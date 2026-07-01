@@ -1,0 +1,15 @@
+# Normalize line endings: store everything with LF in the repo, check out native.
+* text=auto eol=lf
+
+# Explicit text types (so diffs/merges treat them as text regardless of content).
+*.py    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.html  text eol=lf
+*.json  text eol=lf
+*.tsv   text eol=lf
+
+# Binary artifacts: never touch line endings.
+*.zip   binary
+*.pdf   binary
+*.xml   -text

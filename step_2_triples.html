@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<title>Step 2 &mdash; triples pipeline (gpu_bundle): order, inputs &amp; outputs</title>
+<style>
+ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 2rem auto; max-width: 1100px; color: #222; line-height: 1.45; padding: 0 1rem; }
+ h1 { margin-bottom: .25rem; } h2 { margin-top: 2.25rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+ h3 { margin: 1.2rem 0 .3rem; }
+ .meta { color: #555; margin-bottom: 1rem; }
+ .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin: 1rem 0 1.5rem; }
+ .stat { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .7rem 1rem; }
+ .stat .v { font-size: 1.35rem; font-weight: 600; } .stat .k { color: #555; font-size: .82rem; }
+ table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; font-size: .9rem; }
+ th, td { border: 1px solid #e1e4e8; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+ th { background: #f6f8fa; }
+ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+ code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; font-size: .88em; }
+ pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .9rem 1rem; overflow-x: auto; font-size: .85rem; line-height: 1.4; white-space: pre-wrap; }
+ .dim { color: #888; font-size: .85em; }
+ .key  { background: #ddf4ff; border-left: 4px solid #0969da; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .warn { background: #fff8c5; border-left: 4px solid #d4a72c; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ ol.steps > li { margin: .55rem 0; }
+ .flow { display: flex; flex-direction: column; gap: .35rem; margin: 1rem 0 1.5rem; }
+ .flow .node { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .55rem .9rem; }
+ .flow .node .s { font-weight: 600; }
+ .flow .node .io { color: #555; font-size: .85rem; }
+ .flow .arrow { color: #888; text-align: center; font-size: .9rem; line-height: 1; }
+ .pill { display: inline-block; background: #eef2f6; border: 1px solid #d6dde4; border-radius: 999px;
+         padding: 0 .5rem; font-size: .8rem; color: #444; margin-left: .35rem; }
+ .pill.gpu { background: #e6f4ea; border-color: #b7dfc4; color: #1a7f37; }
+ .pill.net { background: #fdeef0; border-color: #f0c4cb; color: #b3243b; }
+ .pill.opt { background: #f2eef9; border-color: #d9c9f0; color: #6b3fa0; }
+ .step-no { display:inline-block; min-width:1.5rem; height:1.5rem; line-height:1.5rem; text-align:center;
+            background:#0969da; color:#fff; border-radius:50%; font-size:.82rem; font-weight:600; margin-right:.4rem; }
+ .grp { background:#f0f3f6; border:1px solid #dde2e8; border-radius:6px; padding:.35rem .7rem; margin:.6rem 0 .2rem;
+        font-weight:600; font-size:.9rem; color:#333; }
+</style>
+</head>
+<body>
+<h1>Step 2 &mdash; triples pipeline <span class='dim'>(gpu_bundle)</span></h1>
+<p class='meta'>Order of execution, inputs and outputs of the Python scripts in
+<code>lung/gpu_bundle/</code> &mdash; the Kaggle/GPU bundle that takes the NER corpus handed
+over by step&nbsp;1 (<code>experimental_ner/</code>) and turns it into normalized, learned-scored
+relation <strong>triples</strong>. One orchestrator, <code>gpu.py</code>, runs a fixed
+<strong>16-step</strong> chain in dependency order; each step is a standalone script run as a
+subprocess in a single writable working directory, and the final step zips that directory
+into one downloadable archive.</p>
+
+<div class='stat-grid'>
+  <div class='stat'><div class='v'>16</div><div class='k'>steps in the chain</div></div>
+  <div class='stat'><div class='v'>gpu.py</div><div class='k'>the orchestrator</div></div>
+  <div class='stat'><div class='v'>3</div><div class='k'>GPU steps (1, 2, 15)</div></div>
+  <div class='stat'><div class='v'>2</div><div class='k'>optional steps (13, 14)</div></div>
+  <div class='stat'><div class='v'>kaggle_working.zip</div><div class='k'>final bundle (step 16)</div></div>
+</div>
+
+<div class='key'>You normally run <strong>one command &mdash; <code>python gpu.py</code></strong> &mdash; and it
+executes all 16 steps for you, in the order below, in one staged working directory
+(<code>/kaggle/working/</code> on Kaggle, or in place locally). It is <em>not</em> a loose set of
+scripts you run by hand: <code>gpu.py</code> copies the scripts, symlinks the read-only
+<code>experimental_ner/</code> corpus, makes a writable copy of <code>databases/</code>, creates the
+output dirs (<code>GENETIC/ DISEASE/ CHEMICAL/ TRIPLES/</code>, plus <code>sentences/</code> and
+<code>summaries/</code>), and sets <code>RE_MODEL_PPI</code> for the learned RE step. Steps&nbsp;1, 2
+and 15 use CUDA; steps&nbsp;1, 2 and 14 reach the network. Steps&nbsp;13 and 14 are optional &mdash;
+if they fail the orchestrator warns and continues to the critical RE step. The last step
+(<code>zip_work.py</code>) bundles the whole working directory into
+<code>kaggle_working.zip</code> so the entire run is a single download. Run a subset with
+<code>--steps a,b,c</code> and preview the plan with <code>--list</code>.</div>
+
+<h2>1. Order of execution (data flow)</h2>
+<div class='flow'>
+  <div class='grp'>A. Train the relation model &nbsp;<span class='dim'>(most upstream; its own 3-script sub-pipeline)</span></div>
+  <div class='node'><span class='s'>1. run_re_pipeline.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span>
+    <div class='io'>in: BigBIO <code>bioinfer</code> corpus (HF <code>datasets</code>) &nbsp;&rarr;&nbsp; out: <code>ppi-biobert-re/</code> checkpoint + <code>summaries/calibration.html</code>
+      <span class='dim'>&mdash; runs bigbio_to_re.py &rarr; train_re.py &rarr; calibration.py</span></div></div>
+  <div class='arrow'>&darr;&nbsp; ppi-biobert-re/ (loaded by step 15 via RE_MODEL_PPI)</div>
+
+  <div class='grp'>B. NER: corpus &rarr; result-sentence entities</div>
+  <div class='node'><span class='s'>2. sentences.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span>
+    <div class='io'>in: <code>experimental_ner/PMC*.xml</code> &nbsp;&rarr;&nbsp; out: <code>sentences/PMC*.json</code> + <code>summaries/sentences.html</code></div></div>
+  <div class='arrow'>&darr;&nbsp; sentences/*.json  (every later step reads this)</div>
+
+  <div class='grp'>C. Build the GENETIC / DISEASE / CHEMICAL normalization libraries</div>
+  <div class='node'><span class='s'>3. roman.py</span> &nbsp;<span class='s'>4. greek.py</span> &nbsp;<span class='s'>5. keys_values.py</span> &nbsp;<span class='s'>6. controls.py</span>
+    <div class='io'>GENETIC surfaces &rarr; HGNC &nbsp;(<code>GENETIC/</code>: roman*.json, greek*.json, coverage + control flag)</div></div>
+  <div class='node'><span class='s'>7. disease.py</span> &nbsp;<span class='s'>8. phenotypes.py</span>
+    <div class='io'>DISEASE surfaces &rarr; MONDO + phenotype flag &nbsp;(<code>DISEASE/</code>)</div></div>
+  <div class='node'><span class='s'>9. chemical.py</span> &nbsp;<span class='s'>10. nonchemical.py</span> &nbsp;<span class='s'>11. target_pharm.py</span>
+    <div class='io'>CHEMICAL surfaces &rarr; ChEBI + non-chemical flag + chemical&harr;gene cross-links &nbsp;(<code>CHEMICAL/</code>)</div></div>
+  <div class='arrow'>&darr;&nbsp; GENETIC/ + DISEASE/ + CHEMICAL/ lookup libraries</div>
+
+  <div class='grp'>D. Triples: extract, normalize, score</div>
+  <div class='node'><span class='s'>12. triples.py</span>
+    <div class='io'>in: <code>sentences/*.json</code> + the libraries &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples.json</code>, <code>triples_*_normalized.json</code>, <code>triples.html</code></div></div>
+  <div class='arrow'>&darr;&nbsp; TRIPLES/</div>
+  <div class='node'><span class='s'>13. relationships.py</span> <span class='pill opt'>optional</span>
+    <div class='io'>in: <code>TRIPLES/triples*.json</code> &nbsp;&rarr;&nbsp; out: <code>TRIPLES/genetic_genetic.json</code> + <code>relationships.html</code></div></div>
+  <div class='arrow'>&darr;&nbsp; genetic_genetic.json</div>
+  <div class='node'><span class='s'>14. pub_years.py</span> <span class='pill opt'>optional</span> <span class='pill net'>internet</span>
+    <div class='io'>in: <code>TRIPLES/genetic_genetic.json</code> &nbsp;&rarr;&nbsp; out: adds <code>year</code> to each triple; caches <code>databases/pmc_years.json</code></div></div>
+  <div class='arrow'>&darr;&nbsp; (independent of step 15)</div>
+  <div class='node'><span class='s'>15. relation_extraction.py --normalize</span> <span class='pill gpu'>GPU</span>
+    <div class='io'>in: <code>sentences/*.json</code> + <code>ppi-biobert-re/</code> (RE_MODEL_PPI) &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples_re.json</code> (BioBERT-scored) + normalized variant</div></div>
+
+  <div class='grp'>E. Bundle the run for download &nbsp;<span class='dim'>(most downstream; runs after everything else)</span></div>
+  <div class='node'><span class='s'>16. zip_work.py</span>
+    <div class='io'>in: the whole working dir (all outputs above) &nbsp;&rarr;&nbsp; out: <code>kaggle_working.zip</code> (single downloadable archive)</div></div>
+</div>
+<p class='dim'>Steps 3&ndash;11 all read the same <code>sentences/*.json</code> and only touch their own type's
+library dir, so within a type they are ordered by dependency: <code>roman.py</code> (step&nbsp;3) builds the
+GENETIC libraries that <code>greek.py</code>/<code>keys_values.py</code>/<code>controls.py</code> extend or
+report on; <code>controls.py</code> (6) re-annotates those libraries in place, so it runs after
+<code>roman.py</code>/<code>greek.py</code> rewrite them. <code>triples.py</code> (12) reads all three finished
+libraries; <code>relationships.py</code> (13) reads <code>triples.py</code>'s output; <code>pub_years.py</code> (14)
+reads <code>relationships.py</code>'s <code>genetic_genetic.json</code>. The learned RE step (15) depends only on
+step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&ndash;14 branch.</p>
+
+<h2>2. Per-script inputs &amp; outputs</h2>
+<table>
+<thead><tr><th class='num'>#</th><th>script</th><th>input</th><th>output</th><th>what it does</th></tr></thead>
+<tbody>
+<tr>
+  <td class='num'>1</td>
+  <td><code>run_re_pipeline.py</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span></td>
+  <td>BigBIO <code>bigbio/bioinfer</code> KB corpus <span class='dim'>(downloaded via HF <code>datasets&lt;4</code>)</span></td>
+  <td><code>ppi-biobert-re/</code> checkpoint (weights, config+label map, tokenizer, <code>calibration.json</code>)<br><code>ppi_data/{train,dev,test}.tsv</code><br><code>summaries/calibration.html</code></td>
+  <td>Fine-tunes BioBERT into the PPI relation model that step&nbsp;15 needs. Itself a 3-script
+      sub-pipeline run as one subprocess: <code>bigbio_to_re.py</code> (corpus &rarr; entity-blinded TSVs)
+      &rarr; <code>train_re.py</code> (fine-tune) &rarr; <code>calibration.py</code> (evaluate on test + fit a
+      probability calibrator). Skip it with <code>--steps</code> if you upload a checkpoint.</td>
+</tr>
+<tr>
+  <td class='num'>2</td>
+  <td><code>sentences.py</code> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span></td>
+  <td><code>experimental_ner/PMC*.xml</code> (JATS + GROBID TEI, from step&nbsp;1 of the publications pipeline)
+      <span class='dim'>(HF BioBERT models fetched on first use)</span></td>
+  <td><code>sentences/PMC*.json</code> (one per input doc)<br><code>summaries/sentences.html</code></td>
+  <td>Uses BioBERT embeddings to select the <em>original-result</em> sentences (cosine margin to
+      hand-written positive/negative anchor centroids), then runs three fine-tuned BioBERT NER models
+      (<code>biobert_diseases/genetic/chemical_ner</code>) over each kept sentence, tagging
+      DISEASE/GENETIC/CHEMICAL spans with offsets + confidence. <strong>This JSON is the input every
+      later step reads.</strong></td>
+</tr>
+<tr>
+  <td class='num'>3</td>
+  <td><code>roman.py</code></td>
+  <td><code>sentences/*.json</code><br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
+  <td><code>GENETIC/</code>: <code>clean_genetic_ne.tsv</code>, <code>roman_clean_genetic_ne.tsv</code>,
+      <code>greek_clean_genetic_ne.tsv</code>, <code>roman.json</code>, <code>roman_ambiguous.json</code>,
+      <code>roman_cosine.json</code>, <code>unmatched.tsv</code>, <code>roman.html</code></td>
+  <td>Aggregates GENETIC surfaces (dash-normalized), splits Greek- vs Roman-key entities, then a
+      multi-stage cascade links each surface to an HGNC symbol (symbol/name fields, phospho/anti/protein
+      strips, missense, miRNA, cosine fallback&hellip;). Single-match &rarr; <code>roman.json</code>,
+      ambiguous &rarr; <code>roman_ambiguous.json</code>.</td>
+</tr>
+<tr>
+  <td class='num'>4</td>
+  <td><code>greek.py</code></td>
+  <td><code>GENETIC/greek_clean_genetic_ne.tsv</code> (from step&nbsp;3)<br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
+  <td><code>GENETIC/</code>: <code>full_greek.json</code>, <code>greek.json</code>,
+      <code>greek_ambiguous.json</code>, <code>greek_complex.json</code>, <code>greek_cosine.json</code>
+      <span class='dim'>(+ HTML)</span></td>
+  <td>Expands Greek-symbol-bearing GENETIC surfaces (IFN-&gamma; &rarr; IFN-gamma&hellip;) and links them to
+      HGNC, including multi-protein complexes (NF-&kappa;B &rarr; NFKB1+RELA). Each entry keeps the original
+      glyph key and the <code>greek_expanded</code> form &mdash; both are match routes in step&nbsp;12.</td>
+</tr>
+<tr>
+  <td class='num'>5</td>
+  <td><code>keys_values.py</code></td>
+  <td>the seven GENETIC libraries (roman*.json + greek*.json)</td>
+  <td><code>GENETIC/hgnc.html</code>, <code>GENETIC/hgnc_1_to_1.html</code>, <code>GENETIC/nested_keys.html</code></td>
+  <td>Reporting only: tabulates unique <code>hgnc_symbol</code> values and summed occurrences across the
+      libraries (all, and the 1-to-1 subset), plus a nested-key coverage/type matrix. Transforms no data.</td>
+</tr>
+<tr>
+  <td class='num'>6</td>
+  <td><code>controls.py</code></td>
+  <td><code>GENETIC/clean_genetic_ne.tsv</code> (or rebuilt from <code>sentences/</code>)<br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
+  <td><code>GENETIC/controls.html</code><br><em>in-place</em> <code>"control":"yes"/"no"</code> on all seven
+      GENETIC libraries</td>
+  <td>Flags GENETIC surfaces that are lab controls/tools (reporters, tags, housekeeping normalizers, Cas9,
+      scramble controls) rather than studied genes, and annotates every library entry with a
+      <code>control</code> flag. Re-run after <code>roman.py</code>/<code>greek.py</code> (which rewrite those files).</td>
+</tr>
+<tr>
+  <td class='num'>7</td>
+  <td><code>disease.py</code></td>
+  <td><code>sentences/*.json</code><br><code>databases/mondo-clingen.json</code></td>
+  <td><code>DISEASE/</code>: <code>clean_disease_ne.tsv</code>, <code>disease.json</code>,
+      <code>disease_ambiguous.json</code>, <code>unmatched_disease.json</code> <span class='dim'>(+ HTML)</span></td>
+  <td>Aggregates DISEASE surfaces and links each to a MONDO term (single match &rarr; <code>disease.json</code>,
+      multiple &rarr; <code>disease_ambiguous.json</code>).</td>
+</tr>
+<tr>
+  <td class='num'>8</td>
+  <td><code>phenotypes.py</code></td>
+  <td><code>DISEASE/clean_disease_ne.tsv</code> (or rebuilt from <code>sentences/</code>)</td>
+  <td><code>DISEASE/phenotypes.html</code><br><em>in-place</em> <code>"phenotype":"yes"/"no"</code> on the disease libraries</td>
+  <td>DISEASE analog of <code>controls.py</code>: flags surfaces that name a biological process / phenotype /
+      finding (cytotoxicity, hypoxia, metastasis, inflammation&hellip;) rather than a disease, and annotates
+      the disease libraries.</td>
+</tr>
+<tr>
+  <td class='num'>9</td>
+  <td><code>chemical.py</code></td>
+  <td><code>sentences/*.json</code><br><code>databases/chebi.json</code></td>
+  <td><code>CHEMICAL/</code>: <code>clean_chemical_ne.tsv</code>, <code>chemical.json</code>,
+      <code>chemical_ambiguous.json</code>, <code>unmatched_chemical.json</code> <span class='dim'>(+ HTML)</span></td>
+  <td>Aggregates CHEMICAL surfaces and links each to a ChEBI term (single match &rarr;
+      <code>chemical.json</code>, multiple &rarr; <code>chemical_ambiguous.json</code>).</td>
+</tr>
+<tr>
+  <td class='num'>10</td>
+  <td><code>nonchemical.py</code></td>
+  <td><code>CHEMICAL/clean_chemical_ne.tsv</code> + <code>chemical*.json</code><br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
+  <td><code>CHEMICAL/nonchemical.html</code><br><em>in-place</em> <code>"non_chemical":"yes"/"no"</code> on the chemical libraries</td>
+  <td>CHEMICAL analog of <code>controls.py</code>: flags CHEMICAL-labelled surfaces that are really a
+      gene/protein, a nucleic-acid element, or a process/therapy concept rather than a compound.</td>
+</tr>
+<tr>
+  <td class='num'>11</td>
+  <td><code>target_pharm.py</code></td>
+  <td><code>databases/chebi.json</code>, <code>databases/hgnc_complete_set_2026-05-01.json</code><br><code>CHEMICAL/chemical*.json</code>, <code>GENETIC/roman*.json</code> + <code>greek*.json</code></td>
+  <td><code>CHEMICAL/</code>: <code>target_pharm.json</code>, <code>chemical_to_target.json</code>, <code>target_pharm.html</code></td>
+  <td>Cross-links corpus chemicals to their protein/gene targets via ChEBI roles (CHEMICAL &rarr; ChEBI id
+      &rarr; target role &rarr; HGNC symbol &rarr; corpus GENETIC surface), and emits the inverse
+      gene&rarr;chemicals view.</td>
+</tr>
+<tr>
+  <td class='num'>12</td>
+  <td><code>triples.py</code></td>
+  <td><code>sentences/*.json</code><br>the finished <code>GENETIC/</code>, <code>DISEASE/</code>, <code>CHEMICAL/</code> libraries</td>
+  <td><code>TRIPLES/triples.json</code><br><code>TRIPLES/triples_GENETIC_normalized.json</code><br><code>TRIPLES/triples_GENETIC_DISEASE_normalized.json</code><br><code>TRIPLES/triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code><br><code>TRIPLES/triples.html</code></td>
+  <td>Derives <em>(subject, predicate, object)</em> triples from consecutive typed entities in a sentence
+      joined by connecting text that carries a relation cue (rule-based; no model). Then chains three
+      normalizations onto copies: GENETIC&rarr;HGNC symbol (+control), DISEASE&rarr;MONDO label,
+      CHEMICAL&rarr;ChEBI label &mdash; the last file is the fully ID-normalized set.</td>
+</tr>
+<tr>
+  <td class='num'>13</td>
+  <td><code>relationships.py</code> <span class='pill opt'>optional</span></td>
+  <td><code>TRIPLES/triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code><br><code>TRIPLES/triples.json</code></td>
+  <td><code>TRIPLES/genetic_genetic.json</code><br><code>TRIPLES/relationships.html</code></td>
+  <td>Extracts the GENETIC&ndash;GENETIC slice occurring in disease/chemical sentences. Non-fatal: if it fails
+      the orchestrator warns and continues.</td>
+</tr>
+<tr>
+  <td class='num'>14</td>
+  <td><code>pub_years.py</code> <span class='pill opt'>optional</span> <span class='pill net'>net</span></td>
+  <td><code>TRIPLES/genetic_genetic.json</code> (from step&nbsp;13)</td>
+  <td><code>TRIPLES/genetic_genetic.json</code> (adds a <code>year</code> field per triple)<br><code>databases/pmc_years.json</code> (cache)</td>
+  <td>Resolves each PMC accession to a publication year via NCBI E-utilities (esummary, db=pmc) and caches
+      the lookups so it is fetched only once. Non-fatal (needs internet).</td>
+</tr>
+<tr>
+  <td class='num'>15</td>
+  <td><code>relation_extraction.py --normalize</code> <span class='pill gpu'>GPU</span></td>
+  <td><code>sentences/*.json</code><br><code>ppi-biobert-re/</code> via env <code>RE_MODEL_PPI</code> (from step&nbsp;1)<br><span class='dim'>imports <code>triples.py</code> for the normalization chain</span></td>
+  <td><code>TRIPLES/triples_re.json</code> (BioBERT-scored triples; predicate carries a relation
+      probability/score) + its normalized variant</td>
+  <td>The learned relation-extraction step: blinds each entity pair with type markers, scores the pair with
+      the fine-tuned PPI model, and writes model-scored GENETIC&ndash;GENETIC triples &mdash; the trained-model
+      counterpart to the rule-based <code>triples.py</code>.</td>
+</tr>
+<tr>
+  <td class='num'>16</td>
+  <td><code>zip_work.py</code></td>
+  <td>the whole working directory (every dir produced by steps&nbsp;1&ndash;15:
+      <code>ppi-biobert-re/</code>, <code>sentences/</code>, <code>summaries/</code>,
+      <code>GENETIC/ DISEASE/ CHEMICAL/ TRIPLES/</code>&hellip;)</td>
+  <td><code>kaggle_working.zip</code> (in the working dir)</td>
+  <td>Final packaging step: archives the entire run into one zip so the whole output is a single download.
+      The archive is built in a temp dir (so the growing zip can't include itself) then moved into the
+      working dir; inside a notebook it also shows a clickable <code>FileLink</code>. Must run last, after
+      every other step has written its output.</td>
+</tr>
+</tbody>
+</table>
+
+<h2>3. How to run</h2>
+<ol class='steps'>
+  <li><span class='step-no'>1</span><code>python gpu.py --list</code>
+      <span class='dim'>&mdash; preview the plan (roots, input count, accelerator, the 16 steps).</span></li>
+  <li><span class='step-no'>2</span><code>python gpu.py</code>
+      <span class='dim'>&mdash; run all 16 steps end-to-end. On Kaggle: enable the GPU accelerator + internet, and
+      <code>!pip install -q 'datasets&lt;4'</code> first (for step&nbsp;1's BigBIO download).</span></li>
+  <li><span class='step-no'>3</span><code>python gpu.py --steps triples,relation_extraction</code>
+      <span class='dim'>&mdash; run a subset (e.g. re-derive triples from existing <code>sentences/</code> and libraries).</span></li>
+</ol>
+<p class='dim'>Individual scripts can still be run directly (<code>python triples.py</code>, etc.) &mdash; each
+resolves its paths relative to its own file &mdash; but <code>gpu.py</code> is the intended entry point
+because it stages inputs, orders the steps, and wires up <code>RE_MODEL_PPI</code>.</p>
+
+<div class='warn'>Step&nbsp;1 (<code>run_re_pipeline.py</code>) needs internet + <code>datasets&lt;4</code> to
+download BigBIO bioinfer; step&nbsp;2 (<code>sentences.py</code>) pulls the BioBERT NER models from Hugging
+Face on first use; step&nbsp;14 (<code>pub_years.py</code>) calls NCBI. Steps&nbsp;1, 2 and 15 run on CUDA
+(they fall back to CPU &mdash; slow &mdash; if no GPU is visible). Upload <code>ppi-biobert-re/</code> and
+skip step&nbsp;1, or upload <code>sentences/</code> and skip step&nbsp;2, to reuse prior results.</div>
+
+<h2>4. Notes</h2>
+<ul>
+  <li><strong>One orchestrator, one working dir.</strong> <code>gpu.py</code> stages the scripts,
+      <code>experimental_ner/</code> (symlinked), a writable <code>databases/</code> copy, and the output dirs
+      into a single run root, then runs each step there as a subprocess with the same environment.</li>
+  <li><strong>The hub file is <code>sentences/*.json</code>.</strong> Step&nbsp;2 produces it from the XML
+      corpus; steps&nbsp;3&ndash;12 and 15 all read it. Three parallel normalization branches
+      (GENETIC / DISEASE / CHEMICAL) fan out from it and reconverge in <code>triples.py</code>.</li>
+  <li><strong>Two triple producers.</strong> <code>triples.py</code> (12) is rule-based (relation-cue text
+      between consecutive entities); <code>relation_extraction.py</code> (15) is the trained BioBERT model.
+      Both write into <code>TRIPLES/</code>; step&nbsp;15's scores are the learned counterpart to step&nbsp;12's
+      candidates.</li>
+  <li><strong>Normalization is layered.</strong> <code>triples.py</code> writes the base triples then three
+      progressively normalized files: +HGNC, +MONDO, +ChEBI &mdash; the last
+      (<code>triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code>) is the fully ID-normalized set.</li>
+  <li><strong>In-place annotators.</strong> <code>controls.py</code> (6), <code>phenotypes.py</code> (8) and
+      <code>nonchemical.py</code> (10) add yes/no flags <em>onto existing library JSON</em> rather than
+      producing new corpora &mdash; so they must run after the libraries they annotate are built.</li>
+  <li><strong>Hand-off from step&nbsp;1.</strong> The input <code>experimental_ner/</code> is exactly what the
+      publications pipeline (<code>step_1_publications.html</code>) assembled; this bundle is the "step&nbsp;2"
+      referenced there.</li>
+  <li><strong>Single-download bundle.</strong> The last step, <code>zip_work.py</code> (16), packs the whole
+      working directory into <code>kaggle_working.zip</code> &mdash; so the entire run (model, sentences,
+      normalization libraries, <code>TRIPLES/</code> and the HTML summaries) comes off Kaggle as one file. It
+      runs after every other step, and builds the archive in a temp dir so the growing zip can't include
+      itself.</li>
+</ul>
+
+</body>
+</html>

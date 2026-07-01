@@ -1,0 +1,10 @@
+# Step 2 -- the GPU bundle (gpu.py). These are preinstalled on Kaggle GPU images;
+# install them only when running step 2 locally.
+#
+# datasets is PINNED to <4 because BigBIO ships as dataset loading scripts, which
+# were dropped in datasets 4.0 (step 1 of gpu.py downloads BigBIO bioinfer).
+torch
+transformers
+datasets<4
+numpy
+lxml

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<title>Step 1 &mdash; publications pipeline: order, inputs &amp; outputs</title>
+<style>
+ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 2rem auto; max-width: 1100px; color: #222; line-height: 1.45; padding: 0 1rem; }
+ h1 { margin-bottom: .25rem; } h2 { margin-top: 2.25rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+ h3 { margin: 1.2rem 0 .3rem; }
+ .meta { color: #555; margin-bottom: 1rem; }
+ .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin: 1rem 0 1.5rem; }
+ .stat { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .7rem 1rem; }
+ .stat .v { font-size: 1.35rem; font-weight: 600; } .stat .k { color: #555; font-size: .82rem; }
+ table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; font-size: .9rem; }
+ th, td { border: 1px solid #e1e4e8; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+ th { background: #f6f8fa; }
+ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+ code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; font-size: .88em; }
+ pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .9rem 1rem; overflow-x: auto; font-size: .85rem; line-height: 1.4; white-space: pre-wrap; }
+ .dim { color: #888; font-size: .85em; }
+ .key  { background: #ddf4ff; border-left: 4px solid #0969da; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .warn { background: #fff8c5; border-left: 4px solid #d4a72c; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ ol.steps > li { margin: .55rem 0; }
+ .flow { display: flex; flex-direction: column; gap: .35rem; margin: 1rem 0 1.5rem; }
+ .flow .node { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .55rem .9rem; }
+ .flow .node .s { font-weight: 600; }
+ .flow .node .io { color: #555; font-size: .85rem; }
+ .flow .arrow { color: #888; text-align: center; font-size: .9rem; line-height: 1; }
+ .pill { display: inline-block; background: #eef2f6; border: 1px solid #d6dde4; border-radius: 999px;
+         padding: 0 .5rem; font-size: .8rem; color: #444; margin-left: .35rem; }
+ .step-no { display:inline-block; min-width:1.5rem; height:1.5rem; line-height:1.5rem; text-align:center;
+            background:#0969da; color:#fff; border-radius:50%; font-size:.82rem; font-weight:600; margin-right:.4rem; }
+</style>
+</head>
+<body>
+<h1>Step 1 &mdash; publications pipeline</h1>
+<p class='meta'>Order of execution, inputs and outputs of the Python scripts in the
+<code>lung/</code> directory (top level only &mdash; the <code>gpu_bundle/</code> Kaggle pipeline is
+covered separately). The seven scripts form a single linear pipeline that turns one PubMed query
+into a de-duplicated, full-text corpus ready for named-entity recognition.</p>
+
+<div class='stat-grid'>
+  <div class='stat'><div class='v'>7</div><div class='k'>scripts in the pipeline</div></div>
+  <div class='stat'><div class='v'>1</div><div class='k'>external input (PubMed query)</div></div>
+  <div class='stat'><div class='v'>7</div><div class='k'>HTML summaries produced</div></div>
+  <div class='stat'><div class='v'>linear</div><div class='k'>each step feeds the next</div></div>
+</div>
+
+<div class='key'>Run the scripts <strong>in the order below</strong>: each consumes the files the
+previous one wrote, and writes an HTML summary of its own stage into <code>summaries/</code>
+(each summary is <strong>named after its script</strong>). Every script <strong>creates the input
+and output directories it needs</strong> if they are missing, and (except <code>grobid_xml.py</code>)
+<strong>empties its bulk output directory before writing</strong> so each run starts clean &mdash;
+Python scripts are never deleted. Several stages reach the network (NCBI E-utilities, OpenAlex,
+CrossRef) or need Docker (GROBID), so they are <em>not</em> run automatically &mdash; run each yourself.</div>
+
+<h2>1. Order of execution (data flow)</h2>
+<div class='flow'>
+  <div class='node'><span class='s'>1. pubmed_query.py</span>
+    <div class='io'>in: PubMed query (STDIN) &nbsp;&rarr;&nbsp; out: <code>pmids/pmid_pmc_ids.tsv</code></div></div>
+  <div class='arrow'>&darr;&nbsp; pmid_pmc_ids.tsv</div>
+  <div class='node'><span class='s'>2. high_impact_xml.py</span>
+    <div class='io'>in: <code>pmids/pmid_pmc_ids.tsv</code> &nbsp;&rarr;&nbsp; out: <code>high_impact_xmls/PMC*.xml</code></div></div>
+  <div class='arrow'>&darr;&nbsp; high_impact_xmls/</div>
+  <div class='node'><span class='s'>3. xml_structure.py</span>
+    <div class='io'>in: <code>high_impact_xmls/PMC*.xml</code> &nbsp;&rarr;&nbsp; out: <code>summaries/xml_structure.html</code> (flags the no-<code>&lt;body&gt;</code> subset)</div></div>
+  <div class='arrow'>&darr;&nbsp; the no-&lt;body&gt; records</div>
+  <div class='node'><span class='s'>4. ncbi_pdf.py</span>
+    <div class='io'>in: no-<code>&lt;body&gt;</code> <code>high_impact_xmls/PMC*.xml</code> &nbsp;&rarr;&nbsp; out: <code>ncbi_pdfs_grobid/PMC*.pdf</code></div></div>
+  <div class='arrow'>&darr;&nbsp; ncbi_pdfs_grobid/</div>
+  <div class='node'><span class='s'>5. grobid_xml.py</span> <span class='pill'>needs Docker + GROBID</span>
+    <div class='io'>in: <code>ncbi_pdfs_grobid/PMC*.pdf</code> &nbsp;&rarr;&nbsp; out: <code>grobid_xmls/PMC*.grobid.tei.xml</code></div></div>
+  <div class='arrow'>&darr;&nbsp; grobid_xmls/ + high_impact_xmls/</div>
+  <div class='node'><span class='s'>6. named_entity_xml.py</span>
+    <div class='io'>in: <code>grobid_xmls/</code> + <code>high_impact_xmls/</code> &nbsp;&rarr;&nbsp; out: <code>named_entity_xmls/</code>, <code>gpu_bundle/experimental_ner/</code></div></div>
+  <div class='arrow'>&darr;&nbsp; gpu_bundle/experimental_ner/</div>
+  <div class='node'><span class='s'>7. pre_ner_xml_structure.py</span>
+    <div class='io'>in: <code>gpu_bundle/experimental_ner/</code> &nbsp;&rarr;&nbsp; out: <code>summaries/pre_ner_xml_structure.html</code></div></div>
+</div>
+<p class='dim'>Step 3 (<code>xml_structure.py</code>) is an analysis/reporting step: it does not transform
+files but identifies the no-<code>&lt;body&gt;</code> subset of <code>high_impact_xmls/</code> that step 4
+targets, so it is placed before <code>ncbi_pdf.py</code>. (<code>ncbi_pdf.py</code> also re-detects that
+subset itself, so it does not strictly depend on step 3 having run.) Step 5 (<code>grobid_xml.py</code>)
+is the only stage that <strong>keeps resume</strong> (it skips PDFs that already have TEI) rather than
+wiping its output dir; it is also skipped entirely when every article already has JATS full text.</p>
+
+<h2>2. Per-script inputs &amp; outputs</h2>
+<table>
+<thead><tr><th class='num'>#</th><th>script</th><th>input</th><th>output</th><th>what it does</th></tr></thead>
+<tbody>
+<tr>
+  <td class='num'>1</td>
+  <td><code>pubmed_query.py</code></td>
+  <td>PubMed query read strictly from <strong>STDIN</strong>
+      <span class='dim'>(env: <code>NCBI_API_KEY</code>, <code>JIF_TABLE</code>, <code>YEAR_LO/HI</code>, <code>TIME_BUDGET</code>)</span></td>
+  <td><code>pmids/pmid_pmc_ids.tsv</code><br><code>summaries/pubmed_query.html</code>
+      <span class='dim'>(+ resumable caches in <code>pmids/</code>)</span></td>
+  <td>Retrieves <em>all</em> PMIDs for the query (year&rarr;month&rarr;day partitioning to beat the
+      10k esearch cap), annotates each with PMC id, journal, ISSN and year via <code>esummary</code>,
+      and attaches a journal impact factor (OpenAlex 2-yr mean citedness proxy, or a curated
+      <code>JIF_TABLE</code>). The resumable <code>pmids/</code> caches are <em>not</em> wiped between runs.</td>
+</tr>
+<tr>
+  <td class='num'>2</td>
+  <td><code>high_impact_xml.py</code></td>
+  <td><code>pmids/pmid_pmc_ids.tsv</code>
+      <span class='dim'>(env: <code>IF_THRESHOLD</code>, <code>PERCENTILE</code>=0.90, <code>RETRY_FAILED</code>, <code>TIME_BUDGET</code>)</span></td>
+  <td><code>high_impact_xmls/PMC*.xml</code><br><code>high_impact_xmls/_failed.tsv</code><br><code>summaries/high_impact_xml.html</code></td>
+  <td>Selects the high-impact subset (articles with a PMC id whose article-weighted impact factor is
+      &ge; the 90th-percentile threshold), builds a <code>pmid2pmcid</code> dict, and fetches each
+      article's full-text JATS XML via NCBI eFetch (<code>db=pmc</code>). <strong>Empties
+      <code>high_impact_xmls/</code> before writing.</strong></td>
+</tr>
+<tr>
+  <td class='num'>3</td>
+  <td><code>xml_structure.py</code></td>
+  <td><code>high_impact_xmls/PMC*.xml</code></td>
+  <td><code>summaries/xml_structure.html</code></td>
+  <td>Tolerant regex scan of each JATS XML for publication structure (title, abstract, IMRaD body
+      sections, references, ancillary parts). Classifies body shape and, crucially, identifies the
+      records with <strong>no <code>&lt;body&gt;</code></strong> &mdash; the set step 4 must fetch as PDFs.</td>
+</tr>
+<tr>
+  <td class='num'>4</td>
+  <td><code>ncbi_pdf.py</code></td>
+  <td>The <code>high_impact_xmls/PMC*.xml</code> files <strong>lacking a <code>&lt;body&gt;</code></strong>
+      <span class='dim'>(env: <code>RETRY_FAILED</code>, <code>TIME_BUDGET</code>)</span></td>
+  <td><code>ncbi_pdfs_grobid/PMC*.pdf</code><br><code>ncbi_pdfs_grobid/ncbi_pdf_download_summary.tsv</code><br><code>ncbi_pdfs_grobid/_failed.tsv</code> <span class='dim'>(append-only failure journal)</span><br><code>summaries/ncbi_pdf.html</code></td>
+  <td>For each no-<code>&lt;body&gt;</code> record, downloads the PDF via a cascade (PMC proof-of-work
+      &rarr; OpenAlex &rarr; CrossRef), resolving PMCID&rarr;PMID/DOI through the NCBI ID Converter.
+      <strong>Empties <code>ncbi_pdfs_grobid/</code> before writing.</strong></td>
+</tr>
+<tr>
+  <td class='num'>5</td>
+  <td><code>grobid_xml.py</code> <span class='pill'>Docker + GROBID</span></td>
+  <td><code>ncbi_pdfs_grobid/PMC*.pdf</code>
+      <span class='dim'>(needs GROBID on :8070; env: <code>GROBID_SERVER</code>, <code>GROBID_FORCE</code>,
+      <code>GROBID_THREADS</code>, <code>GROBID_TIMEOUT</code>, <code>GROBID_ATTEMPTS</code>,
+      <code>GROBID_RETRY_SLEEP</code>, <code>GROBID_BUSY_RETRIES</code>/<code>_BUSY_WAIT_CAP</code>,
+      <code>GROBID_CONN_RETRIES</code>/<code>_CONN_WAIT_CAP</code>, <code>GROBID_AUTOLAUNCH</code>,
+      <code>GROBID_IMAGE</code>, <code>GROBID_CONTAINER</code>,
+      <code>GROBID_DOCKER_WAIT</code>/<code>_PULL_WAIT</code>/<code>_SERVER_WAIT</code>)</span></td>
+  <td><code>grobid_xmls/PMC*.grobid.tei.xml</code><br><code>summaries/grobid_xml.html</code></td>
+  <td>POSTs each PDF to the GROBID <code>processFulltextDocument</code> service, producing structured
+      TEI XML &mdash; recovering the full text that was missing from the NCBI export. Can auto-launch
+      Docker Desktop and the GROBID container. <strong>Keeps resume</strong> (skips PDFs already
+      converted; <code>GROBID_FORCE=1</code> reconverts all).</td>
+</tr>
+<tr>
+  <td class='num'>6</td>
+  <td><code>named_entity_xml.py</code></td>
+  <td><code>grobid_xmls/PMC*.grobid.tei.xml</code><br><code>high_impact_xmls/PMC*.xml</code>
+      <span class='dim'>(env: <code>DRY_RUN</code>)</span></td>
+  <td><code>named_entity_xmls/PMC*.{xml,grobid.tei.xml}</code><br><code>gpu_bundle/experimental_ner/PMC*.{xml,grobid.tei.xml}</code><br><code>summaries/named_entity_xml.html</code></td>
+  <td>De-duplicates the two XML sources by PMC id (GROBID full text wins on overlap), <code>shutil.move</code>s
+      one representative file per publication into <code>named_entity_xmls/</code>, determines each file's
+      article type, then moves the original-results (primary-research) subset on into
+      <code>gpu_bundle/experimental_ner/</code> (<strong>clean-rebuilt</strong> each run; both moves are
+      guarded so a no-op re-run never wipes the corpus).</td>
+</tr>
+<tr>
+  <td class='num'>7</td>
+  <td><code>pre_ner_xml_structure.py</code></td>
+  <td><code>gpu_bundle/experimental_ner/PMC*.xml</code> and <code>*.grobid.tei.xml</code></td>
+  <td><code>summaries/pre_ner_xml_structure.html</code></td>
+  <td>Scans the assembled NER corpus (both JATS and TEI) and tabulates section types &mdash; section
+      titles (captions excluded) and explicit machine types (JATS <code>sec-type</code>, TEI
+      <code>&lt;div type&gt;</code>) &mdash; across the whole corpus.</td>
+</tr>
+</tbody>
+</table>
+
+<h2>3. How to run</h2>
+<ol class='steps'>
+  <li><span class='step-no'>1</span><code>echo "your query" | python pubmed_query.py</code>
+      <span class='dim'>&mdash; or run it and type the query at the prompt.</span></li>
+  <li><span class='step-no'>2</span><code>python high_impact_xml.py</code></li>
+  <li><span class='step-no'>3</span><code>python xml_structure.py</code></li>
+  <li><span class='step-no'>4</span><code>python ncbi_pdf.py</code></li>
+  <li><span class='step-no'>5</span><code>python grobid_xml.py</code> <span class='pill'>needs Docker + GROBID</span></li>
+  <li><span class='step-no'>6</span><code>python named_entity_xml.py</code></li>
+  <li><span class='step-no'>7</span><code>python pre_ner_xml_structure.py</code></li>
+</ol>
+
+<div class='warn'>These scripts are <strong>not executed automatically</strong>: most reach external
+services (NCBI E-utilities, OpenAlex, CrossRef) and step 5 needs a running GROBID container. Set
+<code>NCBI_API_KEY</code> to lift the 3&nbsp;req/s rate limit. Each run starts clean (the bulk output
+dir is emptied before writing) <em>except</em> <code>grobid_xml.py</code>, which resumes; bound the
+network stages with <code>TIME_BUDGET</code> if needed.</div>
+
+<h2>4. Notes</h2>
+<ul>
+  <li><strong>Single linear pipeline.</strong> The output directory of each step is the input of the
+      next: <code>pmids/</code> &rarr; <code>high_impact_xmls/</code> &rarr; <code>ncbi_pdfs_grobid/</code>
+      &rarr; <code>grobid_xmls/</code> &rarr; <code>named_entity_xmls/</code> &rarr; <code>gpu_bundle/experimental_ner/</code>.</li>
+  <li><strong>All paths are script-relative.</strong> Each script resolves inputs/outputs from its own
+      location, so it can be run from any working directory (and a copied tree runs in isolation).</li>
+  <li><strong>Directories are auto-created.</strong> Every script creates the input and output
+      directories it needs if they are missing; file-based inputs (e.g. <code>pmid_pmc_ids.tsv</code>)
+      must still be produced by the previous stage.</li>
+  <li><strong>Seven self-contained HTML summaries</strong> land in <code>summaries/</code>, each named
+      after its script (<code>pubmed_query.html</code>, <code>high_impact_xml.html</code>,
+      <code>xml_structure.html</code>, <code>ncbi_pdf.html</code>, <code>grobid_xml.html</code>,
+      <code>named_entity_xml.html</code>, <code>pre_ner_xml_structure.html</code>).</li>
+  <li><strong>Hand-off to step 2.</strong> The assembled NER corpus in <code>gpu_bundle/experimental_ner/</code>
+      is the input to the GPU bundle (<code>gpu_bundle/gpu.py</code>); see step&nbsp;2.</li>
+</ul>
+
+</body>
+</html>

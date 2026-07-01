@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<title>Requirements &mdash; running steps 1, 2 &amp; 3</title>
+<style>
+ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 2rem auto; max-width: 1100px; color: #222; line-height: 1.45; padding: 0 1rem; }
+ h1 { margin-bottom: .25rem; } h2 { margin-top: 2.25rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+ h3 { margin: 1.4rem 0 .3rem; }
+ .meta { color: #555; margin-bottom: 1rem; }
+ .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin: 1rem 0 1.5rem; }
+ .stat { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .7rem 1rem; }
+ .stat .v { font-size: 1.35rem; font-weight: 600; } .stat .k { color: #555; font-size: .82rem; }
+ table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; font-size: .9rem; }
+ th, td { border: 1px solid #e1e4e8; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+ th { background: #f6f8fa; }
+ td.cat { white-space: nowrap; font-weight: 600; width: 12rem; }
+ code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; font-size: .88em; }
+ pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .9rem 1rem; overflow-x: auto; font-size: .85rem; line-height: 1.4; white-space: pre-wrap; }
+ .dim { color: #888; font-size: .85em; }
+ .key  { background: #ddf4ff; border-left: 4px solid #0969da; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .warn { background: #fff8c5; border-left: 4px solid #d4a72c; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .crit { background: #fdeef0; border-left: 4px solid #b3243b; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .pill { display: inline-block; background: #eef2f6; border: 1px solid #d6dde4; border-radius: 999px;
+         padding: 0 .5rem; font-size: .8rem; color: #444; margin-left: .35rem; }
+ .pill.gpu { background: #e6f4ea; border-color: #b7dfc4; color: #1a7f37; }
+ .pill.net { background: #fdeef0; border-color: #f0c4cb; color: #b3243b; }
+ .pill.local { background: #eef2f6; border-color: #d6dde4; color: #444; }
+ .pill.kaggle { background: #ddf4ff; border-color: #b6d9f2; color: #0969da; }
+ ol.steps > li { margin: .55rem 0; }
+ .step-no { display:inline-block; min-width:1.5rem; height:1.5rem; line-height:1.5rem; text-align:center;
+            background:#0969da; color:#fff; border-radius:50%; font-size:.82rem; font-weight:600; margin-right:.4rem; }
+</style>
+</head>
+<body>
+<h1>Requirements &mdash; running the full pipeline</h1>
+<p class='meta'>What you need to run the three stages of the project end to end:
+<strong>step&nbsp;1 &mdash; publications</strong> (<code>step_1_publications.html</code>),
+<strong>step&nbsp;2 &mdash; triples / GPU bundle</strong> (<code>step_2_triples.html</code>) and
+<strong>step&nbsp;3 &mdash; graph</strong> (<code>step_3_graph.html</code>). The three stages run in
+<em>different environments</em>: step&nbsp;1 is a local, network-heavy pipeline (+ Docker for GROBID),
+step&nbsp;2 is a GPU job best run on Kaggle, and step&nbsp;3 is a lightweight local script.</p>
+
+<div class='stat-grid'>
+  <div class='stat'><div class='v'>3</div><div class='k'>stages, 3 environments</div></div>
+  <div class='stat'><div class='v'>Python 3</div><div class='k'>required throughout</div></div>
+  <div class='stat'><div class='v'>GPU</div><div class='k'>needed for step 2 (CUDA)</div></div>
+  <div class='stat'><div class='v'>Docker</div><div class='k'>needed for step 1 (GROBID)</div></div>
+</div>
+
+<div class='key'>The stages hand off by <strong>files</strong>, so each has its own prerequisites.
+Step&nbsp;1 produces the NER corpus <code>gpu_bundle/experimental_ner/</code>; step&nbsp;2 (the GPU bundle,
+orchestrated by <code>gpu.py</code>) turns it into triples and packs the whole run into
+<code>kaggle_working.zip</code>; step&nbsp;3 (<code>high_confidence.py</code>) reads that unzipped run and
+draws the graph. Common to all: <strong>Python&nbsp;3</strong> and the ability to reach the network on the
+stages that fetch data/models.</div>
+
+<h2>1. Common requirements (all stages)</h2>
+<table>
+<tbody>
+<tr><td class='cat'>Python</td><td>Python&nbsp;3 (3.9+ recommended). All scripts are launched as <code>python &lt;script&gt;.py</code> and resolve their paths relative to their own location, so they can be run from any working directory.</td></tr>
+<tr><td class='cat'>Network</td><td>Internet access on the stages that fetch data (step&nbsp;1 throughout; step&nbsp;2 for corpus/model downloads and the year lookup; step&nbsp;3 only for the optional graph library).</td></tr>
+<tr><td class='cat'>Disk</td><td>Room for the corpus, models and the packaged run (the step-2 output tree and its <code>kaggle_working.zip</code> can be multi-GB).</td></tr>
+<tr><td class='cat'>Order</td><td>Strictly sequential: <strong>1 &rarr; 2 &rarr; 3</strong>. Each stage needs the file outputs of the one before it.</td></tr>
+</tbody>
+</table>
+
+<h2>2. Step 1 &mdash; publications <span class='pill local'>local</span> <span class='pill net'>internet</span> <span class='pill'>Docker</span></h2>
+<p class='meta'>Seven scripts in the project root, run in order (<code>pubmed_query.py</code> &rarr;
+<code>high_impact_xml.py</code> &rarr; <code>xml_structure.py</code> &rarr; <code>ncbi_pdf.py</code> &rarr;
+<code>grobid_xml.py</code> &rarr; <code>named_entity_xml.py</code> &rarr; <code>pre_ner_xml_structure.py</code>).
+Not run automatically &mdash; run each yourself.</p>
+<table>
+<tbody>
+<tr><td class='cat'>Python packages</td><td><code>requests</code> (used by <code>high_impact_xml.py</code>, <code>ncbi_pdf.py</code>, <code>grobid_xml.py</code>). The rest use only the standard library (<code>urllib</code>, etc.). <span class='dim'>Install: <code>pip install requests</code>.</span></td></tr>
+<tr><td class='cat'>Input</td><td>A <strong>PubMed query</strong> read strictly from <strong>STDIN</strong> by <code>pubmed_query.py</code> (e.g. <code>echo "pancreatic cancer" | python pubmed_query.py</code>).</td></tr>
+<tr><td class='cat'>External services</td><td>NCBI E-utilities (esearch/esummary/eFetch, ID Converter), OpenAlex, CrossRef, PMC &mdash; reached over the network for PMIDs, metadata, impact factors and PDFs.</td></tr>
+<tr><td class='cat'>Docker + GROBID</td><td><strong>Only <code>grobid_xml.py</code> (step&nbsp;5):</strong> a running GROBID service on <code>:8070</code>. It can auto-launch Docker Desktop + the GROBID container. Skippable when every article already has JATS full text. <span class='dim'>Docker is not needed for any other script.</span></td></tr>
+<tr><td class='cat'>Env vars <span class='dim'>(optional)</span></td><td><code>NCBI_API_KEY</code> (recommended &mdash; lifts the 3&nbsp;req/s rate limit); <code>JIF_TABLE</code>, <code>YEAR_LO</code>/<code>YEAR_HI</code>, <code>TIME_BUDGET</code>, <code>IF_THRESHOLD</code>, <code>PERCENTILE</code>, <code>RETRY_FAILED</code>, <code>DRY_RUN</code>; and the <code>GROBID_*</code> family (server, threads, timeouts, autolaunch, image/container) for step&nbsp;5.</td></tr>
+<tr><td class='cat'>Produces</td><td>The NER corpus <code>gpu_bundle/experimental_ner/PMC*.xml</code> (+ per-script HTML summaries in <code>summaries/</code>) &mdash; <strong>the input to step&nbsp;2</strong>.</td></tr>
+</tbody>
+</table>
+
+<h2>3. Step 2 &mdash; triples / GPU bundle <span class='pill kaggle'>Kaggle</span> <span class='pill gpu'>GPU / CUDA</span> <span class='pill net'>internet</span></h2>
+<p class='meta'>One orchestrator, <code>gpu.py</code>, runs a 16-step chain in a single working directory
+(<code>/kaggle/working/</code> on Kaggle, or in place locally). Best run on Kaggle with a GPU accelerator.</p>
+<table>
+<tbody>
+<tr><td class='cat'>Hardware</td><td><strong>GPU with CUDA</strong> &mdash; steps&nbsp;1, 2 and 15 (model training, BioBERT NER, learned relation extraction) use CUDA. They fall back to CPU but are then very slow. On Kaggle: <em>Settings &rarr; Accelerator &rarr; GPU</em>.</td></tr>
+<tr><td class='cat'>Python packages</td><td><code>torch</code> + <code>transformers</code> (training, NER, RE), <code>numpy</code>, and <code>lxml</code> (step&nbsp;2 XML parsing) &mdash; all preinstalled on Kaggle GPU images. Plus <strong><code>datasets&lt;4</code></strong> for the BigBIO download, pinned in a setup cell: <code>!pip install -q 'datasets&lt;4'</code> <span class='dim'>(BigBIO ships as loading scripts dropped in datasets&nbsp;4.0)</span>. Steps&nbsp;3&ndash;14 are pure standard library.</td></tr>
+<tr><td class='cat'>Network / models</td><td>Internet ON: step&nbsp;1 downloads the BigBIO <code>bioinfer</code> corpus (HF <code>datasets</code>); step&nbsp;2 pulls the BioBERT models (<code>dmis-lab/biobert-v1.1</code>, <code>alvaroalon2/biobert_{diseases,genetic,chemical}_ner</code>) from Hugging Face on first use; step&nbsp;14 (optional) calls NCBI for publication years.</td></tr>
+<tr><td class='cat'>Data inputs</td><td><code>experimental_ner/</code> (from step&nbsp;1) <strong>and</strong> the ontology databases under <code>databases/</code>: <code>hgnc_complete_set_2026-05-01.json</code> (HGNC), <code>mondo-clingen.json</code> (MONDO), <code>chebi.json</code> (ChEBI). Upload these with the scripts. <span class='dim'>(<code>pmc_years.json</code> is generated by step&nbsp;14; upload it only to run the year filter offline.)</span></td></tr>
+<tr><td class='cat'>Scripts to upload</td><td>The 16 step scripts + <code>bigbio_to_re.py</code>, <code>train_re.py</code>, <code>calibration.py</code>. <code>ppi-biobert-re/</code> (model) and <code>sentences/</code> are generated by steps&nbsp;1 and&nbsp;2 &mdash; no need to upload unless you skip those steps.</td></tr>
+<tr><td class='cat'>Run</td><td><code>python gpu.py --list</code> to preview, then <code>python gpu.py</code> for all 16 steps. Steps&nbsp;13&ndash;14 are optional (warn &amp; continue on failure).</td></tr>
+<tr><td class='cat'>Produces</td><td><code>TRIPLES/</code> (incl. the scored/normalized triples) and, from the final step, <strong><code>kaggle_working.zip</code></strong> &mdash; the whole run bundled for download.</td></tr>
+</tbody>
+</table>
+
+<h2>4. Step 3 &mdash; graph <span class='pill local'>local</span> <span class='pill net'>internet (optional)</span></h2>
+<p class='meta'>One standalone script, <code>high_confidence.py</code>, run on your local computer against the
+unzipped step-2 output.</p>
+<div class='crit'><strong>NB!</strong> <code>kaggle_working.zip</code> (produced by step&nbsp;2) must be
+<strong>downloaded to the local computer and unzipped</strong> <em>before</em> <code>high_confidence.py</code>
+is triggered &mdash; it reads its inputs from that unzipped run directory (the data root).</div>
+<table>
+<tbody>
+<tr><td class='cat'>Python packages</td><td><strong>None beyond the standard library</strong> (<code>argparse</code>, <code>json</code>, <code>collections</code>, <code>re</code>, <code>html</code>, <code>shutil</code>, <code>urllib</code>). No torch/transformers needed &mdash; this stage does no model inference.</td></tr>
+<tr><td class='cat'>Data inputs</td><td>The unzipped <code>kaggle_working/</code> tree (the data root; override with <code>--data-root</code>). Required: <code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> and <code>TRIPLES/triples.json</code>. Optional (enrich the graph): <code>databases/pmc_years.json</code>, <code>CHEMICAL/chemical_to_target.json</code>, <code>DISEASE/disease.json</code>, <code>DISEASE/disease_ambiguous.json</code>, <code>sentences/</code>, and <code>summaries/pubmed_query.html</code> (the query legend line).</td></tr>
+<tr><td class='cat'>Network <span class='dim'>(optional)</span></td><td>Fetches <code>vis-network</code> from a CDN to inline into the graph HTML. If offline, the HTML falls back to a CDN link, or run with <code>--no-graph</code> to skip it entirely.</td></tr>
+<tr><td class='cat'>Run</td><td><code>python high_confidence.py</code> <span class='dim'>(options: <code>--data-root</code>, <code>--score</code>, <code>--thresholds</code>, <code>--no-graph</code>).</span></td></tr>
+<tr><td class='cat'>Produces</td><td><code>TRIPLES/high_confidence_G_D_C.json</code>, the interactive <code>summaries/high_confidence.html</code>, and a copy of the graph in the root dir named after the PubMed query (e.g. <code>pancreatic_cancer.html</code>).</td></tr>
+</tbody>
+</table>
+
+<h2>5. End-to-end checklist</h2>
+<ol class='steps'>
+  <li><span class='step-no'>1</span><strong>Step 1 (local):</strong> <code>pip install requests</code>; have Docker Desktop available for GROBID; optionally set <code>NCBI_API_KEY</code>. Run the seven scripts in order, starting with <code>echo "your query" | python pubmed_query.py</code>.</li>
+  <li><span class='step-no'>2</span><strong>Step 2 (Kaggle GPU):</strong> upload the scripts + <code>experimental_ner/</code> + the three ontology JSONs; enable GPU + Internet; <code>!pip install -q 'datasets&lt;4'</code>; run <code>python gpu.py</code>. Download the resulting <code>kaggle_working.zip</code>.</li>
+  <li><span class='step-no'>3</span><strong>Step 3 (local):</strong> unzip <code>kaggle_working.zip</code>, then run <code>python high_confidence.py</code> (needs only Python&nbsp;3; internet optional for the graph).</li>
+</ol>
+
+<div class='warn'>The heaviest prerequisites are stage-specific: <strong>Docker + GROBID</strong> for step&nbsp;1's
+PDF-to-TEI conversion, and a <strong>CUDA GPU + torch/transformers/datasets</strong> for step&nbsp;2's
+training and inference. Step&nbsp;3 deliberately needs neither &mdash; just Python&nbsp;3 and the unzipped run.</div>
+
+</body>
+</html>

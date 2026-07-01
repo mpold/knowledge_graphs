@@ -1,0 +1,9 @@
+# Local stages (step 1 -- publications, and step 3 -- graph).
+# Step 1's network scripts use `requests`; everything else in steps 1 and 3 is
+# Python standard library only. Step 3 (high_confidence.py) needs NO third-party
+# package at all.
+#
+# Step 2 (the GPU bundle) has its own, heavier requirements -- see
+# gpu_bundle/requirements.txt (torch / transformers / datasets / numpy / lxml),
+# normally run on a Kaggle GPU image where those are preinstalled.
+requests

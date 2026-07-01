@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<title>Step 3 &mdash; graph (high_confidence.py): inputs &amp; outputs</title>
+<style>
+ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 2rem auto; max-width: 1100px; color: #222; line-height: 1.45; padding: 0 1rem; }
+ h1 { margin-bottom: .25rem; } h2 { margin-top: 2.25rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+ h3 { margin: 1.2rem 0 .3rem; }
+ .meta { color: #555; margin-bottom: 1rem; }
+ .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin: 1rem 0 1.5rem; }
+ .stat { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .7rem 1rem; }
+ .stat .v { font-size: 1.35rem; font-weight: 600; } .stat .k { color: #555; font-size: .82rem; }
+ table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; font-size: .9rem; }
+ th, td { border: 1px solid #e1e4e8; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+ th { background: #f6f8fa; }
+ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+ code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; font-size: .88em; }
+ pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .9rem 1rem; overflow-x: auto; font-size: .85rem; line-height: 1.4; white-space: pre-wrap; }
+ .dim { color: #888; font-size: .85em; }
+ .key  { background: #ddf4ff; border-left: 4px solid #0969da; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .warn { background: #fff8c5; border-left: 4px solid #d4a72c; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ ol.steps > li { margin: .55rem 0; }
+ .flow { display: flex; flex-direction: column; gap: .35rem; margin: 1rem 0 1.5rem; }
+ .flow .node { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .55rem .9rem; }
+ .flow .node .s { font-weight: 600; }
+ .flow .node .io { color: #555; font-size: .85rem; }
+ .flow .arrow { color: #888; text-align: center; font-size: .9rem; line-height: 1; }
+ .pill { display: inline-block; background: #eef2f6; border: 1px solid #d6dde4; border-radius: 999px;
+         padding: 0 .5rem; font-size: .8rem; color: #444; margin-left: .35rem; }
+ .pill.req { background: #e6f4ea; border-color: #b7dfc4; color: #1a7f37; }
+ .pill.opt { background: #f2eef9; border-color: #d9c9f0; color: #6b3fa0; }
+ .pill.net { background: #fdeef0; border-color: #f0c4cb; color: #b3243b; }
+ .step-no { display:inline-block; min-width:1.5rem; height:1.5rem; line-height:1.5rem; text-align:center;
+            background:#0969da; color:#fff; border-radius:50%; font-size:.82rem; font-weight:600; margin-right:.4rem; }
+ ol.filt { margin: .5rem 0 1rem; padding-left: 1.4rem; }
+ ol.filt > li { margin: .3rem 0; }
+</style>
+</head>
+<body>
+<h1>Step 3 &mdash; graph <span class='dim'>(high_confidence.py)</span></h1>
+<p style="font-family: Georgia, 'Times New Roman', serif; font-size: 1.4rem; font-weight: 700;
+   color: #b3243b; background: #fdeef0; border: 2px solid #b3243b; border-radius: 8px;
+   padding: .75rem 1rem; margin: 1rem 0;">NB!&nbsp; <code style="background:#fbdce1;color:#b3243b;">kaggle_working.zip</code>
+   must be downloaded to the local computer and unzipped before <code style="background:#fbdce1;color:#b3243b;">high_confidence.py</code>
+   is triggered.</p>
+<p class='meta'>Inputs and outputs of <code>high_confidence.py</code> &mdash; the downstream analysis
+script that reads the triples the GPU bundle (step&nbsp;2) produced, keeps only the
+<strong>high-confidence gene&ndash;gene relations in a disease/chemical context</strong>, and draws the
+interactive brain-cancer gene&ndash;gene graph. It is a single standalone script (not orchestrated by
+<code>gpu.py</code>): one command in, one JSON export plus one self-contained HTML graph out.</p>
+
+<div class='stat-grid'>
+  <div class='stat'><div class='v'>1</div><div class='k'>script (this stage)</div></div>
+  <div class='stat'><div class='v'>2 + 6</div><div class='k'>required + optional inputs</div></div>
+  <div class='stat'><div class='v'>2</div><div class='k'>file outputs (JSON + HTML)</div></div>
+  <div class='stat'><div class='v'>kaggle_working/</div><div class='k'>default <code>--data-root</code></div></div>
+</div>
+
+<div class='key'>Everything is read from and written under one <strong>data root</strong> &mdash; the writable
+run directory the GPU bundle produced (<code>kaggle_working/</code> next to the script by default;
+override with <code>--data-root</code>). The script applies the <strong>&ldquo;G_D_C&rdquo; qualifying
+filter</strong> (below) to the scored RE triples, writes the survivors to
+<code>TRIPLES/high_confidence_G_D_C.json</code>, and renders the gene&ndash;gene graph to
+<code>summaries/high_confidence.html</code> with an in-browser &ge;0.8&thinsp;/&thinsp;&ge;0.95&thinsp;/&thinsp;&ge;0.99
+confidence toggle. Run it after the bundle:
+<code>python high_confidence.py</code> (optionally <code>--data-root</code>, <code>--score</code>,
+<code>--no-graph</code>).</div>
+
+<h2>1. Data flow (inputs &rarr; script &rarr; outputs)</h2>
+<div class='flow'>
+  <div class='node'><span class='s'>inputs</span> <span class='dim'>(all under <code>&lt;data-root&gt;/</code>, from the step-2 GPU bundle)</span>
+    <div class='io'><strong>required:</strong> <code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> (scored + ID-normalized RE triples),
+      <code>TRIPLES/triples.json</code> (which sentences carry a DISEASE/CHEMICAL entity)<br>
+      <strong>optional (graph only):</strong> <code>databases/pmc_years.json</code>,
+      <code>CHEMICAL/chemical_to_target.json</code>, <code>DISEASE/disease.json</code>,
+      <code>DISEASE/disease_ambiguous.json</code>, <code>experimental_ner/</code> or <code>sentences/</code> (corpus size),
+      <code>summaries/pubmed_query.html</code> (query legend)</div></div>
+  <div class='arrow'>&darr;</div>
+  <div class='node'><span class='s'>high_confidence.py</span> <span class='pill net'>internet (optional)</span>
+    <div class='io'>apply the G_D_C filter at <code>--score</code> &rarr; export JSON; then build the gene&ndash;gene graph
+      from the &ge;0.8 universe (per-sentence scores kept so the browser can re-filter to &ge;0.95&thinsp;/&thinsp;&ge;0.99),
+      fetching <code>vis-network</code> from the CDN to inline it</div></div>
+  <div class='arrow'>&darr;</div>
+  <div class='node'><span class='s'>outputs</span>
+    <div class='io'>out: <code>TRIPLES/high_confidence_G_D_C.json</code> (qualifying triples) &middot;
+      <code>summaries/high_confidence.html</code> (interactive graph) &middot; console threshold stats</div></div>
+</div>
+
+<h2>2. The &ldquo;G_D_C&rdquo; qualifying filter</h2>
+<p class='meta'>A scored RE triple is kept only when <strong>all five</strong> conditions hold
+(<code>qualifies()</code>). This is what separates &ldquo;high-confidence gene&ndash;gene in a
+disease/chemical context&rdquo; from the raw scored output.</p>
+<ol class='filt'>
+  <li><code>score &ge; --score</code> &mdash; model relation score at or above the threshold (export default <strong>0.8</strong>).</li>
+  <li><strong>control&nbsp;=&nbsp;no</strong> &mdash; at least one GENETIC endpoint is annotated <code>control:&nbsp;"no"</code> (a studied gene, not a lab control).</li>
+  <li><strong>not control&nbsp;=&nbsp;yes</strong> &mdash; neither endpoint is annotated <code>control:&nbsp;"yes"</code>.</li>
+  <li><strong>no MKI67</strong> &mdash; neither endpoint's <code>hgnc_symbol</code> is <code>MKI67</code> (proliferation marker, excluded).</li>
+  <li><strong>disease/chemical context</strong> &mdash; the triple's <code>sentence</code> also carries a DISEASE or CHEMICAL entity, per <code>triples.json</code>.</li>
+</ol>
+
+<h2>3. Inputs</h2>
+<p class='meta'>Paths are resolved beneath <code>--data-root</code> (default <code>kaggle_working/</code>).
+The two <span class='pill req'>required</span> files are read directly (missing the first is a fatal
+error); the <span class='pill opt'>optional</span> ones are read defensively for the graph &mdash; if
+absent, that facet is simply empty (no year slider, no drug-target colouring, etc.).</p>
+<table>
+<thead><tr><th>path (under <code>&lt;data-root&gt;/</code>)</th><th>need</th><th>from</th><th>what the script uses it for</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code></td>
+  <td><span class='pill req'>required</span></td>
+  <td>bundle step&nbsp;15 (learned RE, normalized)</td>
+  <td>The scored + ID-normalized relation triples &mdash; the main universe. Each triple's
+      <code>score</code>, <code>subject</code>/<code>object</code> (<code>hgnc_symbol</code>,
+      <code>control</code>, <code>type</code>, <code>text</code>), <code>sentence</code>,
+      <code>polarity</code> and <code>pmid</code> drive both the filter and the graph. <strong>Fatal
+      error if missing.</strong></td>
+</tr>
+<tr>
+  <td><code>TRIPLES/triples.json</code></td>
+  <td><span class='pill req'>required</span></td>
+  <td>bundle step&nbsp;12 (base rule triples)</td>
+  <td>Supplies the set of sentences that contain a DISEASE or CHEMICAL entity (filter rule&nbsp;5), and
+      the per-sentence disease labels used by the graph's disease filter (DISEASE entity <code>text</code>,
+      mapped to MONDO below).</td>
+</tr>
+<tr>
+  <td><code>databases/pmc_years.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>bundle step&nbsp;14 (PMC&rarr;year)</td>
+  <td>Maps each PMID to a publication year for the graph's year slider and per-sentence year labels. Absent &rarr; no year facet.</td>
+</tr>
+<tr>
+  <td><code>CHEMICAL/chemical_to_target.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>bundle step&nbsp;11 (target_pharm)</td>
+  <td>Gene&rarr;corpus-chemicals with roles and the <code>in_corpus_GENETIC</code> flag. Sizes and colours
+      drug-target nodes (green = DGIdb approved anti-neoplastic, amber = DGIdb approved other, pink = ChEBI-only)
+      and populates the drug filter/search.</td>
+</tr>
+<tr>
+  <td><code>DISEASE/disease.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>bundle step&nbsp;7 (disease)</td>
+  <td>Disease surface &rarr; single MONDO label; feeds the sentence&rarr;disease map behind the disease filter.</td>
+</tr>
+<tr>
+  <td><code>DISEASE/disease_ambiguous.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>bundle step&nbsp;7 (disease)</td>
+  <td>Disease surface &rarr; list of MONDO labels (ambiguous surfaces); merged into the same disease map.
+      Surfaces with no MONDO match fall back to their own text so the sentence still carries a disease facet.</td>
+</tr>
+<tr>
+  <td><code>experimental_ner/*.xml</code> &nbsp;<span class='dim'>then</span>&nbsp; <code>sentences/*.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>step&nbsp;1 corpus / bundle step&nbsp;2</td>
+  <td>Corpus size (number of source documents) for the &ldquo;N&nbsp;of&nbsp;M documents produced gene&ndash;gene
+      interactions&rdquo; line. Counts XMLs first; if that dir is empty (as in the bundle), falls back to the
+      per-document <code>sentences/</code> JSON count.</td>
+</tr>
+<tr>
+  <td><code>summaries/pubmed_query.html</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>step&nbsp;1 (publications)</td>
+  <td>The PubMed query the whole corpus came from &mdash; the value after
+      &ldquo;<code>Query (read strictly from &lt;STDIN&gt;):</code>&rdquo; is parsed out and shown as a
+      <code>PubMed query = &hellip;</code> legend line above the graph title. Looked up under the data root
+      first, then next to the script; absent &rarr; no query line. Not needed with <code>--no-graph</code>.</td>
+</tr>
+<tr>
+  <td><code>vis-network@9.1.9</code> <span class='dim'>(unpkg CDN)</span></td>
+  <td><span class='pill opt'>optional</span> <span class='pill net'>net</span></td>
+  <td>external CDN</td>
+  <td>The graph library. Fetched once and inlined into the HTML so it works offline; if the fetch fails the
+      HTML falls back to a CDN <code>&lt;script src&gt;</code> (needs internet to view). Skipped entirely with <code>--no-graph</code>.</td>
+</tr>
+</tbody>
+</table>
+
+<h2>4. Outputs</h2>
+<table>
+<thead><tr><th>path (under <code>&lt;data-root&gt;/</code>)</th><th>what it is</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>TRIPLES/high_confidence_G_D_C.json</code></td>
+  <td>The qualifying triples at <code>--score</code> (default 0.8) &mdash; every RE triple that passes all five
+      filter rules, written as a JSON list. <strong>Always produced.</strong></td>
+</tr>
+<tr>
+  <td><code>summaries/high_confidence.html</code></td>
+  <td>Self-contained interactive gene&ndash;gene graph (vis-network). A <code>PubMed query = &hellip;</code>
+      legend line (read from <code>summaries/pubmed_query.html</code>) sits above the &ldquo;Gene&ndash;gene
+      interactions&rdquo; title. Universe = triples qualifying at score
+      &ge;&nbsp;0.8, with per-sentence scores retained so the in-browser toggle re-filters to
+      &ge;0.95&thinsp;/&thinsp;&ge;0.99. Nodes are genes (drug-target ones sized/coloured by their corpus
+      chemicals); edges are directed gene&ndash;gene relations coloured by polarity, each carrying its
+      supporting sentences (PMID, score, year, diseases). Panel filters: confidence, min sentences/edge, min
+      cluster size, year range, gene search/focus (1&ndash;2 hops), drug search/filter, disease filter,
+      polarity. <strong>Skipped with <code>--no-graph</code>.</strong></td>
+</tr>
+<tr>
+  <td><span class='dim'>console (stdout)</span></td>
+  <td>Progress + summary: the export count/sentences at <code>--score</code>, the graph line (genes, edges,
+      edges with a &ge;0.99 sentence, publications of corpus size), and one stats row per
+      <code>--thresholds</code> value (triples/sentences before vs. after the G_D_C filter).</td>
+</tr>
+</tbody>
+</table>
+
+<h2>5. Options</h2>
+<table>
+<thead><tr><th>flag</th><th>default</th><th>effect</th></tr></thead>
+<tbody>
+<tr><td><code>--data-root PATH</code></td><td><code>kaggle_working/</code></td><td>Pipeline output tree that every input/output path is resolved beneath.</td></tr>
+<tr><td><code>--score FLOAT</code></td><td><code>0.8</code></td><td>Score threshold for the exported <code>high_confidence_G_D_C.json</code>.</td></tr>
+<tr><td><code>--thresholds LIST</code></td><td><code>0.8,0.95,0.99</code></td><td>Comma-separated thresholds summarized in the console stats (does not change files).</td></tr>
+<tr><td><code>--no-graph</code></td><td><span class='dim'>off</span></td><td>Skip the HTML graph (and its CDN fetch); still writes the JSON export.</td></tr>
+</tbody>
+</table>
+
+<h2>6. How to run</h2>
+<ol class='steps'>
+  <li><span class='step-no'>1</span><code>python high_confidence.py</code>
+      <span class='dim'>&mdash; reads <code>kaggle_working/</code>, writes the JSON + graph at the defaults (score&nbsp;0.8).</span></li>
+  <li><span class='step-no'>2</span><code>python high_confidence.py --data-root path/to/run --score 0.95</code>
+      <span class='dim'>&mdash; point at a different bundle output tree and raise the export threshold.</span></li>
+  <li><span class='step-no'>3</span><code>python high_confidence.py --no-graph</code>
+      <span class='dim'>&mdash; JSON export only (no network, no HTML).</span></li>
+</ol>
+
+<div class='warn'>Run this <strong>after</strong> the GPU bundle (step&nbsp;2): it needs at least
+<code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> and <code>TRIPLES/triples.json</code>
+under the data root, or it exits with an error. The optional inputs (years, chemical targets, MONDO labels)
+just enrich the graph's filters; the graph still renders without them. Building the graph fetches
+<code>vis-network</code> from the CDN &mdash; harmless if offline (it falls back to a CDN link, or use
+<code>--no-graph</code>).</div>
+
+<h2>7. Notes</h2>
+<ul>
+  <li><strong>Hand-off from step&nbsp;2.</strong> Every required input is a file the GPU bundle
+      (<code>step_2_triples.html</code>) wrote into <code>TRIPLES/</code>; the optional inputs come from the
+      bundle's <code>DISEASE/</code>, <code>CHEMICAL/</code> and <code>databases/</code> dirs. This stage is the
+      &ldquo;step&nbsp;3&rdquo; that consumes them.</li>
+  <li><strong>Export threshold vs. graph universe.</strong> <code>--score</code> sets the exported JSON's cutoff,
+      but the graph is always built from the score&nbsp;&ge;&nbsp;0.8 universe (with per-sentence scores kept), so
+      the &ge;0.8&thinsp;/&thinsp;&ge;0.95&thinsp;/&thinsp;&ge;0.99 toggle works in the browser regardless of
+      <code>--score</code>.</li>
+  <li><strong>Single-file, portable HTML.</strong> The graph inlines both the data payload and (when the fetch
+      succeeds) the vis-network library, so <code>high_confidence.html</code> opens with no build step and no
+      network once written.</li>
+</ul>
+
+</body>
+</html>
