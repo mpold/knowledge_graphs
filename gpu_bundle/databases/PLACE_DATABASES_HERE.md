@@ -15,5 +15,7 @@ Optional:
 - `pmc_years.json` — produced by step 14 (`pub_years.py`); drop it in only to run the
   publication-year lookup with the internet off.
 
+- 'interactions.tsv' - DGIdb interactions TSV (open drug-gene targets; typed interactions)
+
 On Kaggle, upload these alongside the scripts as part of the dataset. See the repo README
 and `step_2_triples.html` for the full step-2 setup.
