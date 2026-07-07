@@ -53,7 +53,9 @@ previous one wrote, and writes an HTML summary of its own stage into <code>summa
 and output directories it needs</strong> if they are missing, and (except <code>grobid_xml.py</code>)
 <strong>empties its bulk output directory before writing</strong> so each run starts clean &mdash;
 Python scripts are never deleted. Several stages reach the network (NCBI E-utilities, OpenAlex,
-CrossRef) or need Docker (GROBID), so they are <em>not</em> run automatically &mdash; run each yourself.</div>
+CrossRef) or need Docker (GROBID), so they are <em>not</em> run automatically &mdash; run each yourself,
+or drive all seven in order with <code>step_1_orchestrator.py</code> (see section&nbsp;3), which still
+needs the same network and Docker access.</div>
 
 <h2>1. Order of execution (data flow)</h2>
 <div class='flow'>
@@ -172,6 +174,28 @@ wiping its output dir; it is also skipped entirely when every article already ha
 </table>
 
 <h2>3. How to run</h2>
+
+<h3>One command &mdash; the orchestrator</h3>
+<p><code>step_1_orchestrator.py</code> runs all seven scripts in the order above, in one process.
+It feeds the PubMed query to step 1 on <code>STDIN</code> and <strong>aborts the moment any stage
+exits non-zero</strong> (so a failed stage never silently poisons the next). Every path is
+script-relative, so it can be launched from any working directory.</p>
+<pre># query as an argument (fed to step 1's STDIN)
+python step_1_orchestrator.py "your pubmed query"
+
+# or pipe it in / type it at the prompt
+echo "your pubmed query" | python step_1_orchestrator.py
+python step_1_orchestrator.py</pre>
+<p class='dim'>Options: <code>--start N</code> / <code>--stop N</code> / <code>--only N</code> run a
+sub-range of steps 1&ndash;7 (e.g. <code>--only 5</code> to re-run just GROBID, or
+<code>--start 4</code> to resume after a manual step 3); <code>--list</code> prints the pipeline order;
+<code>--dry-run</code> shows what would run without executing anything. The query is only read when
+step&nbsp;1 is in the selected range. Environment variables (<code>NCBI_API_KEY</code>,
+<code>TIME_BUDGET</code>, GROBID settings, &hellip;) are passed straight through to each child, so the
+orchestrator changes <em>nothing</em> about the requirements below &mdash; the network stages still
+reach out and step&nbsp;5 still needs Docker + GROBID.</p>
+
+<h3>Or run each stage by hand</h3>
 <ol class='steps'>
   <li><span class='step-no'>1</span><code>echo "your query" | python pubmed_query.py</code>
       <span class='dim'>&mdash; or run it and type the query at the prompt.</span></li>
@@ -205,6 +229,11 @@ network stages with <code>TIME_BUDGET</code> if needed.</div>
       <code>named_entity_xml.html</code>, <code>pre_ner_xml_structure.html</code>).</li>
   <li><strong>Hand-off to step 2.</strong> The assembled NER corpus in <code>gpu_bundle/experimental_ner/</code>
       is the input to the GPU bundle (<code>gpu_bundle/gpu.py</code>); see step&nbsp;2.</li>
+  <li><strong>Orchestrator, not a stage.</strong> <code>step_1_orchestrator.py</code> only chains the seven
+      scripts in order (feeding the query to step&nbsp;1 on <code>STDIN</code>, aborting on the first
+      non-zero exit); it produces no corpus or summary of its own and can be run partially with
+      <code>--start</code>/<code>--stop</code>/<code>--only</code>. It does not relax any per-stage
+      requirement &mdash; the network stages and step&nbsp;5's GROBID container are still needed.</li>
 </ul>
 
 </body>
