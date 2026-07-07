@@ -76,6 +76,7 @@ SUMMARY_HTML= os.path.join(SUMMARY_DIR, "pubmed_query.html")
 CACHE_PMIDS = os.path.join(PMID_DIR, "_pmids.txt")
 CACHE_ANNOT = os.path.join(PMID_DIR, "_annot.tsv")        # pmid pmcid year source issn essn
 CACHE_JIF   = os.path.join(PMID_DIR, "_journal_if.tsv")   # issn if h_index name issn_l
+CACHE_META  = os.path.join(PMID_DIR, "_query.json")       # signature of the query these caches belong to
 
 ESEARCH  = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 ESUMMARY = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
@@ -213,14 +214,55 @@ def fetch_year(term, year):
     return count, out
 
 
+def cache_signature(term):
+    """Identity of the query a cache belongs to: the term plus the year window.
+
+    The pmids/ caches are keyed on PMIDs, not on the query that produced them, so
+    reusing them across a *different* query silently returns the wrong corpus. The
+    signature makes that reuse conditional: same query + same YEAR_LO/HI => resume;
+    anything different => the caches are stale and must be rebuilt.
+    """
+    return {"query": term, "year_lo": YEAR_LO, "year_hi": YEAR_HI}
+
+
+def load_cache_signature():
+    """Return the signature stored for the current caches, or None if absent/unreadable."""
+    try:
+        with open(CACHE_META, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def invalidate_caches(reason):
+    """Drop the PMID/annotation/JIF caches so a changed query starts clean."""
+    print("[pmids] cache invalidated (%s) -- refetching" % reason, file=sys.stderr)
+    for path in (CACHE_PMIDS, CACHE_ANNOT, CACHE_JIF, CACHE_META):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def get_all_pmids(term):
-    """Complete, de-duplicated PMID set for the query (cached to CACHE_PMIDS)."""
+    """Complete, de-duplicated PMID set for the query (cached to CACHE_PMIDS).
+
+    The cache is reused only when its stored signature matches the current query
+    and year window (see cache_signature); on a mismatch every pmids/ cache is
+    wiped first so a new query can never inherit a previous run's PMIDs.
+    """
+    sig = cache_signature(term)
     if os.path.exists(CACHE_PMIDS):
-        with open(CACHE_PMIDS, encoding="utf-8") as fh:
-            cached = [ln.strip() for ln in fh if ln.strip()]
-        if cached:
-            print("[pmids] using cache: %d" % len(cached), file=sys.stderr)
-            return cached
+        stored = load_cache_signature()
+        if stored != sig:
+            was = (stored or {}).get("query") if stored else None
+            invalidate_caches("query changed from %r to %r" % (was, term))
+        else:
+            with open(CACHE_PMIDS, encoding="utf-8") as fh:
+                cached = [ln.strip() for ln in fh if ln.strip()]
+            if cached:
+                print("[pmids] using cache: %d" % len(cached), file=sys.stderr)
+                return cached
     total, _ = esearch(term, "%d/01/01" % YEAR_LO, "%d/12/31" % YEAR_HI)  # warm + sanity
     all_ids = set()
     for year in range(YEAR_HI, YEAR_LO - 1, -1):
@@ -232,6 +274,8 @@ def get_all_pmids(term):
     ordered = sorted(all_ids, key=int)
     with open(CACHE_PMIDS, "w", encoding="utf-8") as fh:
         fh.write("\n".join(ordered))
+    with open(CACHE_META, "w", encoding="utf-8") as fh:
+        json.dump(sig, fh)
     print("[pmids] total unique %d" % len(ordered), file=sys.stderr)
     return ordered
 
