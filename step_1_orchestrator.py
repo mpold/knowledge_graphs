@@ -76,20 +76,19 @@ def print_list():
 def get_query(cli_query):
     """Resolve the PubMed query for step 1.
 
-    Priority: explicit CLI argument, then piped STDIN, then an interactive
-    prompt. ``pubmed_query.py`` itself reads a single line from STDIN via
-    input(), so we hand it the query through the child's stdin.
+    Priority: explicit CLI argument, else a single line read from STDIN (typed
+    interactively or piped in). ``pubmed_query.py`` itself reads one line from
+    STDIN via input(), so we hand it the query through the child's stdin.
     """
     if cli_query is not None:
         return cli_query
-    if not sys.stdin.isatty():
-        # Something was piped in -- forward the first line to step 1.
-        line = sys.stdin.readline()
-        return line.strip()
-    try:
-        return input("enter pubmed query: ").strip()
-    except EOFError:
-        return ""
+    # Always emit the prompt (flushed) *before* blocking on STDIN so it shows
+    # even when STDIN is not a TTY -- e.g. PyCharm's run console, where
+    # sys.stdin.isatty() is False, would otherwise wait with no visible prompt.
+    sys.stdout.write("enter pubmed query: ")
+    sys.stdout.flush()
+    line = sys.stdin.readline()      # "" on EOF (closed/empty STDIN)
+    return line.strip()
 
 
 def run_stage(step_no, script, query, dry_run):
