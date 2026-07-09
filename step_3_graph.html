@@ -2,7 +2,7 @@
 <html lang='en'>
 <head>
 <meta charset='utf-8'>
-<title>Step 3 &mdash; graph (high_confidence.py): inputs &amp; outputs</title>
+<title>Step 3 &mdash; graph (high_confidence.py &amp; high_confidence_g.py): inputs &amp; outputs</title>
 <style>
  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         margin: 2rem auto; max-width: 1100px; color: #222; line-height: 1.45; padding: 0 1rem; }
@@ -39,22 +39,27 @@
 </style>
 </head>
 <body>
-<h1>Step 3 &mdash; graph <span class='dim'>(high_confidence.py)</span></h1>
+<h1>Step 3 &mdash; graph <span class='dim'>(high_confidence.py &amp; high_confidence_g.py)</span></h1>
 <p style="font-family: Georgia, 'Times New Roman', serif; font-size: 1.4rem; font-weight: 700;
    color: #b3243b; background: #fdeef0; border: 2px solid #b3243b; border-radius: 8px;
    padding: .75rem 1rem; margin: 1rem 0;">NB!&nbsp; <code style="background:#fbdce1;color:#b3243b;">kaggle_working.zip</code>
    must be downloaded to the local computer and unzipped before <code style="background:#fbdce1;color:#b3243b;">high_confidence.py</code>
+   or <code style="background:#fbdce1;color:#b3243b;">high_confidence_g.py</code>
    is triggered.</p>
-<p class='meta'>Inputs and outputs of <code>high_confidence.py</code> &mdash; the downstream analysis
-script that reads the triples the GPU bundle (step&nbsp;2) produced, keeps only the
-<strong>high-confidence gene&ndash;gene relations in a disease/chemical context</strong>, and draws the
-interactive brain-cancer gene&ndash;gene graph. It is a single standalone script (not orchestrated by
-<code>gpu.py</code>): one command in, one JSON export plus one self-contained HTML graph out.</p>
+<p class='meta'>Inputs and outputs of the two step-3 analysis scripts that read the triples the GPU bundle
+(step&nbsp;2) produced and draw the interactive brain-cancer gene&ndash;gene graph. They are standalone
+scripts (not orchestrated by <code>gpu.py</code>) &mdash; one command in, one JSON export plus one
+self-contained HTML graph out &mdash; and differ in exactly one place, the qualifying filter:
+<strong><code>high_confidence.py</code></strong> (sections&nbsp;1&ndash;7 below) keeps the high-confidence
+gene&ndash;gene relations <strong>in a disease/chemical context</strong> (the &ldquo;G_D_C&rdquo; filter),
+while <strong><code>high_confidence_g.py</code></strong> (section&nbsp;8) drops that context requirement and
+keeps <strong>every</strong> high-confidence gene&ndash;gene relation (the gene-only &ldquo;G&rdquo; filter).
+Their <code>_G</code>-suffixed outputs never clobber each other, so both can target the same data root.</p>
 
 <div class='stat-grid'>
-  <div class='stat'><div class='v'>1</div><div class='k'>script (this stage)</div></div>
+  <div class='stat'><div class='v'>2</div><div class='k'>scripts (G_D_C &amp; G)</div></div>
   <div class='stat'><div class='v'>2 + 6</div><div class='k'>required + optional inputs</div></div>
-  <div class='stat'><div class='v'>2</div><div class='k'>file outputs (JSON + HTML)</div></div>
+  <div class='stat'><div class='v'>2</div><div class='k'>file outputs each (JSON + HTML)</div></div>
   <div class='stat'><div class='v'>kaggle_working/</div><div class='k'>default <code>--data-root</code></div></div>
 </div>
 
@@ -252,6 +257,65 @@ just enrich the graph's filters; the graph still renders without them. Building 
       succeeds) the vis-network library, so <code>high_confidence.html</code> opens with no build step and no
       network once written.</li>
 </ul>
+
+<h2>8. Gene-only variant &mdash; <code>high_confidence_g.py</code> <span class='dim'>(the &ldquo;G&rdquo; step)</span></h2>
+<p class='meta'>A sibling script, <code>high_confidence_g.py</code>, runs the <strong>same pipeline as a separate
+step</strong> with <strong>one logic difference</strong>: it applies the gene-only <strong>&ldquo;G&rdquo;
+filter</strong> instead of the &ldquo;G_D_C&rdquo; filter above. Everything else &mdash; inputs, graph
+rendering, options, the in-browser confidence toggle &mdash; is identical. Its output filenames all differ
+(a <code>_G</code> suffix), so the two scripts can be run against the same data root without clobbering each
+other.</p>
+
+<div class='key'><strong>The one difference:</strong> <code>high_confidence_g.py</code> <strong>drops
+qualifying rule&nbsp;5</strong> &mdash; the requirement that the triple's sentence also carry a DISEASE or
+CHEMICAL entity. A triple qualifies on the first four rules alone (score, control&nbsp;=&nbsp;no, not
+control&nbsp;=&nbsp;yes, no MKI67). This yields a <em>larger</em> universe: every high-confidence
+gene&ndash;gene relation, whether or not its sentence is in a disease/chemical context.</div>
+
+<h3>The &ldquo;G&rdquo; qualifying filter</h3>
+<p class='meta'>A scored RE triple is kept when <strong>all four</strong> conditions hold
+(<code>qualifies()</code> in <code>high_confidence_g.py</code>) &mdash; rules&nbsp;1&ndash;4 of the G_D_C
+filter, without rule&nbsp;5:</p>
+<ol class='filt'>
+  <li><code>score &ge; --score</code> &mdash; model relation score at or above the threshold (export default <strong>0.8</strong>).</li>
+  <li><strong>control&nbsp;=&nbsp;no</strong> &mdash; at least one GENETIC endpoint is annotated <code>control:&nbsp;"no"</code>.</li>
+  <li><strong>not control&nbsp;=&nbsp;yes</strong> &mdash; neither endpoint is annotated <code>control:&nbsp;"yes"</code>.</li>
+  <li><strong>no MKI67</strong> &mdash; neither endpoint's <code>hgnc_symbol</code> is <code>MKI67</code>.</li>
+  <li class='dim'><s>disease/chemical context</s> &mdash; <strong>not applied</strong> in this variant (this is the only difference from the G_D_C filter).</li>
+</ol>
+
+<h3>Inputs</h3>
+<p class='meta'>Identical to the G_D_C script (section&nbsp;3): the same two <span class='pill req'>required</span>
+files and the same six <span class='pill opt'>optional</span> graph inputs, all under <code>--data-root</code>.
+Note <code>TRIPLES/triples.json</code> is still <span class='pill req'>required</span> here, but it is used
+<em>only</em> for the graph's per-sentence disease labels &mdash; not for filtering (rule&nbsp;5 is gone).</p>
+
+<h3>Outputs <span class='dim'>(all <code>_G</code>-suffixed, distinct from the G_D_C script)</span></h3>
+<table>
+<thead><tr><th>path</th><th>what it is</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>&lt;data-root&gt;/TRIPLES/high_confidence_G.json</code></td>
+  <td>The qualifying triples at <code>--score</code> (default 0.8) that pass the four-rule <strong>G</strong> filter, as a JSON list. <strong>Always produced.</strong></td>
+</tr>
+<tr>
+  <td><code>&lt;data-root&gt;/summaries/high_confidence_G.html</code></td>
+  <td>The same self-contained interactive gene&ndash;gene graph as the G_D_C variant (same panel filters and &ge;0.8&thinsp;/&thinsp;&ge;0.95&thinsp;/&thinsp;&ge;0.99 toggle), but built from the larger gene-only universe. <strong>Skipped with <code>--no-graph</code>.</strong></td>
+</tr>
+<tr>
+  <td><code>&lt;root&gt;/&lt;pubmed_query&gt;_G.html</code></td>
+  <td>A copy of that graph in the script's own directory, named after the PubMed query with a <code>_G</code> suffix (e.g. <code>lung_adenocarcinoma_G.html</code>). Written only when a query is found; the <code>_G</code> keeps it distinct from the G_D_C script's <code>&lt;query&gt;.html</code> copy.</td>
+</tr>
+<tr>
+  <td><span class='dim'>console (stdout)</span></td>
+  <td>Same summary as the G_D_C script, except the per-threshold stats row is labelled <strong>G</strong> (triples/sentences before vs. after the gene-only filter) rather than <strong>G_D_C</strong>.</td>
+</tr>
+</tbody>
+</table>
+<p class='meta'>Options (<code>--data-root</code>, <code>--score</code>, <code>--thresholds</code>,
+<code>--no-graph</code>) and the run/ordering requirements are the same as sections&nbsp;5&ndash;6; run it
+after the GPU bundle, the same way as <code>high_confidence.py</code>:
+<code>python high_confidence_g.py</code>.</p>
 
 </body>
 </html>
