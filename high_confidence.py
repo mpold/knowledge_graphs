@@ -273,13 +273,13 @@ def get_vis_lib():
 
 GRAPH_TEMPLATE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>High-confidence brain-cancer gene-gene interactions</title>
+<title>__TITLE__</title>
 __LIBTAG__
 <style>
  html,body{margin:0;height:100%;background:#eef1f5;color:#1c2330;font:14px/1.5 Segoe UI,Arial,sans-serif}
  #net{position:absolute;top:0;left:0;right:0;bottom:0;background:#ffffff}
  #panel{position:absolute;top:12px;left:12px;z-index:5;background:rgba(255,255,255,.97);border:1px solid #cdd5e0;border-radius:10px;padding:14px 16px;max-width:320px;box-shadow:0 2px 12px rgba(0,0,0,.18);color:#1c2330}
- #panel h1{font-size:16px;margin:0 0 8px;color:#1c2330}
+ #panel h1{font-size:13px;margin:0 0 8px;color:#1c2330;font-variant:small-caps;letter-spacing:.4px}
  .row{margin:8px 0}
  input[type=range]{width:150px;max-width:100%;vertical-align:middle}
  .legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}
@@ -345,7 +345,7 @@ function activeCats(){return new Set(Array.from(document.querySelectorAll(".catf
 function activeYears(){const a=parseInt(document.getElementById('yrlo').value),b=parseInt(document.getElementById('yrhi').value);return [Math.min(a,b),Math.max(a,b)];}
 function passYear(yr,lo,hi){return (yr!=null&&yr>=lo&&yr<=hi)||(yr==null&&lo<=MINY&&hi>=MAXY);}
 function activeDisease(){return (document.getElementById('disfilter').value||'').trim();}
-function isSCC(d){d=(d||'').toLowerCase();return d.indexOf('squamous cell carcinoma')>=0||/^[a-z]*sccs?$/.test(d)||d==='lusc';}
+function isSCC(d){d=(d||'').toLowerCase();return d.indexOf('squamous cell carcinoma')>=0||/^[a-z]*sccs?$/.test(d)||d==='lusc'||d==='ecss';}
 function disMatch(s,dis){if(!dis)return true;if(!s.dis)return false;return dis==='__ALL_SCC__'?s.dis.some(isSCC):s.dis.indexOf(dis)>=0;}
 function disLabel(dis){return dis==='__ALL_SCC__'?'all squamous cell carcinomas':dis;}
 function visSents(e,conf,lo,hi,dis){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&disMatch(s,dis));}
@@ -425,7 +425,7 @@ yl.addEventListener('input',()=>{updYr();build(+thr.value);});
 yh.addEventListener('input',()=>{updYr();build(+thr.value);});
 const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
 const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
-const disCounts={},sccMembers={};let sccCount=0;DATA.edges.forEach(e=>e.sents.forEach(s=>{let sHasSCC=false;(s.dis||[]).forEach(d=>{disCounts[d]=(disCounts[d]||0)+1;if(isSCC(d)){sccMembers[d]=(sccMembers[d]||0)+1;sHasSCC=true;}});if(sHasSCC)sccCount++;}));const dsel=document.getElementById('disfilter');const sccLabels=Object.keys(sccMembers).sort((a,b)=>sccMembers[b]-sccMembers[a]);if(sccLabels.length){const o=document.createElement('option');o.value='__ALL_SCC__';o.textContent='all squamous cell carcinomas — '+sccLabels.join(', ')+' ('+sccCount+')';dsel.appendChild(o);}Object.keys(disCounts).filter(d=>disCounts[d]>1&&!isSCC(d)).sort((a,b)=>disCounts[b]-disCounts[a]).forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d+' ('+disCounts[d]+')';dsel.appendChild(o);});dsel.addEventListener('change',()=>build(+thr.value));
+const disCounts={},sccMembers={};let sccCount=0;DATA.edges.forEach(e=>e.sents.forEach(s=>{let sHasSCC=false;(s.dis||[]).forEach(d=>{disCounts[d]=(disCounts[d]||0)+1;if(isSCC(d)){sccMembers[d]=(sccMembers[d]||0)+1;sHasSCC=true;}});if(sHasSCC)sccCount++;}));const dsel=document.getElementById('disfilter');const sccLabels=Object.keys(sccMembers).sort((a,b)=>sccMembers[b]-sccMembers[a]);if(sccLabels.length){const o=document.createElement('option');o.value='__ALL_SCC__';o.textContent='all squamous cell carcinomas — '+sccLabels.join(', ')+' ('+sccCount+')';dsel.appendChild(o);}Object.keys(disCounts).filter(d=>disCounts[d]>1&&!isSCC(d)).sort((a,b)=>disCounts[b]-disCounts[a]).forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d+' ('+disCounts[d]+')';dsel.appendChild(o);});if(sccLabels.length)dsel.value='__ALL_SCC__';dsel.addEventListener('change',()=>build(+thr.value));
 document.getElementById('toggle').addEventListener('click',()=>document.getElementById('panel').classList.toggle('collapsed'));
 if(window.innerWidth<=700)document.getElementById('panel').classList.add('collapsed');
 window.addEventListener('resize',()=>{if(network)network.redraw();});
@@ -440,10 +440,12 @@ def render_graph(payload, lib, miny, maxy, nxml, pubmed_query=""):
     else:
         libtag = f'<script src="{VIS_URL}"></script>'
     # legend line above the title: the PubMed query this corpus came from (empty -> nothing shown)
-    qrow = (f'<div class="row" id="pubmedq" style="font-size:13px;font-weight:600;color:#2b6cb0;'
-            f'margin-bottom:6px">PubMed query = <b style="color:#1c2330">{html.escape(pubmed_query)}</b></div>'
+    qrow = (f'<div class="row" id="pubmedq" style="font-size:18px;font-weight:600;color:#2b6cb0;'
+            f'margin-bottom:6px">PubMed query = {html.escape(pubmed_query)}</div>'
             if pubmed_query else "")
+    title = html.escape(pubmed_query) if pubmed_query else "High-confidence brain-cancer gene-gene interactions"
     return (GRAPH_TEMPLATE.replace("__LIBTAG__", libtag)
+            .replace("__TITLE__", title)
             .replace("__PUBMED_QUERY__", qrow)
             .replace("__PAYLOAD__", json.dumps(payload, ensure_ascii=False))
             .replace("__CCOLOR__", json.dumps(PCOLOR))
