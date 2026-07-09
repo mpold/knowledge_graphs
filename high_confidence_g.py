@@ -1,28 +1,43 @@
 #!/usr/bin/env python3
 """
-high_confidence.py -- extract the high-confidence Gene / Disease-or-Chemical-context
-relation triples from the scored RE output, summarize the threshold statistics, and
-draw the brain-cancer gene-gene relationship graph.
+high_confidence_g.py -- extract the high-confidence Gene-context relation triples from
+the scored RE output, summarize the threshold statistics, and draw the brain-cancer
+gene-gene relationship graph.
 
-A triple QUALIFIES (the "G_D_C" filter) when ALL of these hold:
-  1. score >= SCORE                                   (export default 0.8)
-  2. annotated control:no   -- >=1 GENETIC endpoint has control == "no"
-  3. NOT annotated control:yes -- no endpoint has control == "yes"
-  4. NOT hgnc_symbol == "MKI67" on either endpoint
-  5. its sentence ALSO carries a DISEASE or CHEMICAL entity (looked up in triples.json)
+This is the "G" (gene-only) variant of high_confidence.py, run as a SEPARATE STEP: the
+same step-3 graph pipeline, differing in exactly one place -- the qualifying filter. Where
+high_confidence.py applies the "G_D_C" filter (gene-gene IN a disease/chemical context),
+this step applies the "G" filter (gene-gene, context-agnostic). It is a standalone step you
+run in addition to -- or instead of -- the G_D_C step; its "_G" output names never clobber
+the other's, so both can target the same data root.
+
+  The "G" step -- the ONE logic difference from high_confidence.py:
+  the DISEASE-or-CHEMICAL sentence-context requirement (G_D_C rule 5) is DROPPED.
+  A triple QUALIFIES (the "G" filter) when ALL of these hold:
+    1. score >= SCORE                                   (export default 0.8)
+    2. annotated control:no   -- >=1 GENETIC endpoint has control == "no"
+    3. NOT annotated control:yes -- no endpoint has control == "yes"
+    4. NOT hgnc_symbol == "MKI67" on either endpoint
+  (The G_D_C filter's 5th condition -- the sentence must also carry a DISEASE or
+  CHEMICAL entity -- is intentionally NOT applied in this step, so the "G" universe is
+  strictly larger: every high-confidence gene-gene relation, disease/chemical context or not.)
 
 All inputs are read from the pipeline output tree (the writable run dir gpu.py produced),
 which defaults to ``kaggle_working/`` next to this script; override with ``--data-root``.
 
 Inputs  : <data-root>/TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json  (scored + normalized)
-          <data-root>/TRIPLES/triples.json                                          (DISEASE/CHEMICAL sentences)
+          <data-root>/TRIPLES/triples.json                                          (disease facets for the graph)
           <data-root>/{DISEASE,CHEMICAL,databases,sentences}/...                     (normalization + year + corpus size)
-Outputs : <data-root>/TRIPLES/high_confidence_G_D_C.json   qualifying triples at --score (default 0.8)
-          <data-root>/summaries/high_confidence.html        gene-gene graph with a >=0.8 / >=0.95 / >=0.99 toggle
-          <root>/<pubmed_query>.html                        a copy of that graph, named after the PubMed query
-                                                            (whitespace -> underscore); e.g. pancreatic_cancer.html
+Outputs : <data-root>/TRIPLES/high_confidence_G.json     qualifying triples at --score (default 0.8)
+          <data-root>/summaries/high_confidence_G.html    gene-gene graph with a >=0.8 / >=0.95 / >=0.99 toggle
+          <root>/<pubmed_query>_G.html                    a copy of that graph, named after the PubMed query
+                                                           (whitespace -> underscore); e.g. pancreatic_cancer_G.html
 
-Run::  python high_confidence.py [--data-root kaggle_working] [--score 0.8] [--thresholds 0.8,0.95,0.99] [--no-graph]
+The output filenames all differ from those written by high_confidence.py (which uses the
+"_G_D_C" JSON, "high_confidence.html" graph, and "<query>.html" copy) so the two scripts
+can be run against the same data root without clobbering each other's outputs.
+
+Run::  python high_confidence_g.py [--data-root kaggle_working] [--score 0.8] [--thresholds 0.8,0.95,0.99] [--no-graph]
 """
 import argparse
 import collections
@@ -58,8 +73,9 @@ def set_data_root(data_root):
     TARGET_FILE = DATA_ROOT / "CHEMICAL" / "chemical_to_target.json"   # gene -> corpus chemicals (in_corpus_GENETIC flag)
     DISEASE_FILE = DATA_ROOT / "DISEASE" / "disease.json"            # surface -> MONDO label (single)
     DISEASE_AMBIG = DATA_ROOT / "DISEASE" / "disease_ambiguous.json"  # surface -> MONDO labels (list)
-    JSON_OUT = OUT_DIR / "high_confidence_G_D_C.json"
-    GRAPH_OUT = DATA_ROOT / "summaries" / "high_confidence.html"
+    # "_G" (gene-only) output names, distinct from high_confidence.py's "_G_D_C"/"high_confidence.html".
+    JSON_OUT = OUT_DIR / "high_confidence_G.json"
+    GRAPH_OUT = DATA_ROOT / "summaries" / "high_confidence_G.html"
 
 
 set_data_root(DATA_ROOT)
@@ -123,31 +139,20 @@ def ctrl_yes(t):
     return t["subject"].get("control") == "yes" or t["object"].get("control") == "yes"
 
 
-def dc_sentences(base):
-    s = set()
-    for t in base:
-        if t["subject"].get("type") in ("DISEASE", "CHEMICAL") or t["object"].get("type") in ("DISEASE", "CHEMICAL"):
-            x = t.get("sentence")
-            if x:
-                s.add(x)
-    return s
-
-
-def qualifies(t, T, DC):
+def qualifies(t, T):
+    # gene-only filter: no DISEASE/CHEMICAL sentence-context requirement (that was the "_G_D_C" filter)
     sc = t.get("score")
     return (isinstance(sc, (int, float)) and sc >= T
-            and ctrl_no(t) and not ctrl_yes(t) and not has_mki67(t)
-            and t.get("sentence") in DC)
+            and ctrl_no(t) and not ctrl_yes(t) and not has_mki67(t))
 
 
-def stats(d, DC, T):
+def stats(d, T):
     sub = [t for t in d if isinstance(t.get("score"), (int, float)) and t["score"] >= T]
-    f = [t for t in sub if qualifies(t, T, DC)]
+    f = [t for t in sub if qualifies(t, T)]
     return {"T": T, "triples": len(sub), "sentences": len({t.get("sentence") for t in sub}),
             "control_no": sum(1 for t in sub if ctrl_no(t)),
             "control_yes": sum(1 for t in sub if ctrl_yes(t)),
             "mki67": sum(1 for t in sub if has_mki67(t)),
-            "to_dc": sum(1 for t in sub if t.get("sentence") in DC),
             "filt": len(f), "filt_sentences": len({t.get("sentence") for t in f})}
 
 
@@ -273,7 +278,7 @@ def get_vis_lib():
 
 GRAPH_TEMPLATE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>High-confidence brain-cancer gene-gene interactions</title>
+<title>High-confidence brain-cancer gene-gene interactions (gene-only filter)</title>
 __LIBTAG__
 <style>
  html,body{margin:0;height:100%;background:#eef1f5;color:#1c2330;font:14px/1.5 Segoe UI,Arial,sans-serif}
@@ -323,7 +328,7 @@ __LIBTAG__
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
- <div class="row">Filter to disease:<br><select id="disfilter"></select></div>
+ <div class="row">Filter to disease:<br><select id="disfilter"><option value="">(no disease)</option></select></div>
  <div class="row mut">Polarity:</div><div id="catfilters"></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row mut" id="stats"></div>
@@ -463,22 +468,21 @@ def main():
                          f"(run the gpu_bundle pipeline first, or pass --data-root).")
 
     d = json.loads(RE_FILE.read_text(encoding="utf-8"))
-    base = json.loads(BASE_FILE.read_text(encoding="utf-8"))
-    DC = dc_sentences(base)
+    base = json.loads(BASE_FILE.read_text(encoding="utf-8"))   # DISEASE facets for the graph's disease filter
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1) JSON export at --score
-    kept = [t for t in d if qualifies(t, args.score, DC)]
+    kept = [t for t in d if qualifies(t, args.score)]
     JSON_OUT.write_text(json.dumps(kept, ensure_ascii=False), encoding="utf-8")
     ksents = len({t.get("sentence") for t in kept})
     print(f"exported {len(kept):,} triples ({ksents:,} sentences) at score>={args.score} -> {JSON_OUT}")
 
     # 2) threshold stats (for the console summary below)
-    rows = [stats(d, DC, float(x)) for x in args.thresholds.split(",")]
+    rows = [stats(d, float(x)) for x in args.thresholds.split(",")]
 
     # 3) brain-cancer gene-gene graph (universe = qualifying at GRAPH_BASE; >=0.8/>=0.95/>=0.99 toggle in-browser)
     if not args.no_graph:
-        universe = kept if args.score <= GRAPH_BASE else [t for t in d if qualifies(t, GRAPH_BASE, DC)]
+        universe = kept if args.score <= GRAPH_BASE else [t for t in d if qualifies(t, GRAPH_BASE)]
         payload = graph_payload(universe, base)
         yrs = [s["yr"] for e in payload["edges"] for s in e["sents"] if s.get("yr")]
         miny, maxy = (min(yrs), max(yrs)) if yrs else (2000, 2026)
@@ -496,15 +500,16 @@ def main():
 
         # also drop a copy in the root dir, named after the PubMed query (whitespace -> underscore;
         # other filesystem-illegal characters likewise underscored so the name is always valid).
+        # "_G" suffix keeps this distinct from high_confidence.py's "<query>.html" copy.
         if pubmed_query:
             fname = re.sub(r'[\\/:*?"<>|\s]+', "_", pubmed_query.strip())
-            dest = ROOT / f"{fname}.html"
+            dest = ROOT / f"{fname}_G.html"
             shutil.copy2(GRAPH_OUT, dest)
             print(f"copied graph -> {dest}")
 
     for r in rows:
         print(f"  score>={r['T']}: {r['triples']:,} triples / {r['sentences']:,} sent; "
-              f"G_D_C {r['filt']:,} triples / {r['filt_sentences']:,} sent")
+              f"G {r['filt']:,} triples / {r['filt_sentences']:,} sent")
 
 
 if __name__ == "__main__":
