@@ -323,7 +323,7 @@ __LIBTAG__
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
- <div class="row">Filter to disease:<br><select id="disfilter"></select></div>
+ <div class="row">Filter to disease:<br><select id="disfilter"><option value="">(no disease)</option></select></div>
  <div class="row mut">Polarity:</div><div id="catfilters"></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row mut" id="stats"></div>
@@ -345,7 +345,10 @@ function activeCats(){return new Set(Array.from(document.querySelectorAll(".catf
 function activeYears(){const a=parseInt(document.getElementById('yrlo').value),b=parseInt(document.getElementById('yrhi').value);return [Math.min(a,b),Math.max(a,b)];}
 function passYear(yr,lo,hi){return (yr!=null&&yr>=lo&&yr<=hi)||(yr==null&&lo<=MINY&&hi>=MAXY);}
 function activeDisease(){return (document.getElementById('disfilter').value||'').trim();}
-function visSents(e,conf,lo,hi,dis){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&(!dis||(s.dis&&s.dis.indexOf(dis)>=0)));}
+function isSCC(d){d=(d||'').toLowerCase();return d.indexOf('squamous cell carcinoma')>=0||/^[a-z]*sccs?$/.test(d)||d==='lusc';}
+function disMatch(s,dis){if(!dis)return true;if(!s.dis)return false;return dis==='__ALL_SCC__'?s.dis.some(isSCC):s.dis.indexOf(dis)>=0;}
+function disLabel(dis){return dis==='__ALL_SCC__'?'all squamous cell carcinomas':dis;}
+function visSents(e,conf,lo,hi,dis){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&disMatch(s,dis));}
 function edgeHead(e,vis){const np=new Set(vis.map(s=>s.pmid)).size;return '<div class=eth><b>'+esc(labelById[e.from])+' &rarr; '+esc(labelById[e.to])+'</b> ('+vis.length+' sentences &middot; '+np+' PMIDs &middot; '+e.cat+')</div>';}
 function edgeTip(e,vis){const d=document.createElement('div');let h=edgeHead(e,vis);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+esc(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
@@ -386,7 +389,7 @@ function build(thr){
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:(dfltView?undefined:n.label),value:nsz(n.id),size:scaleNode(nsz(n.id)),title:n.label+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),font:{color:'#1a1a1a',size:(dfltView?13:fontSize(nsz(n.id)))}}));
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,value:o.w,width:Math.min(1+o.w*0.7,10),color:{color:o.e.color,opacity:0.6},title:edgeTip(o.e,o.vis)}));
  const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> genes, <b>'+eds.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(dis?' &middot; disease: <b>'+esc(dis)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'');
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> genes, <b>'+eds.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(dis?' &middot; disease: <b>'+esc(disLabel(dis))+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'');
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
@@ -422,7 +425,7 @@ yl.addEventListener('input',()=>{updYr();build(+thr.value);});
 yh.addEventListener('input',()=>{updYr();build(+thr.value);});
 const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
 const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
-const disCounts={};DATA.edges.forEach(e=>e.sents.forEach(s=>(s.dis||[]).forEach(d=>{disCounts[d]=(disCounts[d]||0)+1;})));const dsel=document.getElementById('disfilter');Object.keys(disCounts).filter(d=>disCounts[d]>1).sort((a,b)=>disCounts[b]-disCounts[a]).forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d+' ('+disCounts[d]+')';dsel.appendChild(o);});dsel.addEventListener('change',()=>build(+thr.value));
+const disCounts={},sccMembers={};let sccCount=0;DATA.edges.forEach(e=>e.sents.forEach(s=>{let sHasSCC=false;(s.dis||[]).forEach(d=>{disCounts[d]=(disCounts[d]||0)+1;if(isSCC(d)){sccMembers[d]=(sccMembers[d]||0)+1;sHasSCC=true;}});if(sHasSCC)sccCount++;}));const dsel=document.getElementById('disfilter');const sccLabels=Object.keys(sccMembers).sort((a,b)=>sccMembers[b]-sccMembers[a]);if(sccLabels.length){const o=document.createElement('option');o.value='__ALL_SCC__';o.textContent='all squamous cell carcinomas — '+sccLabels.join(', ')+' ('+sccCount+')';dsel.appendChild(o);}Object.keys(disCounts).filter(d=>disCounts[d]>1&&!isSCC(d)).sort((a,b)=>disCounts[b]-disCounts[a]).forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d+' ('+disCounts[d]+')';dsel.appendChild(o);});dsel.addEventListener('change',()=>build(+thr.value));
 document.getElementById('toggle').addEventListener('click',()=>document.getElementById('panel').classList.toggle('collapsed'));
 if(window.innerWidth<=700)document.getElementById('panel').classList.add('collapsed');
 window.addEventListener('resize',()=>{if(network)network.redraw();});
