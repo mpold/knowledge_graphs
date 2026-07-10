@@ -29,7 +29,7 @@ Inputs  : <data-root>/TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.jso
           <data-root>/TRIPLES/triples.json                                          (disease facets for the graph)
           <data-root>/{DISEASE,CHEMICAL,databases,sentences}/...                     (normalization + year + corpus size)
 Outputs : <data-root>/TRIPLES/high_confidence_G.json     qualifying triples at --score (default 0.8)
-          <data-root>/summaries/high_confidence_G.html    gene-gene graph with a >=0.8 / >=0.95 / >=0.99 toggle
+          <data-root>/summaries/high_confidence_G.html    gene-gene graph with a 0.5..0.99 in-browser score slider
           <root>/<pubmed_query>_G.html                    a copy of that graph, named after the PubMed query
                                                            (whitespace -> underscore); e.g. pancreatic_cancer_G.html
 
@@ -80,7 +80,7 @@ def set_data_root(data_root):
 
 set_data_root(DATA_ROOT)
 
-GRAPH_BASE = 0.8           # graph universe = qualifying triples at this score (lowest in-browser toggle)
+GRAPH_BASE = 0.5           # graph universe = qualifying triples at this score (lowest in-browser slider stop)
 VIS_URL = "https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"
 PCOLOR = {"positive": "#2e9e5b", "negated": "#e0533d", "speculated": "#d59a2e"}
 
@@ -281,9 +281,9 @@ GRAPH_TEMPLATE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <title>__TITLE__</title>
 __LIBTAG__
 <style>
- html,body{margin:0;height:100%;background:#eef1f5;color:#1c2330;font:14px/1.5 Segoe UI,Arial,sans-serif}
+ html,body{margin:0;height:100%;background:#ffffff;color:#1c2330;font:14px/1.5 Segoe UI,Arial,sans-serif}
  #net{position:absolute;top:0;left:0;right:0;bottom:0;background:#ffffff}
- #panel{position:absolute;top:12px;left:12px;z-index:5;background:rgba(255,255,255,.97);border:1px solid #cdd5e0;border-radius:10px;padding:14px 16px;max-width:320px;box-shadow:0 2px 12px rgba(0,0,0,.18);color:#1c2330}
+ #panel{position:absolute;top:12px;right:12px;z-index:5;background:rgba(255,255,255,.97);border:1px solid #cdd5e0;border-radius:10px;padding:14px 16px;max-width:320px;box-shadow:0 2px 12px rgba(0,0,0,.18);color:#1c2330}
  #panel h1{font-size:13px;margin:0 0 8px;color:#1c2330;font-variant:small-caps;letter-spacing:.4px}
  .row{margin:8px 0}
  input[type=range]{width:150px;max-width:100%;vertical-align:middle}
@@ -291,7 +291,7 @@ __LIBTAG__
  .legend b{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px;border:1px solid #999}
  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px}
  .mut{color:#5b6677;font-size:12px} b{color:#2b6cb0}
- #conf label{margin-right:12px;cursor:pointer}
+ #conf{width:190px;cursor:pointer}
  select,#search,#genefilter,#drugsearch{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
  #search,#genefilter,#drugsearch{width:200px}
  #catfilters label{display:block;cursor:pointer;white-space:nowrap;font-size:12px;margin:1px 0}
@@ -303,7 +303,7 @@ __LIBTAG__
  .pm{display:inline-block;background:#eef3fb;color:#2b6cb0;border-radius:4px;padding:0 5px;margin-right:5px;font-weight:600;font-size:11px;text-decoration:none}
  a.pm:hover{background:#d6e6fb;text-decoration:underline} .more{margin-top:5px;color:#888;font-style:italic}
  #info{max-height:240px;overflow:auto} #info .stip{border-top:1px solid #e3e3e3}
- #toggle{position:absolute;top:12px;right:12px;z-index:6;background:#fff;color:#1c2330;border:1px solid #cdd5e0;border-radius:8px;padding:5px 11px;font-size:18px;line-height:1;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+ #toggle{position:absolute;top:12px;left:12px;z-index:6;background:#fff;color:#1c2330;border:1px solid #cdd5e0;border-radius:8px;padding:5px 11px;font-size:18px;line-height:1;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
  #panel.collapsed{display:none}
  @media (max-width:700px){
   #panel{left:12px;right:12px;max-width:none;max-height:62vh;overflow:auto;top:56px}
@@ -317,10 +317,6 @@ __LIBTAG__
  <div class="row mut" id="pubinfo"></div>
  <div class="row legend"><b style="background:#cfe3ff;border-color:#2b6cb0"></b>gene <b style="background:#1b7837;border-color:#145a28"></b>approved anti-neoplastic <b style="background:#e08600;border-color:#9a6700"></b>approved (other) <b style="background:#c2185b;border-color:#7a0f3a"></b>ChEBI</div>
  <div class="row mut">Drug-target genes (corpus chemicals): deeper colour = more chemicals. <b style="color:#1b7837">Green</b> = DGIdb approved anti-neoplastic, <b style="color:#e08600">amber</b> = DGIdb approved (non-anti-neoplastic), <b style="color:#c2185b">pink</b> = ChEBI, absent in DGIdb.</div>
- <div class="row" id="conf"><b>Score:</b>
-   <label><input type="radio" name="conf" value="0.8"> &ge;0.8</label>
-   <label><input type="radio" name="conf" value="0.95"> &ge;0.95</label>
-   <label><input type="radio" name="conf" value="0.99" checked> &ge;0.99</label></div>
  <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
  <div class="row">Min cluster size: <select id="mincluster"><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
@@ -331,6 +327,7 @@ __LIBTAG__
  <div class="row">Filter to disease:<br><select id="disfilter"><option value="">(no disease)</option></select></div>
  <div class="row mut">Polarity:</div><div id="catfilters"></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
+ <div class="row">Relationship score: <b id="scval">&ge;0.99</b><br><input id="conf" type="range" min="0" max="13" step="1" value="13" aria-label="Minimum relationship score"></div>
  <div class="row mut" id="stats"></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
@@ -345,7 +342,8 @@ const net=document.getElementById('net'); let network=null;
 const labelById={};DATA.nodes.forEach(n=>{labelById[n.id]=n.label;});
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function pmA(p){return '<a class=pm target=_blank rel=noopener href="https://www.ncbi.nlm.nih.gov/pmc/articles/'+p+'/">'+p+'</a>';}
-function activeConf(){const r=document.querySelector('input[name=conf]:checked');return r?parseFloat(r.value):0.95;}
+const SCORE_STEPS=[0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,0.96,0.97,0.98,0.99]; // 0.05 up to 0.95, then 0.01
+function activeConf(){const s=document.getElementById('conf');let i=s?parseInt(s.value):SCORE_STEPS.length-1;if(isNaN(i))i=SCORE_STEPS.length-1;return SCORE_STEPS[Math.max(0,Math.min(SCORE_STEPS.length-1,i))];}
 function activeCats(){return new Set(Array.from(document.querySelectorAll(".catf:checked")).map(c=>c.value));}
 function activeYears(){const a=parseInt(document.getElementById('yrlo').value),b=parseInt(document.getElementById('yrhi').value);return [Math.min(a,b),Math.max(a,b)];}
 function passYear(yr,lo,hi){return (yr!=null&&yr>=lo&&yr<=hi)||(yr==null&&lo<=MINY&&hi>=MAXY);}
@@ -410,7 +408,7 @@ function buildCatFilters(){const counts={};DATA.edges.forEach(e=>counts[e.cat]=(
 thr.addEventListener('input',()=>{document.getElementById('thv').textContent=thr.value;build(+thr.value);});
 const mcl=document.getElementById('mincluster');
 mcl.addEventListener('change',()=>build(+thr.value));
-document.querySelectorAll('input[name=conf]').forEach(r=>r.addEventListener('change',()=>build(+thr.value)));
+const confEl=document.getElementById('conf');function updScore(){document.getElementById('scval').innerHTML='&ge;'+activeConf().toFixed(2);}updScore();confEl.addEventListener('input',()=>{updScore();build(+thr.value);});
 document.getElementById('genefilter').addEventListener('change',()=>build(+thr.value));
 document.getElementById('genefilter').addEventListener('keydown',ev=>{if(ev.key==='Enter')build(+thr.value);});
 document.getElementById('hops').addEventListener('change',()=>build(+thr.value));
@@ -430,7 +428,7 @@ yl.addEventListener('input',()=>{updYr();build(+thr.value);});
 yh.addEventListener('input',()=>{updYr();build(+thr.value);});
 const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
 const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
-const disCounts={},sccMembers={};let sccCount=0;DATA.edges.forEach(e=>e.sents.forEach(s=>{let sHasSCC=false;(s.dis||[]).forEach(d=>{disCounts[d]=(disCounts[d]||0)+1;if(isSCC(d)){sccMembers[d]=(sccMembers[d]||0)+1;sHasSCC=true;}});if(sHasSCC)sccCount++;}));const dsel=document.getElementById('disfilter');const sccLabels=Object.keys(sccMembers).sort((a,b)=>sccMembers[b]-sccMembers[a]);if(sccLabels.length){const o=document.createElement('option');o.value='__ALL_SCC__';o.textContent='all squamous cell carcinomas — '+sccLabels.join(', ')+' ('+sccCount+')';dsel.appendChild(o);}Object.keys(disCounts).filter(d=>disCounts[d]>1&&!isSCC(d)).sort((a,b)=>disCounts[b]-disCounts[a]).forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d+' ('+disCounts[d]+')';dsel.appendChild(o);});if(sccLabels.length)dsel.value='__ALL_SCC__';dsel.addEventListener('change',()=>build(+thr.value));
+const disCounts={},sccMembers={};let sccCount=0;DATA.edges.forEach(e=>e.sents.forEach(s=>{let sHasSCC=false;(s.dis||[]).forEach(d=>{disCounts[d]=(disCounts[d]||0)+1;if(isSCC(d)){sccMembers[d]=(sccMembers[d]||0)+1;sHasSCC=true;}});if(sHasSCC)sccCount++;}));const dsel=document.getElementById('disfilter');const sccLabels=Object.keys(sccMembers).sort((a,b)=>sccMembers[b]-sccMembers[a]);const disOpts=[];if(sccLabels.length)disOpts.push({value:'__ALL_SCC__',text:'all squamous cell carcinomas — '+sccLabels.join(', '),count:sccCount});Object.keys(disCounts).filter(d=>disCounts[d]>1&&!isSCC(d)).forEach(d=>disOpts.push({value:d,text:d,count:disCounts[d]}));disOpts.sort((a,b)=>b.count-a.count).forEach(x=>{const o=document.createElement('option');o.value=x.value;o.textContent=x.text+' ('+x.count+')';dsel.appendChild(o);});if(disOpts.length)dsel.value=disOpts[0].value;dsel.addEventListener('change',()=>build(+thr.value));
 document.getElementById('toggle').addEventListener('click',()=>document.getElementById('panel').classList.toggle('collapsed'));
 if(window.innerWidth<=700)document.getElementById('panel').classList.add('collapsed');
 window.addEventListener('resize',()=>{if(network)network.redraw();});
@@ -485,7 +483,7 @@ def main():
     # 2) threshold stats (for the console summary below)
     rows = [stats(d, float(x)) for x in args.thresholds.split(",")]
 
-    # 3) brain-cancer gene-gene graph (universe = qualifying at GRAPH_BASE; >=0.8/>=0.95/>=0.99 toggle in-browser)
+    # 3) brain-cancer gene-gene graph (universe = qualifying at GRAPH_BASE; in-browser score slider 0.5..0.99)
     if not args.no_graph:
         universe = kept if args.score <= GRAPH_BASE else [t for t in d if qualifies(t, GRAPH_BASE)]
         payload = graph_payload(universe, base)
