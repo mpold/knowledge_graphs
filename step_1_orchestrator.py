@@ -31,9 +31,19 @@ Options
     --list        print the pipeline order and exit
     --dry-run     print what would run without executing anything
 
-Only step 1 (``pubmed_query.py``) reads a query from STDIN; the remaining
-steps take no argument and discover their inputs from the previous stage's
-output directory. Any non-zero exit code aborts the pipeline.
+Step 1 (``pubmed_query.py``) reads a query from STDIN and step 2
+(``high_impact_xml.py``) reads a publication-impact percentile (a decimal
+between 0 and 1) from STDIN, entered on its own line right after the query; the
+remaining steps take no argument and discover their inputs from the previous
+stage's output directory. Any non-zero exit code aborts the pipeline.
+
+When step 2 is in the selected range this orchestrator prompts for the
+percentile on a dedicated line with::
+
+    Publication impact percentile (decimal between 0 and 1):
+
+and feeds the value to ``high_impact_xml.py`` on its STDIN. A blank line lets
+that script fall back to its ``PERCENTILE`` env var (default 0.90).
 """
 
 import os
@@ -91,8 +101,25 @@ def get_query(cli_query):
     return line.strip()
 
 
-def run_stage(step_no, script, query, dry_run):
-    """Run a single pipeline stage, returning its exit code."""
+def get_percentile():
+    """Read the publication-impact percentile for step 2 from STDIN.
+
+    Prompted on its own dedicated line *after* the query is entered; the value is
+    handed to ``high_impact_xml.py`` on its STDIN. A blank line (or EOF) is returned
+    as "" so that script falls back to its PERCENTILE env / 0.90 default.
+    """
+    sys.stdout.write("Publication impact percentile (decimal between 0 and 1): ")
+    sys.stdout.flush()
+    line = sys.stdin.readline()      # "" on EOF (closed/empty STDIN)
+    return line.strip()
+
+
+def run_stage(step_no, script, stdin_text, dry_run):
+    """Run a single pipeline stage, returning its exit code.
+
+    ``stdin_text`` is the text fed to the child's STDIN (with a trailing newline),
+    or ``None`` for stages that take no STDIN input.
+    """
     path = os.path.join(BASE_DIR, script)
     label = "[%d/%d] %s" % (step_no, len(PIPELINE), script)
 
@@ -101,21 +128,22 @@ def run_stage(step_no, script, query, dry_run):
         return 127
 
     cmd = [sys.executable, path]
-    feeds_stdin = script == "pubmed_query.py"
+    feeds_stdin = stdin_text is not None
 
     print("=" * 70)
-    print(label + (" <- query on STDIN" if feeds_stdin else ""))
+    print(label + (" <- STDIN" if feeds_stdin else ""))
     print("=" * 70, flush=True)
 
     if dry_run:
         print("  (dry-run) would run: %s" % " ".join(cmd))
         return 0
 
+    if script == "pubmed_query.py" and not (stdin_text or "").strip():
+        print("%s -- no query provided for step 1" % label, file=sys.stderr)
+        return 2
+
     if feeds_stdin:
-        if not query:
-            print("%s -- no query provided for step 1" % label, file=sys.stderr)
-            return 2
-        proc = subprocess.run(cmd, cwd=BASE_DIR, input=query + "\n", text=True)
+        proc = subprocess.run(cmd, cwd=BASE_DIR, input=stdin_text + "\n", text=True)
     else:
         proc = subprocess.run(cmd, cwd=BASE_DIR)
     return proc.returncode
@@ -157,12 +185,17 @@ def main(argv):
     if start > stop:
         sys.exit("error: --start (%d) is after --stop (%d)" % (start, stop))
 
-    # Only fetch a query if step 1 is actually in the selected range.
-    query = get_query(cli_query) if start == 1 else None
+    # Collect the STDIN each stage needs, in the order STDIN lines are consumed:
+    # the query (step 1) first, then the impact percentile (step 2) on its own line.
+    stdin_by_script = {}
+    if start == 1:
+        stdin_by_script["pubmed_query.py"] = get_query(cli_query)
+    if start <= 2 <= stop:
+        stdin_by_script["high_impact_xml.py"] = get_percentile()
 
     for step_no in range(start, stop + 1):
         script = PIPELINE[step_no - 1]
-        code = run_stage(step_no, script, query, dry_run)
+        code = run_stage(step_no, script, stdin_by_script.get(script), dry_run)
         if code != 0:
             print(
                 "\nPIPELINE ABORTED at step %d (%s): exit code %d"

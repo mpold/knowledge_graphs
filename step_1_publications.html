@@ -42,7 +42,7 @@ into a de-duplicated, full-text corpus ready for named-entity recognition.</p>
 
 <div class='stat-grid'>
   <div class='stat'><div class='v'>7</div><div class='k'>scripts in the pipeline</div></div>
-  <div class='stat'><div class='v'>1</div><div class='k'>external input (PubMed query)</div></div>
+  <div class='stat'><div class='v'>2</div><div class='k'>STDIN inputs (PubMed query, impact percentile)</div></div>
   <div class='stat'><div class='v'>7</div><div class='k'>HTML summaries produced</div></div>
   <div class='stat'><div class='v'>linear</div><div class='k'>each step feeds the next</div></div>
 </div>
@@ -63,7 +63,7 @@ needs the same network and Docker access.</div>
     <div class='io'>in: PubMed query (STDIN) &nbsp;&rarr;&nbsp; out: <code>pmids/pmid_pmc_ids.tsv</code></div></div>
   <div class='arrow'>&darr;&nbsp; pmid_pmc_ids.tsv</div>
   <div class='node'><span class='s'>2. high_impact_xml.py</span>
-    <div class='io'>in: <code>pmids/pmid_pmc_ids.tsv</code> &nbsp;&rarr;&nbsp; out: <code>high_impact_xmls/PMC*.xml</code></div></div>
+    <div class='io'>in: <code>pmids/pmid_pmc_ids.tsv</code> + impact percentile (STDIN) &nbsp;&rarr;&nbsp; out: <code>high_impact_xmls/PMC*.xml</code></div></div>
   <div class='arrow'>&darr;&nbsp; high_impact_xmls/</div>
   <div class='node'><span class='s'>3. xml_structure.py</span>
     <div class='io'>in: <code>high_impact_xmls/PMC*.xml</code> &nbsp;&rarr;&nbsp; out: <code>summaries/xml_structure.html</code> (flags the no-<code>&lt;body&gt;</code> subset)</div></div>
@@ -106,12 +106,16 @@ wiping its output dir; it is also skipped entirely when every article already ha
 <tr>
   <td class='num'>2</td>
   <td><code>high_impact_xml.py</code></td>
-  <td><code>pmids/pmid_pmc_ids.tsv</code>
-      <span class='dim'>(env: <code>IF_THRESHOLD</code>, <code>PERCENTILE</code>=0.90, <code>RETRY_FAILED</code>, <code>TIME_BUDGET</code>)</span></td>
+  <td><code>pmids/pmid_pmc_ids.tsv</code><br>impact percentile read from <strong>STDIN</strong>
+      (a decimal 0&ndash;1)
+      <span class='dim'>(env: <code>IF_THRESHOLD</code>, <code>PERCENTILE</code>=0.90 fallback when STDIN is blank,
+      <code>RETRY_FAILED</code>, <code>TIME_BUDGET</code>)</span></td>
   <td><code>high_impact_xmls/PMC*.xml</code><br><code>high_impact_xmls/_failed.tsv</code><br><code>summaries/high_impact_xml.html</code></td>
   <td>Selects the high-impact subset (articles with a PMC id whose article-weighted impact factor is
-      &ge; the 90th-percentile threshold), builds a <code>pmid2pmcid</code> dict, and fetches each
-      article's full-text JATS XML via NCBI eFetch (<code>db=pmc</code>). <strong>Empties
+      &ge; the chosen-percentile threshold), builds a <code>pmid2pmcid</code> dict, and fetches each
+      article's full-text JATS XML via NCBI eFetch (<code>db=pmc</code>). The percentile cut is
+      <strong>read from STDIN</strong> as a decimal 0&ndash;1 (a blank line falls back to
+      <code>PERCENTILE</code>=0.90; <code>IF_THRESHOLD</code> overrides it entirely). <strong>Empties
       <code>high_impact_xmls/</code> before writing.</strong></td>
 </tr>
 <tr>
@@ -177,29 +181,42 @@ wiping its output dir; it is also skipped entirely when every article already ha
 
 <h3>One command &mdash; the orchestrator</h3>
 <p><code>step_1_orchestrator.py</code> runs all seven scripts in the order above, in one process.
-It feeds the PubMed query to step 1 on <code>STDIN</code> and <strong>aborts the moment any stage
-exits non-zero</strong> (so a failed stage never silently poisons the next). Every path is
-script-relative, so it can be launched from any working directory.</p>
-<pre># query as an argument (fed to step 1's STDIN)
+It collects two inputs on <code>STDIN</code> up front &mdash; the <strong>PubMed query</strong> for
+step&nbsp;1, then the <strong>publication impact percentile</strong> for step&nbsp;2 &mdash; and feeds
+each to the stage that consumes it. It <strong>aborts the moment any stage exits non-zero</strong> (so
+a failed stage never silently poisons the next). Every path is script-relative, so it can be launched
+from any working directory.</p>
+<pre># query as an argument (fed to step 1's STDIN);
+# the impact percentile is still prompted on its own line
 python step_1_orchestrator.py "your pubmed query"
+Publication impact percentile (decimal between 0 and 1): 0.90
 
-# or pipe it in / type it at the prompt
-echo "your pubmed query" | python step_1_orchestrator.py
+# or pipe both lines in (query first, percentile second)
+printf 'your pubmed query\n0.90\n' | python step_1_orchestrator.py
+
+# or type each at its prompt
 python step_1_orchestrator.py</pre>
+<p class='dim'>The orchestrator prompts for the percentile on its own dedicated line <em>after</em> the
+query and hands it to <code>high_impact_xml.py</code> on that script's STDIN. Enter a decimal between
+0 and 1 (e.g. <code>0.90</code> = top 10% by article-weighted impact factor); a <strong>blank line</strong>
+(or EOF) falls back to <code>PERCENTILE</code>=0.90, and <code>IF_THRESHOLD</code> overrides the
+percentile entirely.</p>
 <p class='dim'>Options: <code>--start N</code> / <code>--stop N</code> / <code>--only N</code> run a
 sub-range of steps 1&ndash;7 (e.g. <code>--only 5</code> to re-run just GROBID, or
 <code>--start 4</code> to resume after a manual step 3); <code>--list</code> prints the pipeline order;
 <code>--dry-run</code> shows what would run without executing anything. The query is only read when
-step&nbsp;1 is in the selected range. Environment variables (<code>NCBI_API_KEY</code>,
-<code>TIME_BUDGET</code>, GROBID settings, &hellip;) are passed straight through to each child, so the
-orchestrator changes <em>nothing</em> about the requirements below &mdash; the network stages still
-reach out and step&nbsp;5 still needs Docker + GROBID.</p>
+step&nbsp;1 is in the selected range, and the percentile only when step&nbsp;2 is. Environment variables
+(<code>NCBI_API_KEY</code>, <code>TIME_BUDGET</code>, GROBID settings, &hellip;) are passed straight
+through to each child, so the orchestrator changes <em>nothing</em> about the requirements below &mdash;
+the network stages still reach out and step&nbsp;5 still needs Docker + GROBID.</p>
 
 <h3>Or run each stage by hand</h3>
 <ol class='steps'>
   <li><span class='step-no'>1</span><code>echo "your query" | python pubmed_query.py</code>
       <span class='dim'>&mdash; or run it and type the query at the prompt.</span></li>
-  <li><span class='step-no'>2</span><code>python high_impact_xml.py</code></li>
+  <li><span class='step-no'>2</span><code>echo 0.90 | python high_impact_xml.py</code>
+      <span class='dim'>&mdash; or run it and type the impact percentile (decimal 0&ndash;1) at the prompt;
+      blank falls back to <code>PERCENTILE</code>=0.90.</span></li>
   <li><span class='step-no'>3</span><code>python xml_structure.py</code></li>
   <li><span class='step-no'>4</span><code>python ncbi_pdf.py</code></li>
   <li><span class='step-no'>5</span><code>python grobid_xml.py</code> <span class='pill'>needs Docker + GROBID</span></li>
@@ -230,8 +247,9 @@ network stages with <code>TIME_BUDGET</code> if needed.</div>
   <li><strong>Hand-off to step 2.</strong> The assembled NER corpus in <code>gpu_bundle/experimental_ner/</code>
       is the input to the GPU bundle (<code>gpu_bundle/gpu.py</code>); see step&nbsp;2.</li>
   <li><strong>Orchestrator, not a stage.</strong> <code>step_1_orchestrator.py</code> only chains the seven
-      scripts in order (feeding the query to step&nbsp;1 on <code>STDIN</code>, aborting on the first
-      non-zero exit); it produces no corpus or summary of its own and can be run partially with
+      scripts in order (feeding the query to step&nbsp;1 and the impact percentile to step&nbsp;2 on
+      <code>STDIN</code>, aborting on the first non-zero exit); it produces no corpus or summary of its
+      own and can be run partially with
       <code>--start</code>/<code>--stop</code>/<code>--only</code>. It does not relax any per-stage
       requirement &mdash; the network stages and step&nbsp;5's GROBID container are still needed.</li>
 </ul>
