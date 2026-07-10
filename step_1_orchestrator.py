@@ -32,8 +32,8 @@ Options
     --dry-run     print what would run without executing anything
 
 Step 1 (``pubmed_query.py``) reads a query from STDIN and step 2
-(``high_impact_xml.py``) reads a publication-impact percentile (a decimal
-between 0 and 1) from STDIN, entered on its own line right after the query; the
+(``high_impact_xml.py``) takes a publication-impact percentile (a decimal
+between 0 and 1), prompted on its own line right after the query; the
 remaining steps take no argument and discover their inputs from the previous
 stage's output directory. Any non-zero exit code aborts the pipeline.
 
@@ -42,8 +42,10 @@ percentile on a dedicated line with::
 
     Publication impact percentile (decimal between 0 and 1):
 
-and feeds the value to ``high_impact_xml.py`` on its STDIN. A blank line lets
-that script fall back to its ``PERCENTILE`` env var (default 0.90).
+and passes the value to ``high_impact_xml.py`` via its ``PERCENTILE`` env var
+(which is the only place that script reads the percentile from). A blank line
+lets that script fall back to any inherited ``PERCENTILE`` env var, or its
+built-in default of 0.90.
 """
 
 import os
@@ -105,8 +107,9 @@ def get_percentile():
     """Read the publication-impact percentile for step 2 from STDIN.
 
     Prompted on its own dedicated line *after* the query is entered; the value is
-    handed to ``high_impact_xml.py`` on its STDIN. A blank line (or EOF) is returned
-    as "" so that script falls back to its PERCENTILE env / 0.90 default.
+    passed to ``high_impact_xml.py`` via its ``PERCENTILE`` env var (the only place
+    that script reads the percentile). A blank line (or EOF) is returned as "" so
+    that script falls back to its inherited PERCENTILE env / 0.90 default.
     """
     sys.stdout.write("Publication impact percentile (decimal between 0 and 1): ")
     sys.stdout.flush()
@@ -114,11 +117,13 @@ def get_percentile():
     return line.strip()
 
 
-def run_stage(step_no, script, stdin_text, dry_run):
+def run_stage(step_no, script, stdin_text, dry_run, env_extra=None):
     """Run a single pipeline stage, returning its exit code.
 
     ``stdin_text`` is the text fed to the child's STDIN (with a trailing newline),
-    or ``None`` for stages that take no STDIN input.
+    or ``None`` for stages that take no STDIN input. ``env_extra`` is an optional
+    dict of environment variables layered over the inherited environment for the
+    child (e.g. ``PERCENTILE`` for ``high_impact_xml.py``).
     """
     path = os.path.join(BASE_DIR, script)
     label = "[%d/%d] %s" % (step_no, len(PIPELINE), script)
@@ -129,9 +134,12 @@ def run_stage(step_no, script, stdin_text, dry_run):
 
     cmd = [sys.executable, path]
     feeds_stdin = stdin_text is not None
+    child_env = {**os.environ, **env_extra} if env_extra else None
 
     print("=" * 70)
-    print(label + (" <- STDIN" if feeds_stdin else ""))
+    tags = (" <- STDIN" if feeds_stdin else "") + (
+        " <- " + ", ".join(env_extra) if env_extra else "")
+    print(label + tags)
     print("=" * 70, flush=True)
 
     if dry_run:
@@ -143,9 +151,10 @@ def run_stage(step_no, script, stdin_text, dry_run):
         return 2
 
     if feeds_stdin:
-        proc = subprocess.run(cmd, cwd=BASE_DIR, input=stdin_text + "\n", text=True)
+        proc = subprocess.run(cmd, cwd=BASE_DIR, input=stdin_text + "\n",
+                              text=True, env=child_env)
     else:
-        proc = subprocess.run(cmd, cwd=BASE_DIR)
+        proc = subprocess.run(cmd, cwd=BASE_DIR, env=child_env)
     return proc.returncode
 
 
@@ -185,17 +194,22 @@ def main(argv):
     if start > stop:
         sys.exit("error: --start (%d) is after --stop (%d)" % (start, stop))
 
-    # Collect the STDIN each stage needs, in the order STDIN lines are consumed:
-    # the query (step 1) first, then the impact percentile (step 2) on its own line.
+    # Collect each stage's input in the order the prompts are consumed: the query
+    # (step 1, fed on STDIN) first, then the impact percentile (step 2, passed as
+    # the PERCENTILE env var since high_impact_xml.py reads it only from there).
     stdin_by_script = {}
+    env_by_script = {}
     if start == 1:
         stdin_by_script["pubmed_query.py"] = get_query(cli_query)
     if start <= 2 <= stop:
-        stdin_by_script["high_impact_xml.py"] = get_percentile()
+        pctl = get_percentile()
+        if pctl:
+            env_by_script["high_impact_xml.py"] = {"PERCENTILE": pctl}
 
     for step_no in range(start, stop + 1):
         script = PIPELINE[step_no - 1]
-        code = run_stage(step_no, script, stdin_by_script.get(script), dry_run)
+        code = run_stage(step_no, script, stdin_by_script.get(script), dry_run,
+                         env_by_script.get(script))
         if code != 0:
             print(
                 "\nPIPELINE ABORTED at step %d (%s): exit code %d"
