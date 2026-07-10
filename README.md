@@ -61,6 +61,12 @@ Seven scripts in the bundle root, run in order by `run_pipeline.py`:
 
 - Input: a PubMed query (read from **STDIN** by `pubmed_query.py`; `run_pipeline.py --query`
   pipes it in).
+- **Impact percentile prompt:** when `step_1_orchestrator.py` runs step 2 it prompts
+  `Publication impact percentile (decimal between 0 and 1):` on its own line right after
+  the query, and passes the entered value to `high_impact_xml.py` via the `PERCENTILE`
+  env var — the only channel that script reads it from. It selects articles whose journal
+  impact factor is at or above that percentile (e.g. `0.90` → top 10%). A blank line falls
+  back to any inherited `PERCENTILE` env var, or the built-in `0.90` default.
 - Reaches NCBI E-utilities, OpenAlex, CrossRef, PMC. Set `NCBI_API_KEY` to lift the
   3 req/s rate limit. Optional env vars: `TIME_BUDGET`, `IF_THRESHOLD`, `PERCENTILE`,
   `RETRY_FAILED`, `GROBID_*`, … (see `step_1_publications.html`).
