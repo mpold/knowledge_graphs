@@ -15,6 +15,7 @@ Run::  python pub_years.py
 import json
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -27,6 +28,11 @@ EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 BATCH = 200           # accessions per esummary request
 PAUSE = 0.34          # seconds between requests (NCBI: <= 3/sec without an API key)
 TOOL, EMAIL = "normalization", "your-email@example.com"
+
+# NCBI E-utilities intermittently returns transient 5xx/429 errors under load; retry those
+# (and network blips) with exponential backoff rather than aborting the whole run.
+RETRIES = 5
+RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
 def accession(pmid):
@@ -42,20 +48,44 @@ def year_from(rec):
     return None
 
 
-def fetch_years(accessions):
-    """Map bare PMC accession -> year (int or None) via NCBI esummary, in batches."""
-    out = {}
+def esummary(ids):
+    """POST one esummary request, retrying transient NCBI failures with backoff."""
+    data = urllib.parse.urlencode(
+        {"db": "pmc", "id": ids, "retmode": "json",
+         "tool": TOOL, "email": EMAIL}).encode()
+    for attempt in range(1, RETRIES + 1):
+        try:
+            with urllib.request.urlopen(EUTILS, data=data, timeout=60) as r:
+                return json.load(r).get("result", {})
+        except urllib.error.HTTPError as e:
+            if e.code not in RETRY_STATUS or attempt == RETRIES:
+                raise
+            reason = f"HTTP {e.code}"
+        except (urllib.error.URLError, TimeoutError) as e:
+            if attempt == RETRIES:
+                raise
+            reason = str(getattr(e, "reason", e))
+        backoff = PAUSE * 2 ** attempt        # 0.68, 1.36, 2.72, 5.44 s ...
+        print(f"  {reason}; retry {attempt}/{RETRIES - 1} in {backoff:.1f}s")
+        time.sleep(backoff)
+
+
+def fetch_years(accessions, cache=None):
+    """Map bare PMC accession -> year (int or None) via NCBI esummary, in batches.
+
+    When `cache` is given it is updated and flushed to disk after each batch so a later
+    failure never discards the accessions already fetched this run."""
+    out = cache if cache is not None else {}
     for i in range(0, len(accessions), BATCH):
         chunk = accessions[i:i + BATCH]
         ids = ",".join(a[3:] for a in chunk)        # strip "PMC" -> numeric uid
-        data = urllib.parse.urlencode(
-            {"db": "pmc", "id": ids, "retmode": "json",
-             "tool": TOOL, "email": EMAIL}).encode()
-        with urllib.request.urlopen(EUTILS, data=data, timeout=60) as r:
-            res = json.load(r).get("result", {})
+        res = esummary(ids)
         for uid in res.get("uids", []):
             out["PMC" + uid] = year_from(res[uid])
         print(f"  fetched {min(i + BATCH, len(accessions)):,}/{len(accessions):,}")
+        if cache is not None:
+            CACHE.parent.mkdir(parents=True, exist_ok=True)
+            CACHE.write_text(json.dumps(cache, indent=0) + "\n", encoding="utf-8")
         time.sleep(PAUSE)
     return out
 
@@ -70,9 +100,7 @@ def main():
           f"{len(missing):,} to fetch ({len(needed) - len(missing):,} cached)")
 
     if missing:
-        cache.update(fetch_years(missing))
-        CACHE.parent.mkdir(parents=True, exist_ok=True)
-        CACHE.write_text(json.dumps(cache, indent=0) + "\n", encoding="utf-8")
+        fetch_years(missing, cache)        # updates + flushes `cache` to disk per batch
         print(f"cache -> {CACHE} ({len(cache):,} accessions)")
 
     resolved = 0
