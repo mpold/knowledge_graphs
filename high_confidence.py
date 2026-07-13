@@ -19,6 +19,7 @@ Inputs  : <data-root>/TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.jso
           <data-root>/{DISEASE,CHEMICAL,databases,sentences}/...                     (normalization + year + corpus size)
 Outputs : <data-root>/TRIPLES/high_confidence_G_D_C.json   qualifying triples at --score (default 0.8)
           <data-root>/summaries/high_confidence.html        gene-gene graph with a >=0.8 / >=0.95 / >=0.99 toggle
+                                                            and a "match text in sentence" filter (substring, or /regex/)
           <root>/<pubmed_query>.html                        a copy of that graph, named after the PubMed query
                                                             (whitespace -> underscore); e.g. pancreatic_cancer.html
 
@@ -287,8 +288,9 @@ __LIBTAG__
  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px}
  .mut{color:#5b6677;font-size:12px} b{color:#2b6cb0}
  #conf label{margin-right:12px;cursor:pointer}
- select,#search,#genefilter,#drugsearch{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
- #search,#genefilter,#drugsearch{width:200px}
+ select,#search,#genefilter,#drugsearch,#textfilter{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
+ #search,#genefilter,#drugsearch,#textfilter{width:200px}
+ mark{background:#ffe680;color:inherit;border-radius:2px;padding:0 1px}
  #catfilters label{display:block;cursor:pointer;white-space:nowrap;font-size:12px;margin:1px 0}
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px;max-height:140px;overflow:auto}
  #zoom button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
@@ -323,6 +325,8 @@ __LIBTAG__
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
+ <div class="row">Match text in sentence:<br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
+  <div class="mut">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence.</div></div>
  <div class="row">Filter to disease:<br><select id="disfilter"><option value="">(no disease)</option></select></div>
  <div class="row mut">Polarity:</div><div id="catfilters"></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
@@ -348,16 +352,44 @@ function activeDisease(){return (document.getElementById('disfilter').value||'')
 function isSCC(d){d=(d||'').toLowerCase();return d.indexOf('squamous cell carcinoma')>=0||/^[a-z]*sccs?$/.test(d)||d==='lusc'||d==='ecss';}
 function disMatch(s,dis){if(!dis)return true;if(!s.dis)return false;return dis==='__ALL_SCC__'?s.dis.some(isSCC):s.dis.indexOf(dis)>=0;}
 function disLabel(dis){return dis==='__ALL_SCC__'?'all squamous cell carcinomas':dis;}
-function visSents(e,conf,lo,hi,dis){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&disMatch(s,dis));}
+// free-text sentence filter: "foo bar" = case-insensitive substring, "/foo(bar)?/" = regex
+// (an unparseable regex falls back to a literal substring match, so typing is never an error)
+function activeText(){return (document.getElementById('textfilter').value||'').trim();}
+function reEsc(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+function textMatcher(q){
+ if(!q)return null;
+ const m=/^\/(.*)\/([a-z]*)$/.exec(q);
+ let src=null,flags='i';
+ if(m){try{new RegExp(m[1],m[2]);src=m[1];flags=(m[2].indexOf('i')>=0?m[2]:m[2]+'i').replace(/g/g,'');}catch(err){src=null;}}
+ if(src===null)src=reEsc(q);
+ const re=new RegExp(src,flags);
+ return {test:t=>re.test(t||''),hlre:new RegExp(src,flags+'g')};
+}
+let TM=null;   // matcher in force for the current view; used to highlight hits in sentence text
+// mark hits on the RAW text (so a query containing <, > or & still highlights), escaping each piece as we go
+function hl(t){
+ t=t||'';
+ if(!TM)return esc(t);
+ const re=TM.hlre;re.lastIndex=0;
+ let out='',last=0,m;
+ while((m=re.exec(t))!==null){
+  if(!m[0].length){re.lastIndex++;continue;}   // zero-length match (e.g. /x*/): skip, never loop
+  out+=esc(t.slice(last,m.index))+'<mark>'+esc(m[0])+'</mark>';
+  last=m.index+m[0].length;
+ }
+ return out+esc(t.slice(last));
+}
+function visSents(e,conf,lo,hi,dis,tm){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&disMatch(s,dis)&&(!tm||tm.test(s.text)));}
 function edgeHead(e,vis){const np=new Set(vis.map(s=>s.pmid)).size;return '<div class=eth><b>'+esc(labelById[e.from])+' &rarr; '+esc(labelById[e.to])+'</b> ('+vis.length+' sentences &middot; '+np+' PMIDs &middot; '+e.cat+')</div>';}
-function edgeTip(e,vis){const d=document.createElement('div');let h=edgeHead(e,vis);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+esc(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
+function edgeTip(e,vis){const d=document.createElement('div');let h=edgeHead(e,vis);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
 function fontSize(c){return c<5?13:2*Math.max(13,Math.min(Math.round(c*2.2),48));}
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?3:v;}
 function build(thr){
  const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const dis=activeDisease(); const mc=activeMinCluster();
+ const txt=activeText(), tm=textMatcher(txt); TM=tm;
  let edges=[];
- DATA.edges.forEach(e=>{ if(!cats.has(e.cat))return; const vis=visSents(e,conf,ylo,yhi,dis); if(vis.length>=thr) edges.push({e:e,vis:vis,w:vis.length}); });
+ DATA.edges.forEach(e=>{ if(!cats.has(e.cat))return; const vis=visSents(e,conf,ylo,yhi,dis,tm); if(vis.length>=thr) edges.push({e:e,vis:vis,w:vis.length}); });
  const gf=(document.getElementById('genefilter').value||'').trim().toLowerCase();
  const chemSel=document.getElementById('chemfilter').value;
  let focusActive=false, focusLabel='';
@@ -385,11 +417,11 @@ function build(thr){
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  const nsz=id=>(nss[id]?nss[id].size:0);
  const allCatsSel=[...new Set(DATA.edges.map(e=>e.cat))].every(c=>cats.has(c));
- const dfltView=!focusActive&&!dis&&ylo<=MINY&&yhi>=MAXY&&thr<=1&&allCatsSel&&mc<=3; // pristine view at either confidence
+ const dfltView=!focusActive&&!dis&&!txt&&ylo<=MINY&&yhi>=MAXY&&thr<=1&&allCatsSel&&mc<=3; // pristine view at either confidence
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:(dfltView?undefined:n.label),value:nsz(n.id),size:scaleNode(nsz(n.id)),title:n.label+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),font:{color:'#1a1a1a',size:(dfltView?13:fontSize(nsz(n.id)))}}));
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,value:o.w,width:Math.min(1+o.w*0.7,10),color:{color:o.e.color,opacity:0.6},title:edgeTip(o.e,o.vis)}));
  const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> genes, <b>'+eds.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(dis?' &middot; disease: <b>'+esc(disLabel(dis))+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'');
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> genes, <b>'+eds.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(dis?' &middot; disease: <b>'+esc(disLabel(dis))+'</b>':'')+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'');
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
@@ -398,7 +430,7 @@ function build(thr){
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
-   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=edgeHead(o.e,o.vis)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+esc(s.text)+'</div>').join('');}});
+   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=edgeHead(o.e,o.vis)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
 }
 const thr=document.getElementById('thr');
 function buildCatFilters(){const counts={};DATA.edges.forEach(e=>counts[e.cat]=(counts[e.cat]||0)+1);const cats=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+c+'" checked> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+c+' ('+counts[c]+')</label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
@@ -409,6 +441,9 @@ document.querySelectorAll('input[name=conf]').forEach(r=>r.addEventListener('cha
 document.getElementById('genefilter').addEventListener('change',()=>build(+thr.value));
 document.getElementById('genefilter').addEventListener('keydown',ev=>{if(ev.key==='Enter')build(+thr.value);});
 document.getElementById('hops').addEventListener('change',()=>build(+thr.value));
+const txtEl=document.getElementById('textfilter');let txtTimer=null;   // debounce: each keystroke would otherwise rebuild the whole network
+txtEl.addEventListener('input',()=>{clearTimeout(txtTimer);txtTimer=setTimeout(()=>build(+thr.value),350);});
+txtEl.addEventListener('keydown',ev=>{if(ev.key==='Enter'){clearTimeout(txtTimer);build(+thr.value);}});
 const searchBox=document.getElementById('search');
 function doSearch(q){q=(q||'').trim();const info=document.getElementById('info');if(!q)return;const hit=DATA.nodes.find(n=>n.label.toLowerCase()===q.toLowerCase())||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(q.toLowerCase())===0);if(!hit){info.innerHTML='No gene matching "'+q+'"';return;}try{network.selectNodes([hit.id]);network.focus(hit.id,{scale:1.3,animation:true});info.innerHTML='<b>'+hit.label+'</b>';}catch(e){info.innerHTML='<b>'+hit.label+'</b> not in current view';}}
 searchBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')doSearch(searchBox.value);});

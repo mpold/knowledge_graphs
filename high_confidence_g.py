@@ -26,10 +26,10 @@ All inputs are read from the pipeline output tree (the writable run dir gpu.py p
 which defaults to ``kaggle_working/`` next to this script; override with ``--data-root``.
 
 Inputs  : <data-root>/TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json  (scored + normalized)
-          <data-root>/TRIPLES/triples.json                                          (disease facets for the graph)
-          <data-root>/{DISEASE,CHEMICAL,databases,sentences}/...                     (normalization + year + corpus size)
+          <data-root>/{CHEMICAL,databases,sentences}/...                             (drug targets + year + corpus size)
 Outputs : <data-root>/TRIPLES/high_confidence_G.json     qualifying triples at --score (default 0.8)
           <data-root>/summaries/high_confidence_G.html    gene-gene graph with a 0.5..0.99 in-browser score slider
+                                                          and a "match text in sentence" filter (substring, or /regex/)
           <root>/<pubmed_query>_G.html                    a copy of that graph, named after the PubMed query
                                                            (whitespace -> underscore); e.g. pancreatic_cancer_G.html
 
@@ -55,24 +55,21 @@ DATA_ROOT = ROOT / "kaggle_working"
 
 # module-level paths; (re)bound to DATA_ROOT by set_data_root() so --data-root can retarget them
 OUT_DIR = XML_DIR = SENT_DIR = None
-RE_FILE = BASE_FILE = PMC_YEARS = TARGET_FILE = DISEASE_FILE = DISEASE_AMBIG = None
+RE_FILE = PMC_YEARS = TARGET_FILE = None
 JSON_OUT = GRAPH_OUT = None
 
 
 def set_data_root(data_root):
     """Point every input/output path at `data_root` (the pipeline's output tree)."""
-    global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, BASE_FILE, PMC_YEARS
-    global TARGET_FILE, DISEASE_FILE, DISEASE_AMBIG, JSON_OUT, GRAPH_OUT
+    global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, PMC_YEARS
+    global TARGET_FILE, JSON_OUT, GRAPH_OUT
     DATA_ROOT = Path(data_root).resolve()
     OUT_DIR = DATA_ROOT / "TRIPLES"
     XML_DIR = DATA_ROOT / "experimental_ner"   # input XML corpus (may be empty in the bundle)
     SENT_DIR = DATA_ROOT / "sentences"         # one JSON per source document (corpus-size fallback)
     RE_FILE = OUT_DIR / "triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"
-    BASE_FILE = OUT_DIR / "triples.json"
     PMC_YEARS = DATA_ROOT / "databases" / "pmc_years.json"
     TARGET_FILE = DATA_ROOT / "CHEMICAL" / "chemical_to_target.json"   # gene -> corpus chemicals (in_corpus_GENETIC flag)
-    DISEASE_FILE = DATA_ROOT / "DISEASE" / "disease.json"            # surface -> MONDO label (single)
-    DISEASE_AMBIG = DATA_ROOT / "DISEASE" / "disease_ambiguous.json"  # surface -> MONDO labels (list)
     # "_G" (gene-only) output names, distinct from high_confidence.py's "_G_D_C"/"high_confidence.html".
     JSON_OUT = OUT_DIR / "high_confidence_G.json"
     GRAPH_OUT = DATA_ROOT / "summaries" / "high_confidence_G.html"
@@ -83,42 +80,6 @@ set_data_root(DATA_ROOT)
 GRAPH_BASE = 0.5           # graph universe = qualifying triples at this score (lowest in-browser slider stop)
 VIS_URL = "https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"
 PCOLOR = {"positive": "#2e9e5b", "negated": "#e0533d", "speculated": "#d59a2e"}
-
-# Disease-label synonyms: map surface/label variants (matched case-insensitively) onto a
-# single canonical disease name so the same disease is not split across several filter
-# entries. Add new aliases here. Keys must be lowercase.
-DISEASE_ALIASES = {
-    "luad": "lung adenocarcinoma",
-    "lung adenocarcinoma": "lung adenocarcinoma",
-    "primary lung adenocarcinoma": "lung adenocarcinoma",
-    "or": "osimertinib resistance",   # NER false-positive DISEASE: "OR" = osimertinib resistance
-}
-
-# Non-disease surface tokens the NER mislabels as DISEASE entities: dropped from every
-# disease-filtered view. Entries are lowercase; matched case-insensitively.
-DISEASE_IGNORE = {
-    "os",   # "overall survival" (a survival metric), not a disease
-}
-
-# Ambiguous surface abbreviations resolved to their single intended disease in THIS corpus,
-# overriding the multi-label mapping in disease_ambiguous.json. Keys lowercase; the value
-# replaces the ambiguous MONDO label list for that surface token.
-DISEASE_SURFACE = {
-    "gc": ["gastric cancer"],   # "GC" is gastric cancer here, not gonorrhea
-}
-
-
-def canon_disease(label):
-    """Canonicalize a disease label via DISEASE_ALIASES (case-insensitive), e.g. both
-    'LUAD' and 'lung adenocarcinoma' -> 'lung adenocarcinoma'. Labels in DISEASE_IGNORE
-    return None (caller drops them). Unknown labels pass through unchanged (only surrounding
-    whitespace stripped)."""
-    if not isinstance(label, str):
-        return label
-    key = label.strip().lower()
-    if key in DISEASE_IGNORE:
-        return None
-    return DISEASE_ALIASES.get(key, label.strip())
 
 
 # ----- qualifying filter -----------------------------------------------------
@@ -161,7 +122,7 @@ def single(v):
     return v.strip() if isinstance(v, str) and v.strip() else None
 
 
-def graph_payload(triples, base):
+def graph_payload(triples):
     """Gene-gene (single HGNC symbol, non-self) graph; per-sentence scores so the
     in-browser confidence toggle can re-filter to >=0.99."""
     try:
@@ -190,34 +151,6 @@ def graph_payload(triples, base):
                 tcat[g] = "amber"
             else:
                 tcat[g] = "other"
-    dmap = {}
-    for df in (DISEASE_FILE, DISEASE_AMBIG):
-        try:
-            for k, v in json.loads(df.read_text(encoding="utf-8")).items():
-                ml = v.get("mondo_label")
-                dmap[k] = ml if isinstance(ml, list) else [ml]
-        except Exception:
-            pass
-    sent_dis = collections.defaultdict(set)   # sentence -> disease labels (MONDO where known, else the surface text)
-    for bt in base:
-        for r in ("subject", "object"):
-            be = bt[r]
-            if be.get("type") != "DISEASE":
-                continue
-            txt = (be.get("text") or "").strip()
-            if txt.lower() in DISEASE_SURFACE:
-                labels = list(DISEASE_SURFACE[txt.lower()])   # forced disambiguation for ambiguous surface tokens
-            else:
-                labels = [ml for ml in dmap.get(txt, []) if ml]   # MONDO label(s) for this surface, nulls dropped
-            if not labels and txt:
-                # no MONDO match (mondo_label null / surface unmatched, e.g. "PDAC"): fall back to the
-                # DISEASE entity text itself so the sentence still carries a disease facet instead of
-                # being dropped from every disease-filtered view.
-                labels = [txt]
-            for ml in labels:
-                cl = canon_disease(ml)
-                if cl:   # None -> suppressed (DISEASE_IGNORE); skip
-                    sent_dis[bt.get("sentence")].add(cl)
     dir_sent = collections.defaultdict(set)           # (s,o,pol) -> sentences (for direction)
     pair_sent = collections.defaultdict(dict)          # pair -> {sentence: [maxscore, pmid]}
     node_sent = collections.defaultdict(dict)          # node -> {sentence: maxscore}
@@ -241,7 +174,7 @@ def graph_payload(triples, base):
         cands = [(len(ss), f, to, pol) for (f, to, pol), ss in dir_sent.items() if frozenset((f, to)) == pr]
         cands.sort(reverse=True)
         _, ff, ft, fpol = cands[0]
-        sents = [{"pmid": pm, "text": sent[:300], "sc": round(sc, 4), "yr": years.get(pm), "dis": sorted(sent_dis.get(sent, []))} for sent, (sc, pm) in sd.items()]
+        sents = [{"pmid": pm, "text": sent[:300], "sc": round(sc, 4), "yr": years.get(pm)} for sent, (sc, pm) in sd.items()]
         sents.sort(key=lambda z: (-z["sc"], z["pmid"]))
         edges.append({"from": ff, "to": ft, "cat": fpol, "color": PCOLOR.get(fpol, "#888"), "sents": sents})
     nodes = [{"id": nd, "label": nd, "bg": "#cfe3ff", "border": "#2b6cb0",
@@ -292,8 +225,9 @@ __LIBTAG__
  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px}
  .mut{color:#5b6677;font-size:12px} b{color:#2b6cb0}
  #conf{width:190px;cursor:pointer}
- select,#search,#genefilter,#drugsearch{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
- #search,#genefilter,#drugsearch{width:200px}
+ select,#search,#genefilter,#drugsearch,#textfilter{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
+ #search,#genefilter,#drugsearch,#textfilter{width:200px}
+ mark{background:#ffe680;color:inherit;border-radius:2px;padding:0 1px}
  #catfilters label{display:block;cursor:pointer;white-space:nowrap;font-size:12px;margin:1px 0}
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px;max-height:140px;overflow:auto}
  #zoom button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
@@ -324,7 +258,8 @@ __LIBTAG__
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
- <div class="row">Filter to disease:<br><select id="disfilter"><option value="">(no disease)</option></select></div>
+ <div class="row">Match text in sentence:<br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
+  <div class="mut">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence.</div></div>
  <div class="row mut">Polarity:</div><div id="catfilters"></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row">Relationship score: <b id="scval">&ge;0.99</b><br><input id="conf" type="range" min="0" max="13" step="1" value="13" aria-label="Minimum relationship score"></div>
@@ -347,20 +282,44 @@ function activeConf(){const s=document.getElementById('conf');let i=s?parseInt(s
 function activeCats(){return new Set(Array.from(document.querySelectorAll(".catf:checked")).map(c=>c.value));}
 function activeYears(){const a=parseInt(document.getElementById('yrlo').value),b=parseInt(document.getElementById('yrhi').value);return [Math.min(a,b),Math.max(a,b)];}
 function passYear(yr,lo,hi){return (yr!=null&&yr>=lo&&yr<=hi)||(yr==null&&lo<=MINY&&hi>=MAXY);}
-function activeDisease(){return (document.getElementById('disfilter').value||'').trim();}
-function isSCC(d){d=(d||'').toLowerCase();return d.indexOf('squamous cell carcinoma')>=0||/^[a-z]*sccs?$/.test(d)||d==='lusc'||d==='ecss';}
-function disMatch(s,dis){if(!dis)return true;if(!s.dis)return false;return dis==='__ALL_SCC__'?s.dis.some(isSCC):s.dis.indexOf(dis)>=0;}
-function disLabel(dis){return dis==='__ALL_SCC__'?'all squamous cell carcinomas':dis;}
-function visSents(e,conf,lo,hi,dis){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&disMatch(s,dis));}
+// free-text sentence filter: "foo bar" = case-insensitive substring, "/foo(bar)?/" = regex
+// (an unparseable regex falls back to a literal substring match, so typing is never an error)
+function activeText(){return (document.getElementById('textfilter').value||'').trim();}
+function reEsc(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');}
+function textMatcher(q){
+ if(!q)return null;
+ const m=/^\/(.*)\/([a-z]*)$/.exec(q);
+ let src=null,flags='i';
+ if(m){try{new RegExp(m[1],m[2]);src=m[1];flags=(m[2].indexOf('i')>=0?m[2]:m[2]+'i').replace(/g/g,'');}catch(err){src=null;}}
+ if(src===null)src=reEsc(q);
+ const re=new RegExp(src,flags);
+ return {test:t=>re.test(t||''),hlre:new RegExp(src,flags+'g')};
+}
+let TM=null;   // matcher in force for the current view; used to highlight hits in sentence text
+// mark hits on the RAW text (so a query containing <, > or & still highlights), escaping each piece as we go
+function hl(t){
+ t=t||'';
+ if(!TM)return esc(t);
+ const re=TM.hlre;re.lastIndex=0;
+ let out='',last=0,m;
+ while((m=re.exec(t))!==null){
+  if(!m[0].length){re.lastIndex++;continue;}   // zero-length match (e.g. /x*/): skip, never loop
+  out+=esc(t.slice(last,m.index))+'<mark>'+esc(m[0])+'</mark>';
+  last=m.index+m[0].length;
+ }
+ return out+esc(t.slice(last));
+}
+function visSents(e,conf,lo,hi,tm){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&(!tm||tm.test(s.text)));}
 function edgeHead(e,vis){const np=new Set(vis.map(s=>s.pmid)).size;return '<div class=eth><b>'+esc(labelById[e.from])+' &rarr; '+esc(labelById[e.to])+'</b> ('+vis.length+' sentences &middot; '+np+' PMIDs &middot; '+e.cat+')</div>';}
-function edgeTip(e,vis){const d=document.createElement('div');let h=edgeHead(e,vis);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+esc(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
+function edgeTip(e,vis){const d=document.createElement('div');let h=edgeHead(e,vis);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
 function fontSize(c){return c<5?13:2*Math.max(13,Math.min(Math.round(c*2.2),48));}
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?3:v;}
 function build(thr){
- const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const dis=activeDisease(); const mc=activeMinCluster();
+ const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const mc=activeMinCluster();
+ const txt=activeText(), tm=textMatcher(txt); TM=tm;
  let edges=[];
- DATA.edges.forEach(e=>{ if(!cats.has(e.cat))return; const vis=visSents(e,conf,ylo,yhi,dis); if(vis.length>=thr) edges.push({e:e,vis:vis,w:vis.length}); });
+ DATA.edges.forEach(e=>{ if(!cats.has(e.cat))return; const vis=visSents(e,conf,ylo,yhi,tm); if(vis.length>=thr) edges.push({e:e,vis:vis,w:vis.length}); });
  const gf=(document.getElementById('genefilter').value||'').trim().toLowerCase();
  const chemSel=document.getElementById('chemfilter').value;
  let focusActive=false, focusLabel='';
@@ -388,11 +347,11 @@ function build(thr){
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  const nsz=id=>(nss[id]?nss[id].size:0);
  const allCatsSel=[...new Set(DATA.edges.map(e=>e.cat))].every(c=>cats.has(c));
- const dfltView=!focusActive&&!dis&&ylo<=MINY&&yhi>=MAXY&&thr<=1&&allCatsSel&&mc<=3; // pristine view at either confidence
+ const dfltView=!focusActive&&!txt&&ylo<=MINY&&yhi>=MAXY&&thr<=1&&allCatsSel&&mc<=3; // pristine view at either confidence
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:(dfltView?undefined:n.label),value:nsz(n.id),size:scaleNode(nsz(n.id)),title:n.label+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),font:{color:'#1a1a1a',size:(dfltView?13:fontSize(nsz(n.id)))}}));
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,value:o.w,width:Math.min(1+o.w*0.7,10),color:{color:o.e.color,opacity:0.6},title:edgeTip(o.e,o.vis)}));
  const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> genes, <b>'+eds.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(dis?' &middot; disease: <b>'+esc(disLabel(dis))+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'');
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> genes, <b>'+eds.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'');
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
@@ -401,7 +360,7 @@ function build(thr){
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
-   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=edgeHead(o.e,o.vis)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+esc(s.text)+'</div>').join('');}});
+   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=edgeHead(o.e,o.vis)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
 }
 const thr=document.getElementById('thr');
 function buildCatFilters(){const counts={};DATA.edges.forEach(e=>counts[e.cat]=(counts[e.cat]||0)+1);const cats=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+c+'" checked> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+c+' ('+counts[c]+')</label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
@@ -412,6 +371,9 @@ const confEl=document.getElementById('conf');function updScore(){document.getEle
 document.getElementById('genefilter').addEventListener('change',()=>build(+thr.value));
 document.getElementById('genefilter').addEventListener('keydown',ev=>{if(ev.key==='Enter')build(+thr.value);});
 document.getElementById('hops').addEventListener('change',()=>build(+thr.value));
+const txtEl=document.getElementById('textfilter');let txtTimer=null;   // debounce: each keystroke would otherwise rebuild the whole network
+txtEl.addEventListener('input',()=>{clearTimeout(txtTimer);txtTimer=setTimeout(()=>build(+thr.value),350);});
+txtEl.addEventListener('keydown',ev=>{if(ev.key==='Enter'){clearTimeout(txtTimer);build(+thr.value);}});
 const searchBox=document.getElementById('search');
 function doSearch(q){q=(q||'').trim();const info=document.getElementById('info');if(!q)return;const hit=DATA.nodes.find(n=>n.label.toLowerCase()===q.toLowerCase())||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(q.toLowerCase())===0);if(!hit){info.innerHTML='No gene matching "'+q+'"';return;}try{network.selectNodes([hit.id]);network.focus(hit.id,{scale:1.3,animation:true});info.innerHTML='<b>'+hit.label+'</b>';}catch(e){info.innerHTML='<b>'+hit.label+'</b> not in current view';}}
 searchBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')doSearch(searchBox.value);});
@@ -428,7 +390,6 @@ yl.addEventListener('input',()=>{updYr();build(+thr.value);});
 yh.addEventListener('input',()=>{updYr();build(+thr.value);});
 const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
 const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
-const disCounts={},sccMembers={};let sccCount=0;DATA.edges.forEach(e=>e.sents.forEach(s=>{let sHasSCC=false;(s.dis||[]).forEach(d=>{disCounts[d]=(disCounts[d]||0)+1;if(isSCC(d)){sccMembers[d]=(sccMembers[d]||0)+1;sHasSCC=true;}});if(sHasSCC)sccCount++;}));const dsel=document.getElementById('disfilter');const sccLabels=Object.keys(sccMembers).sort((a,b)=>sccMembers[b]-sccMembers[a]);const disOpts=[];if(sccLabels.length)disOpts.push({value:'__ALL_SCC__',text:'all squamous cell carcinomas — '+sccLabels.join(', '),count:sccCount});Object.keys(disCounts).filter(d=>disCounts[d]>1&&!isSCC(d)).forEach(d=>disOpts.push({value:d,text:d,count:disCounts[d]}));disOpts.sort((a,b)=>b.count-a.count).forEach(x=>{const o=document.createElement('option');o.value=x.value;o.textContent=x.text+' ('+x.count+')';dsel.appendChild(o);});if(disOpts.length)dsel.value=disOpts[0].value;dsel.addEventListener('change',()=>build(+thr.value));
 document.getElementById('toggle').addEventListener('click',()=>document.getElementById('panel').classList.toggle('collapsed'));
 if(window.innerWidth<=700)document.getElementById('panel').classList.add('collapsed');
 window.addEventListener('resize',()=>{if(network)network.redraw();});
@@ -471,7 +432,6 @@ def main():
                          f"(run the gpu_bundle pipeline first, or pass --data-root).")
 
     d = json.loads(RE_FILE.read_text(encoding="utf-8"))
-    base = json.loads(BASE_FILE.read_text(encoding="utf-8"))   # DISEASE facets for the graph's disease filter
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1) JSON export at --score
@@ -486,7 +446,7 @@ def main():
     # 3) brain-cancer gene-gene graph (universe = qualifying at GRAPH_BASE; in-browser score slider 0.5..0.99)
     if not args.no_graph:
         universe = kept if args.score <= GRAPH_BASE else [t for t in d if qualifies(t, GRAPH_BASE)]
-        payload = graph_payload(universe, base)
+        payload = graph_payload(universe)
         yrs = [s["yr"] for e in payload["edges"] for s in e["sents"] if s.get("yr")]
         miny, maxy = (min(yrs), max(yrs)) if yrs else (2000, 2026)
         lib = get_vis_lib()
