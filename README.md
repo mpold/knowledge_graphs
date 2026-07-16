@@ -82,6 +82,11 @@ Seven scripts in the bundle root, run in order by `run_pipeline.py`:
 - **`grobid_xml.py` needs Docker + a GROBID server on `:8070`** (it can auto-launch Docker
   Desktop + the container). It is skippable when every article already has JATS full text.
 - Output: the NER corpus `gpu_bundle/experimental_ner/PMC*.xml` — the input to stage 2.
+- **Optional — `subtract.py`** (not one of the seven, not run by the orchestrator): reads two
+  directory paths from **STDIN** and moves entries of `directory_1` whose names also appear in
+  `directory_2` into `gpu_bundle/removed/` (relocated, not deleted; name collisions get a
+  `_1`/`_2` suffix), writing `summaries/subtract_optional.html`. Handy for de-duplicating this
+  project's `gpu_bundle/experimental_ner/` against another corpus. See `step_1_publications.html`.
 
 ### Stage 2 — triples / GPU bundle (Kaggle or local GPU)
 `gpu_bundle/gpu.py` orchestrates a 16-step chain (RE-model training → BioBERT NER → GENETIC/
@@ -142,6 +147,7 @@ cancer_knowledge_graph/
 ├── run_pipeline.py            # end-to-end orchestrator (this bundle's entry point)
 ├── requirements.txt           # local deps (stages 1 & 3): requests
 ├── pubmed_query.py … pre_ner_xml_structure.py   # stage 1: the 7 publications scripts
+├── subtract.py                # stage 1: optional dir-subtract utility (-> gpu_bundle/removed)
 ├── high_confidence.py         # stage 3: the graph
 ├── gpu_bundle/                # stage 2: the GPU pipeline
 │   ├── gpu.py                 #   orchestrator (16 steps)
