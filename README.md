@@ -60,7 +60,16 @@ Seven scripts in the bundle root, run in order by `run_pipeline.py`:
 `grobid_xml.py` → `named_entity_xml.py` → `pre_ner_xml_structure.py`.
 
 - Input: a PubMed query (read from **STDIN** by `pubmed_query.py`; `run_pipeline.py --query`
-  pipes it in).
+  pipes it in). The query used for this project is:
+  ```
+  "non-small cell lung cancer"[Title/Abstract] NOT "small cell lung carcinoma"[Title/Abstract]
+  ```
+  > **Watch the hyphen.** Do *not* write the exclusion as `NOT "small cell lung cancer"`:
+  > PubMed splits `non-small` into `non` + `small`, so the phrase `"small cell lung cancer"`
+  > is a token-substring of every `"non-small cell lung cancer"` record and the `NOT`
+  > excludes all of them → **0 hits**. Excluding `"small cell lung carcinoma"` (carcinoma,
+  > not cancer) avoids the trap and returns the intended set. A query that matches 0 records
+  > now aborts step 1 fast with an explanation instead of hanging.
 - **Impact percentile prompt:** when `step_1_orchestrator.py` runs step 2 it prompts
   `Publication impact percentile (decimal between 0 and 1):` on its own line right after
   the query, and passes the entered value to `high_impact_xml.py` via the `PERCENTILE`
