@@ -132,7 +132,14 @@ def run_stage(step_no, script, stdin_text, dry_run, env_extra=None):
         print("%s -- MISSING (%s)" % (label, path), file=sys.stderr)
         return 127
 
-    cmd = [sys.executable, path]
+    # ``-u`` forces the child's stdout/stderr to be unbuffered. Without it, when
+    # this orchestrator's stdout is a pipe rather than a TTY (e.g. PyCharm's run
+    # console), Python block-buffers the child's output: its prompt line
+    # ("enter command line argument: ") shows, then every progress line is held
+    # in the 4 KB buffer until it fills or the process exits, making the stage
+    # look stalled for minutes even though it is running. Unbuffered output
+    # streams live so the console tracks the child's real progress.
+    cmd = [sys.executable, "-u", path]
     feeds_stdin = stdin_text is not None
     child_env = {**os.environ, **env_extra} if env_extra else None
 
