@@ -104,17 +104,34 @@ def get_query(cli_query):
 
 
 def get_percentile():
-    """Read the publication-impact percentile for step 2 from STDIN.
+    """Read + validate the publication-impact percentile for step 2 from STDIN.
 
     Prompted on its own dedicated line *after* the query is entered; the value is
     passed to ``high_impact_xml.py`` via its ``PERCENTILE`` env var (the only place
     that script reads the percentile). A blank line (or EOF) is returned as "" so
     that script falls back to its inherited PERCENTILE env / 0.90 default.
+
+    A non-blank entry must be a decimal in [0, 1]. The two common mis-entries --
+    a whole-number percentile ("90" instead of "0.90") or a stray character --
+    otherwise sail through as a valid ``PERCENTILE`` env value and make
+    ``high_impact_xml.py`` silently select an unexpected subset, which reads as
+    "my percentile was ignored". We reject them *here*, before the slow step 1
+    runs, with a message that names the fix.
     """
     sys.stdout.write("Publication impact percentile (decimal between 0 and 1): ")
     sys.stdout.flush()
     line = sys.stdin.readline()      # "" on EOF (closed/empty STDIN)
-    return line.strip()
+    pctl = line.strip()
+    if not pctl:
+        return ""
+    try:
+        value = float(pctl)
+    except ValueError:
+        sys.exit("error: percentile must be a decimal between 0 and 1, got %r" % pctl)
+    if not 0.0 <= value <= 1.0:
+        sys.exit("error: percentile must be a fraction between 0 and 1 "
+                 "(e.g. 0.90 for the 90th percentile), got %r" % pctl)
+    return pctl
 
 
 def run_stage(step_no, script, stdin_text, dry_run, env_extra=None):
@@ -212,6 +229,14 @@ def main(argv):
         pctl = get_percentile()
         if pctl:
             env_by_script["high_impact_xml.py"] = {"PERCENTILE": pctl}
+            # Confirm the value that will reach step 2 -- high_impact_xml.py reads
+            # it from PERCENTILE only, so echoing it here makes "did my percentile
+            # get through?" answerable without reading the child's [select] line.
+            print("[orchestrator] step 2 (high_impact_xml.py) will run with "
+                  "PERCENTILE=%s" % pctl, flush=True)
+        else:
+            print("[orchestrator] no percentile entered; step 2 (high_impact_xml.py) "
+                  "will use its PERCENTILE env / 0.90 default", flush=True)
 
     for step_no in range(start, stop + 1):
         script = PIPELINE[step_no - 1]

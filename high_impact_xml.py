@@ -574,8 +574,9 @@ def main():
     if not os.path.exists(IN_TSV):
         raise SystemExit("error: input not found: %s" % IN_TSV)
     threshold, pmid2pmcid, meta = load_selection()
-    print("[select] 90th-pctile IF threshold=%.4f; pmid2pmcid has %d entries"
-          % (threshold, len(pmid2pmcid)), file=sys.stderr)
+    sel_desc = "IF_THRESHOLD override" if IF_OVERRIDE else "PERCENTILE=%g" % PCTL
+    print("[select] IF threshold=%.4f (%s); pmid2pmcid has %d entries"
+          % (threshold, sel_desc, len(pmid2pmcid)), file=sys.stderr)
     complete = False
     try:
         complete = export(pmid2pmcid)
