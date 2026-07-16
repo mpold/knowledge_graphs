@@ -319,7 +319,8 @@ __LIBTAG__
    <label><input type="radio" name="conf" value="0.95"> &ge;0.95</label>
    <label><input type="radio" name="conf" value="0.99" checked> &ge;0.99</label></div>
  <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
- <div class="row">Min cluster size: <select id="mincluster"><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
+ <div class="row">Min cluster size: <select id="mincluster"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
+ <div class="row">Min connections: <select id="mindeg"><option selected>1</option><option>2</option><option>3</option><option>4</option></select><div class="mut">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe.</div></div>
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
  <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
@@ -341,6 +342,13 @@ const MINY=__MINY__, MAXY=__MAXY__;
 const MAXTGT=Math.max(1,...DATA.nodes.map(n=>n.target||0));
 function nodeColor(n){if(!n.target)return {background:'#cfe3ff',border:'#2b6cb0'};const t=n.target/MAXTGT,L=(a,b)=>Math.round(a+(b-a)*t);if(n.tcat==='green')return {background:'rgb('+L(200,27)+','+L(230,120)+','+L(201,55)+')',border:'#145a28'};if(n.tcat==='amber')return {background:'rgb('+L(255,224)+','+L(231,134)+','+L(179,0)+')',border:'#9a6700'};return {background:'rgb('+L(255,194)+','+L(217,24)+','+L(232,91)+')',border:'#7a0f3a'};}
 const net=document.getElementById('net'); let network=null;
+// Labels fade in as you zoom: small graphs always show every symbol; dense views reveal labels as the
+// zoom scale climbs from LABEL_LO to LABEL_HI. Opacity is driven through the shared node-font colour, so
+// one setOptions call recolours all labels (per-node font carries only size, inheriting this colour).
+const LABEL_SMALL=60, LABEL_LO=0.05, LABEL_HI=0.25;
+let LABEL_N=0, LABEL_A=-1;
+function labelOpacity(sc){ if(LABEL_N<=LABEL_SMALL)return 1; return Math.max(0,Math.min(1,(sc-LABEL_LO)/(LABEL_HI-LABEL_LO))); }
+function updateLabels(){ if(!network)return; const a=Math.round(labelOpacity(network.getScale())*20)/20; if(a===LABEL_A)return; LABEL_A=a; network.setOptions({nodes:{font:{color:'rgba(26,26,26,'+a+')'}}}); }
 const labelById={};DATA.nodes.forEach(n=>{labelById[n.id]=n.label;});
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function pmA(p){return '<a class=pm target=_blank rel=noopener href="https://www.ncbi.nlm.nih.gov/pmc/articles/'+p+'/">'+p+'</a>';}
@@ -385,8 +393,9 @@ function edgeTip(e,vis){const d=document.createElement('div');let h=edgeHead(e,v
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
 function fontSize(c){return c<5?13:2*Math.max(13,Math.min(Math.round(c*2.2),48));}
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?3:v;}
+function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?1:v;}
 function build(thr){
- const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const dis=activeDisease(); const mc=activeMinCluster();
+ const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const dis=activeDisease(); const mc=activeMinCluster(); const md=activeMinDegree();
  const txt=activeText(), tm=textMatcher(txt); TM=tm;
  let edges=[];
  DATA.edges.forEach(e=>{ if(!cats.has(e.cat))return; const vis=visSents(e,conf,ylo,yhi,dis,tm); if(vis.length>=thr) edges.push({e:e,vis:vis,w:vis.length}); });
@@ -405,7 +414,13 @@ function build(thr){
    edges=edges.filter(o=>seen.has(o.e.from)&&seen.has(o.e.to));
    focusLabel=labs.join(', ');
  }
+ // min-cluster prunes small connected components; it stays live under a text/year/etc. filter (set it
+ // to 1 to see every match), and is skipped only under gene/chem focus where you want the neighborhood
  if(!focusActive){
+   if(md>1){ // single-pass degree filter: measure each gene's links once, drop the ones below md (peels the fringe)
+     const deg={};edges.forEach(o=>{deg[o.e.from]=(deg[o.e.from]||0)+1;deg[o.e.to]=(deg[o.e.to]||0)+1;});
+     edges=edges.filter(o=>deg[o.e.from]>=md&&deg[o.e.to]>=md);
+   }
    const adj={};
    edges.forEach(o=>{(adj[o.e.from]=adj[o.e.from]||[]).push(o.e.to);(adj[o.e.to]=adj[o.e.to]||[]).push(o.e.from);});
    const comp={};let cid=0;
@@ -417,16 +432,18 @@ function build(thr){
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  const nsz=id=>(nss[id]?nss[id].size:0);
  const allCatsSel=[...new Set(DATA.edges.map(e=>e.cat))].every(c=>cats.has(c));
- const dfltView=!focusActive&&!dis&&!txt&&ylo<=MINY&&yhi>=MAXY&&thr<=1&&allCatsSel&&mc<=3; // pristine view at either confidence
- const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:(dfltView?undefined:n.label),value:nsz(n.id),size:scaleNode(nsz(n.id)),title:n.label+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),font:{color:'#1a1a1a',size:(dfltView?13:fontSize(nsz(n.id)))}}));
+ const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:n.label,value:nsz(n.id),size:scaleNode(nsz(n.id)),title:n.label+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),font:{size:fontSize(nsz(n.id))}}));
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,value:o.w,width:Math.min(1+o.w*0.7,10),color:{color:o.e.color,opacity:0.6},title:edgeTip(o.e,o.vis)}));
  const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
  document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> genes, <b>'+eds.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(dis?' &middot; disease: <b>'+esc(disLabel(dis))+'</b>':'')+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'');
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
- const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
+ const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
  network=new vis.Network(net,data,options);
- network.on('stabilizationIterationsDone',()=>{network.setOptions({physics:false});network.fit({animation:false});network.redraw();});
+ LABEL_N=nodes.length; LABEL_A=-1;
+ network.on('stabilizationIterationsDone',()=>{network.setOptions({physics:false});network.fit({animation:false});LABEL_A=-1;updateLabels();network.redraw();});
+ network.on('zoom',updateLabels);
+ network.on('animationFinished',updateLabels);
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
@@ -437,6 +454,7 @@ function buildCatFilters(){const counts={};DATA.edges.forEach(e=>counts[e.cat]=(
 thr.addEventListener('input',()=>{document.getElementById('thv').textContent=thr.value;build(+thr.value);});
 const mcl=document.getElementById('mincluster');
 mcl.addEventListener('change',()=>build(+thr.value));
+document.getElementById('mindeg').addEventListener('change',()=>build(+thr.value));
 document.querySelectorAll('input[name=conf]').forEach(r=>r.addEventListener('change',()=>build(+thr.value)));
 document.getElementById('genefilter').addEventListener('change',()=>build(+thr.value));
 document.getElementById('genefilter').addEventListener('keydown',ev=>{if(ev.key==='Enter')build(+thr.value);});
