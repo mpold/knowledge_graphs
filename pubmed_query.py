@@ -264,6 +264,21 @@ def get_all_pmids(term):
                 print("[pmids] using cache: %d" % len(cached), file=sys.stderr)
                 return cached
     total, _ = esearch(term, "%d/01/01" % YEAR_LO, "%d/12/31" % YEAR_HI)  # warm + sanity
+    if total == 0:
+        # PubMed matched nothing over the whole window. Return now instead of
+        # sweeping all YEAR_HI..YEAR_LO years -- each per-year esearch would also
+        # return 0, print nothing (the progress line is gated on a non-zero count),
+        # and the run would look frozen for a minute-plus before yielding an empty
+        # corpus. A frequent cause is a NOT phrase that PubMed tokenizes as a
+        # substring of the main phrase -- e.g. "small cell lung cancer" is found
+        # inside "non-small cell lung cancer" (the hyphen splits "non-small"), so
+        # `... NOT "small cell lung cancer"[Title/Abstract]` excludes every record.
+        print("[pmids] PubMed returned 0 records for this query over %d-%d -- nothing "
+              "to fetch.\n        Check the query: a NOT phrase that is a token-substring "
+              "of the main\n        phrase (e.g. \"small cell lung cancer\" within "
+              "\"non-small cell lung cancer\")\n        excludes every record."
+              % (YEAR_LO, YEAR_HI), file=sys.stderr)
+        return []
     all_ids = set()
     for year in range(YEAR_HI, YEAR_LO - 1, -1):
         count, ids = fetch_year(term, year)
@@ -686,6 +701,12 @@ def main():
     deadline = (time.time() + TIME_BUDGET) if TIME_BUDGET > 0 else 0
 
     pmids = get_all_pmids(query)
+    if not pmids:
+        # No PMIDs -> no corpus. Stop with a non-zero exit so the orchestrator
+        # aborts at step 1 with a clear reason, rather than writing an empty TSV
+        # that makes step 2 (high_impact_xml.py) fail with "no impact-factor values".
+        sys.exit("error: query matched 0 PubMed records -- nothing to build a corpus "
+                 "from; refine the query and re-run")
 
     if not annotate(pmids, deadline):
         print("ANNOTATE_INCOMPLETE - re-run to resume", file=sys.stderr)
