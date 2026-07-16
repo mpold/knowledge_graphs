@@ -26,6 +26,7 @@
  .flow .node { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .55rem .9rem; }
  .flow .node .s { font-weight: 600; }
  .flow .node .io { color: #555; font-size: .85rem; }
+ .flow .node.opt { border-style: dashed; background: #fbfbfc; }
  .flow .arrow { color: #888; text-align: center; font-size: .9rem; line-height: 1; }
  .pill { display: inline-block; background: #eef2f6; border: 1px solid #d6dde4; border-radius: 999px;
          padding: 0 .5rem; font-size: .8rem; color: #444; margin-left: .35rem; }
@@ -79,6 +80,9 @@ needs the same network and Docker access.</div>
   <div class='arrow'>&darr;&nbsp; gpu_bundle/experimental_ner/</div>
   <div class='node'><span class='s'>7. pre_ner_xml_structure.py</span>
     <div class='io'>in: <code>gpu_bundle/experimental_ner/</code> &nbsp;&rarr;&nbsp; out: <code>summaries/pre_ner_xml_structure.html</code></div></div>
+  <div class='arrow'>&middot;&middot;&middot;&nbsp; optional &middot; run by hand</div>
+  <div class='node opt'><span class='s'>opt. subtract.py</span> <span class='pill'>optional</span>
+    <div class='io'>in: two directories (STDIN) &nbsp;&rarr;&nbsp; out: <code>gpu_bundle/removed/</code>, <code>summaries/subtract_optional.html</code></div></div>
 </div>
 <p class='dim'>Step 3 (<code>xml_structure.py</code>) is an analysis/reporting step: it does not transform
 files but identifies the no-<code>&lt;body&gt;</code> subset of <code>high_impact_xmls/</code> that step 4
@@ -174,6 +178,21 @@ wiping its output dir; it is also skipped entirely when every article already ha
       titles (captions excluded) and explicit machine types (JATS <code>sec-type</code>, TEI
       <code>&lt;div type&gt;</code>) &mdash; across the whole corpus.</td>
 </tr>
+<tr>
+  <td class='num'>opt</td>
+  <td><code>subtract.py</code> <span class='pill'>optional</span></td>
+  <td>Two directory paths read from <strong>STDIN</strong>
+      (<code>directory_1</code>, then <code>directory_2</code>)</td>
+  <td><code>gpu_bundle/removed/</code> <span class='dim'>(the moved entries)</span><br><code>summaries/subtract_optional.html</code></td>
+  <td>Compares the top-level entry <em>names</em> of the two directories and <strong>moves</strong> every
+      entry of <code>directory_1</code> whose name also appears in <code>directory_2</code> into
+      <code>gpu_bundle/removed/</code> &mdash; i.e. <code>directory_1&nbsp;&minus;&nbsp;directory_2</code>,
+      in place. The overlap is <strong>relocated, not deleted</strong>, and destination-name collisions
+      get a <code>_1</code>/<code>_2</code> suffix instead of overwriting. By name only: <em>not</em>
+      recursive and no content comparison; files and sub-directories both count. Typical use: strip from
+      this project's <code>gpu_bundle/experimental_ner/</code> any files that also appear in another
+      corpus. <strong>Not part of the linear pipeline and not run by the orchestrator.</strong></td>
+</tr>
 </tbody>
 </table>
 
@@ -223,6 +242,16 @@ the network stages still reach out and step&nbsp;5 still needs Docker + GROBID.<
   <li><span class='step-no'>6</span><code>python named_entity_xml.py</code></li>
   <li><span class='step-no'>7</span><code>python pre_ner_xml_structure.py</code></li>
 </ol>
+<p class='dim'><strong>Optional &mdash; <code>subtract.py</code></strong> <span class='pill'>optional</span>: not one
+of the seven and <em>not</em> chained by the orchestrator. Run it by hand to remove from one directory the
+entries whose names also appear in another. It reads the two directory paths on <code>STDIN</code>
+(<code>directory_1</code> first, <code>directory_2</code> second), moves the overlap into
+<code>gpu_bundle/removed/</code>, and writes <code>summaries/subtract_optional.html</code>:</p>
+<pre># move gpu_bundle/experimental_ner entries whose names also exist in another corpus aside
+printf 'gpu_bundle/experimental_ner\n/path/to/other/gpu_bundle/experimental_ner\n' | python subtract.py
+
+# or run it and type the two directory paths at the prompts
+python subtract.py</pre>
 
 <div class='warn'>These scripts are <strong>not executed automatically</strong>: most reach external
 services (NCBI E-utilities, OpenAlex, CrossRef) and step 5 needs a running GROBID container. Set
@@ -252,6 +281,12 @@ network stages with <code>TIME_BUDGET</code> if needed.</div>
       own and can be run partially with
       <code>--start</code>/<code>--stop</code>/<code>--only</code>. It does not relax any per-stage
       requirement &mdash; the network stages and step&nbsp;5's GROBID container are still needed.</li>
+  <li><strong>Optional cleanup utility.</strong> <code>subtract.py</code> is <em>not</em> one of the seven
+      and is <em>not</em> run by the orchestrator: run it by hand when needed. It moves entries of
+      <code>directory_1</code> whose name also appears in <code>directory_2</code> into
+      <code>gpu_bundle/removed/</code> (relocated, not deleted) and writes an eighth, conditional summary
+      <code>summaries/subtract_optional.html</code> &mdash; useful for de-duplicating this project's
+      <code>gpu_bundle/experimental_ner/</code> against another corpus.</li>
 </ul>
 
 </body>
