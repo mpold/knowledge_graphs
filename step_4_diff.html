@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<title>Step 4 &mdash; diff (diff_two.py): inputs &amp; outputs</title>
+<style>
+ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 2rem auto; max-width: 1100px; color: #222; line-height: 1.45; padding: 0 1rem; }
+ h1 { margin-bottom: .25rem; } h2 { margin-top: 2.25rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+ h3 { margin: 1.2rem 0 .3rem; }
+ .meta { color: #555; margin-bottom: 1rem; }
+ .meta strong { color: #222; }
+ .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin: 1rem 0 1.5rem; }
+ .stat { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .7rem 1rem; }
+ .stat .v { font-size: 1.35rem; font-weight: 600; } .stat .k { color: #555; font-size: .82rem; }
+ table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; font-size: .9rem; }
+ th, td { border: 1px solid #e1e4e8; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+ th { background: #f6f8fa; }
+ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+ code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; font-size: .88em; }
+ pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .9rem 1rem; overflow-x: auto; font-size: .85rem; line-height: 1.4; white-space: pre-wrap; }
+ .dim { color: #888; font-size: .85em; }
+ .key  { background: #ddf4ff; border-left: 4px solid #0969da; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .warn { background: #fff8c5; border-left: 4px solid #d4a72c; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ ol.steps > li { margin: .55rem 0; }
+ .flow { display: flex; flex-direction: column; gap: .35rem; margin: 1rem 0 1.5rem; }
+ .flow .node { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .55rem .9rem; }
+ .flow .node .s { font-weight: 600; }
+ .flow .node .io { color: #555; font-size: .85rem; }
+ .flow .arrow { color: #888; text-align: center; font-size: .9rem; line-height: 1; }
+ .pill { display: inline-block; background: #eef2f6; border: 1px solid #d6dde4; border-radius: 999px;
+         padding: 0 .5rem; font-size: .8rem; color: #444; margin-left: .35rem; }
+ .pill.req { background: #e6f4ea; border-color: #b7dfc4; color: #1a7f37; }
+ .pill.opt { background: #f2eef9; border-color: #d9c9f0; color: #6b3fa0; }
+ .pill.net { background: #fdeef0; border-color: #f0c4cb; color: #b3243b; }
+ .step-no { display:inline-block; min-width:1.5rem; height:1.5rem; line-height:1.5rem; text-align:center;
+            background:#0969da; color:#fff; border-radius:50%; font-size:.82rem; font-weight:600; margin-right:.4rem; }
+ ol.filt { margin: .5rem 0 1rem; padding-left: 1.4rem; }
+ ol.filt > li { margin: .3rem 0; }
+</style>
+</head>
+<body>
+<h1>Step 4 &mdash; diff (diff_two.py)</h1>
+<div class='meta'>Diffs two step-3 gene&ndash;gene graphs into one network: node colour is a continuous
+balance between the two sides, edge colour is the pair's provenance. Pure standard library. Nothing is
+hardcoded &mdash; the inputs, the output, the heading and both side labels are asked for at the prompt, so
+the script has no idea what it is diffing until it is run.
+<strong>This step should be viewed as separate from steps&nbsp;1&ndash;3. A dedicated directory for this step
+is desirable.</strong></div>
+
+<div class='stat-grid'>
+  <div class='stat'><div class='v'>2</div><div class='k'>input graphs</div></div>
+  <div class='stat'><div class='v'>6</div><div class='k'>prompts</div></div>
+  <div class='stat'><div class='v'>1</div><div class='k'>output, self-contained</div></div>
+  <div class='stat'><div class='v'>9</div><div class='k'>score steps</div></div>
+  <div class='stat'><div class='v'>0</div><div class='k'>dependencies</div></div>
+</div>
+
+<h2>1. Data flow (inputs &rarr; script &rarr; outputs)</h2>
+<div class='flow'>
+  <div class='node'><span class='s'>inputs</span> <span class='dim'>(two step-3 graphs, named at the prompt)</span>
+    <div class='io'><strong>required:</strong> any two <code>*_G.html</code> graphs. Each carries a
+      <code>const DATA={nodes,edges}</code> object and an inlined <code>vis-network</code> bundle.
+      Nothing else is read &mdash; no network, no database, no step-2 bundle.</div></div>
+  <div class='arrow'>&darr;</div>
+  <div class='node'><span class='s'>diff_two.py</span> <span class='pill'>stdlib only</span> <span class='pill'>offline</span>
+    <div class='io'>parse both <code>DATA</code> objects &rarr; fold directed, category-split edges into
+      undirected gene pairs &rarr; keep the pairs worth drawing &rarr; build per-gene degree tables, one
+      column per score step &rarr; generate the diverging colour ramp in OKLab &rarr; inline the evidence,
+      the tables, the ramp and <code>vis-network</code> (lifted out of input&nbsp;2) into one page</div></div>
+  <div class='arrow'>&darr;</div>
+  <div class='node'><span class='s'>output</span>
+    <div class='io'>out: the file you name at the prompt &mdash; one self-contained HTML page that opens
+      offline. The only thing printed is the path it wrote.</div></div>
+</div>
+
+<div class='key'><strong>The split that matters.</strong> The score is a slider, so the model cannot be baked
+at build time. Python ships the <em>raw evidence</em> &mdash; every sentence at or above the lowest step, plus
+degree tables for each step &mdash; and the browser recomputes which pairs qualify, each gene's connectivity
+and the balance index every time a control moves. Python decides <em>what could ever be shown</em>; the page
+decides <em>what is shown now</em>.</div>
+
+<h2>2. What qualifies as a drawn pair</h2>
+<p class='meta'>Applied per score step. A pair is an unordered gene couple: <code>A&rarr;B</code> and
+<code>B&rarr;A</code>, and any positive/negated split of the same couple, all fold onto one key.</p>
+<ol class='filt'>
+  <li>Keep the pair's sentences scoring <strong>&ge; the active score</strong>. No sentences left in either
+      graph &rarr; the pair does not exist at this step.</li>
+  <li>The pair is <strong>shared</strong> if both graphs still have a sentence, otherwise it belongs to
+      whichever graph does.</li>
+  <li>Draw it if it is <strong>shared</strong>, or if either graph backs it with
+      <strong>&ge; <code>MIN_PUBS</code> distinct publications</strong> (default 2).</li>
+</ol>
+<div class='key'><strong>Prominence is publications, not sentences.</strong> In these graphs the great
+majority of pairs rest on a single paper, so a sentence count mostly ranks how often one author repeated
+themselves rather than how well attested a relation is. A pair whose nine sentences all carry one PMID is
+one claim, not nine.</div>
+<div class='warn'><strong>The rule is not symmetric, and it shows.</strong> Shared pairs bypass the
+publication test entirely, while an exclusive pair must clear it. Because exclusive claims in a smaller
+graph are especially likely to rest on a single paper, the rule culls the smaller side hardest &mdash; in one
+run it removed 97% of one graph's exclusive pairs against 3% of the other's, so a genuinely lopsided
+difference can be made to look like agreement. Raise or lower <code>MIN_PUBS</code> when the two inputs are
+very different in size.</div>
+<p>Only the floor's selection ships. That is sufficient for every step above it: sentences passing the top
+step are a subset of those passing the floor, so a pair drawn at any step is always present at the floor.
+This is what keeps the payload to the pairs that could ever be drawn rather than every pair in both graphs.</p>
+
+<h2>3. The balance index (what makes a gene red or blue)</h2>
+<p class='meta'>Computed in the browser at the active step, over the <strong>full</strong> graphs &mdash; never
+the subgraph on screen. Focusing a gene, brushing the palette or matching sentence text changes what is drawn,
+never what a gene is.</p>
+<ol class='filt'>
+  <li><strong>Count partners.</strong> The gene's distinct neighbours, in each graph separately.</li>
+  <li><strong>Divide by each graph's own size.</strong> The two graphs are never the same size, so raw counts
+      are not comparable. Each degree becomes a share of its own graph's total connectivity, where
+      <code>total = 2 &times; pairs</code> (every pair has two endpoints).</li>
+  <li><strong>Contrast the two shares</strong>, bounded &minus;1&hellip;+1.</li>
+  <li><strong>Name the number</strong> &mdash; colour uses the continuous value; the words are bucketed for
+      readability only.</li>
+</ol>
+<pre>share_1 = degree_1 / total_1        (input 1 &rarr; the red pole)
+share_2 = degree_2 / total_2        (input 2 &rarr; the blue pole)
+
+index = (share_1 &minus; share_2) / (share_1 + share_2)
+
+  +1  pure input 1  &middot;  0  balanced  &middot;  &minus;1  pure input 2</pre>
+<p>Dividing by the sum makes this a <strong>proportion</strong> rather than a magnitude: 3-vs-1 partners and
+30-vs-10 read as the same lean. Magnitude is not lost &mdash; it is carried separately, by node size.</p>
+
+<h3>Why the normalisation is load-bearing</h3>
+<p>One literature has always been written about more than the other. On raw counts, a gene central to
+<em>both</em> is dragged toward whichever graph is larger and reads as though it belonged there. Normalising
+asks the same question of each graph &mdash; <em>what fraction of this graph's wiring runs through this
+gene?</em> &mdash; which is answerable on equal terms however lopsided the two inputs are.</p>
+<p class='meta'>Schematically, with input&nbsp;2 the larger graph:</p>
+<table>
+<thead><tr><th>gene</th><th class='num'>input 1</th><th class='num'>input 2</th>
+  <th class='num'>raw</th><th class='num'>index</th><th>what it really is</th></tr></thead>
+<tbody>
+<tr><td><code>A</code></td><td class='num'>16</td><td class='num'>0</td><td class='num dim'>+1.00</td>
+    <td class='num'><strong>+1.00</strong></td><td>exclusive to input 1 &mdash; both agree</td></tr>
+<tr><td><code>B</code></td><td class='num'>26</td><td class='num'>90</td><td class='num dim'>&minus;0.55</td>
+    <td class='num'><strong>+0.13</strong></td><td>a hub central to both &mdash; raw calls it input 2's</td></tr>
+<tr><td><code>C</code></td><td class='num'>35</td><td class='num'>63</td><td class='num dim'>&minus;0.29</td>
+    <td class='num'><strong>+0.43</strong></td><td>leans to input 1 despite more raw input-2 partners</td></tr>
+<tr><td><code>D</code></td><td class='num'>0</td><td class='num'>117</td><td class='num dim'>&minus;1.00</td>
+    <td class='num'><strong>&minus;1.00</strong></td><td>exclusive to input 2 &mdash; both agree</td></tr>
+</tbody>
+</table>
+<div class='warn'>The two columns only agree at the poles. In between, <span class='dim'>raw</span> reports the
+size difference between the two literatures rather than anything about the gene &mdash; rows <code>B</code>
+and <code>C</code> are exactly the genes a reader most wants to place, and exactly the ones it gets wrong.</div>
+<p>The page's <strong>How balance works</strong> panel makes this argument live, on whatever two graphs were
+loaded: it derives its worked examples from the data rather than a fixed gene list, works out for itself which
+graph is larger, and counts the genes whose raw and normalised labels actually disagree.</p>
+
+<h2>4. Inputs</h2>
+<p class='meta'>Everything comes from the prompt &mdash; there are no hardcoded paths and no defaults. A bare
+name resolves next to the script (<code>os.path.dirname(__file__)</code>); an absolute path is taken as given.
+All six are <span class='pill req'>required</span>; a name that is not an existing file simply re-prompts.
+<strong>Order matters:</strong> input&nbsp;1 becomes the red pole of the scale, input&nbsp;2 the blue pole.</p>
+<table>
+<thead><tr><th>prompt</th><th>need</th><th>from</th><th>what the script uses it for</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>input file name 1:</code></td>
+  <td><span class='pill req'>required</span></td>
+  <td>step 3</td>
+  <td>Its <code>const DATA</code>: <code>edges[].from/.to</code>, <code>.cat</code>
+      (<code>positive</code>&thinsp;/&thinsp;<code>negated</code>) and <code>.sents[]</code>
+      (<code>pmid</code>, <code>text</code>, <code>sc</code>, <code>yr</code>). Becomes the
+      <strong>red</strong> side of every pair.</td>
+</tr>
+<tr>
+  <td><code>input file name 2:</code></td>
+  <td><span class='pill req'>required</span></td>
+  <td>step 3</td>
+  <td>The same fields, for the <strong>blue</strong> side &mdash; <em>and</em> the <code>vis-network</code>
+      bundle, lifted out of its first <code>&lt;script&gt;</code> and inlined into the output so the result
+      opens offline.</td>
+</tr>
+<tr>
+  <td><code>output file name:</code></td>
+  <td><span class='pill req'>required</span></td>
+  <td>you</td>
+  <td>Where to write. A bare name gets <code>.html</code> appended; naming either input re-prompts.</td>
+</tr>
+<tr>
+  <td><code>graph name:</code></td>
+  <td><span class='pill req'>required</span></td>
+  <td>you</td>
+  <td>The page's heading and <code>&lt;title&gt;</code>, HTML-escaped on the way in.</td>
+</tr>
+<tr>
+  <td><code>label 1:</code></td>
+  <td><span class='pill req'>required</span></td>
+  <td>you</td>
+  <td>What to call input&nbsp;1 <em>everywhere</em> &mdash; legend, tooltips, table headers, selection panel,
+      the balance buckets (&ldquo;pure&nbsp;X&rdquo;, &ldquo;X-leaning&rdquo;) and the explainer's prose and
+      formulae.</td>
+</tr>
+<tr>
+  <td><code>label 2:</code></td>
+  <td><span class='pill req'>required</span></td>
+  <td>you</td>
+  <td>The same, for input&nbsp;2.</td>
+</tr>
+</tbody>
+</table>
+<p class='dim'>Node metadata in the sources (drug targets, chemical categories, node colours) is deliberately
+ignored: this graph re-derives colour from the diff, so the sources' own palettes would only conflict. Gene
+identity is taken as given &mdash; symbols arrive already normalised to HGNC by step&nbsp;3, which is why the
+page tells the reader to expect the nodes and the sentences to use different vocabulary for the same
+molecule.</p>
+
+<h2>5. Outputs</h2>
+<table>
+<thead><tr><th>file</th><th>what it is</th></tr></thead>
+<tbody>
+<tr><td><code>&lt;output file name&gt;</code></td>
+    <td>The diff graph, fully self-contained &mdash; the vis-network runtime, the ramp, the degree tables and
+      every sentence at or above the floor are inlined. No CDN, no server; opens over <code>file://</code>.
+      Byte-identical for identical inputs.</td></tr>
+</tbody>
+</table>
+<h3>Encodings in the output</h3>
+<table>
+<thead><tr><th>channel</th><th>means</th></tr></thead>
+<tbody>
+<tr><td>node fill</td><td>balance index on a diverging red&harr;blue ramp; grey midpoint = equally central to both</td></tr>
+<tr><td>node outline</td><td>a darker (light mode) or lighter (dark mode) step of its own fill &mdash; without it the near-white midpoint would vanish against the surface</td></tr>
+<tr><td>node size</td><td>partner count in whichever graph has more</td></tr>
+<tr><td>edge colour</td><td>provenance: red = input&nbsp;1 only, blue = input&nbsp;2 only, grey = shared</td></tr>
+<tr><td>edge width</td><td>supporting publications</td></tr>
+<tr><td>dashed edge</td><td>the pair includes a negated relationship</td></tr>
+<tr><td>hover</td><td>the sentences themselves, split by side, with PMID links, score and year</td></tr>
+</tbody>
+</table>
+<div class='key'><strong>Provenance and balance are measured on the full evidence at the active score, never on
+the filtered subset.</strong> A text query that happens to hit only one side's sentences must not repaint a
+shared pair as one-sided &mdash; that would be a false claim about the biology. The filters select which pairs
+to show; they never restate what they are.</div>
+<div class='warn'><strong>Node colour and edge colour answer different questions</strong>, and will disagree.
+Colour is a property of the <em>gene</em> across both graphs; provenance is a property of one <em>pair</em>. A
+blue gene having a red edge is not a bug &mdash; it means a gene wired mostly in input&nbsp;2 has a relation
+seen only in input&nbsp;1, which is usually the interesting case.</div>
+
+<h2>6. Options</h2>
+<p class='meta'>There is no command line. File names, the heading and both labels come from the prompt; the
+thresholds and palette are constants at the top of the script; everything else is a control in the finished
+page.</p>
+<h3>Build-time constants</h3>
+<table>
+<thead><tr><th>constant</th><th>default</th><th>effect</th></tr></thead>
+<tbody>
+<tr><td><code>SCORE_STEPS</code></td><td>0.75, 0.80, 0.85, 0.90, 0.95&hellip;0.99</td>
+    <td>The slider's stops &mdash; coarse 0.05s through the noisy low band, 0.01s from 0.95 up where a single
+      point still changes the graph. Its <em>minimum</em> is the payload floor.</td></tr>
+<tr><td><code>DEFAULT_SCORE</code></td><td><code>0.95</code></td>
+    <td>Where the slider opens. Resolved to the nearest step rather than a hardcoded index, so it survives
+      edits to <code>SCORE_STEPS</code>.</td></tr>
+<tr><td><code>MIN_PUBS</code></td><td><code>2</code></td>
+    <td>Distinct publications needed to draw a non-shared pair. The one knob that decides how much of a
+      smaller input survives &mdash; see the warning in section&nbsp;2.</td></tr>
+<tr><td><code>RAMP_MODES</code></td><td>blue&harr;red</td>
+    <td>Diverging ramp anchors per light/dark mode, plus the outline lightness shift.</td></tr>
+</tbody>
+</table>
+<h3>Controls in the output</h3>
+<table>
+<thead><tr><th>control</th><th>does</th></tr></thead>
+<tbody>
+<tr><td>Min score</td><td>Re-filters every sentence and recomputes the whole model.</td></tr>
+<tr><td>Min cluster</td><td>Drops connected groups smaller than N genes. At 2 (default) it is a no-op &mdash; every
+    component built from edges already has two nodes. <em>Skipped while a gene is focused</em>, so two filters
+    cannot silently fight.</td></tr>
+<tr><td>Palette range</td><td>A brush over the colour scale: two handles pick a sub-range of the balance
+    index and only genes coloured inside it are drawn. The excluded ends are greyed back over the ramp
+    itself &mdash; including the miniature one in the collapsed summary, so a restricted range can never hide
+    behind a shut legend.</td></tr>
+<tr><td>Focus on gene</td><td>Exact name, else first prefix match, plus its 1&ndash;3 hop neighbourhood, walked
+    over the edges that survived every other filter.</td></tr>
+<tr><td>Match text in sentence</td><td>Case-insensitive substring, or <code>/regex/flags</code>; a bad regex falls
+    back to a literal match. Hits are highlighted in the tooltip.</td></tr>
+<tr><td>Show table</td><td>The WCAG-clean equivalent: every drawn gene with its balance index and partner counts.</td></tr>
+<tr><td>How balance works</td><td>An explainer generated from the live model, so its worked numbers are always
+    the ones behind the graph on screen.</td></tr>
+<tr><td>Reset all</td><td>Returns every control to its default and clears the saved state.</td></tr>
+</tbody>
+</table>
+<p class='dim'>Score, cluster size, palette range, gene focus, hops, text query and the two legend states
+persist in <code>localStorage</code> under the <code>diff-two.</code> prefix &mdash; every access wrapped
+in <code>try/catch</code>, because <code>file://</code> origins may refuse storage outright and a saved
+preference must never take the graph down with it. The score is stored as its <em>value</em>, not the slider
+index, so a later edit to <code>SCORE_STEPS</code> cannot quietly restore someone to a different threshold.</p>
+
+<h2>7. How to run</h2>
+<ol class='steps'>
+  <li><span class='step-no'>1</span><code>python diff_two.py</code>
+      <span class='dim'>&mdash; then answer six prompts. No arguments, no network, no dependencies.</span>
+      <pre>input file name 1: first_G.html
+input file name 2: second_G.html
+output file name:  diff.html
+graph name:        First vs Second
+label 1:           First
+label 2:           Second</pre></li>
+  <li><span class='step-no'>2</span><span class='dim'>Scripted, by piping the six answers in order:</span>
+      <pre>printf '%s\n' first_G.html second_G.html diff.html "First vs Second" First Second | python diff_two.py</pre></li>
+  <li><span class='step-no'>3</span><span class='dim'>To diff any other pair, answer the prompts with their
+      graphs and labels. Nothing in the script is specific to a disease or a file &mdash; not the paths, not
+      the title, not the wording, and not the explainer's worked examples.</span></li>
+</ol>
+<div class='warn'>Run this <strong>after</strong> step&nbsp;3 has produced both <code>_G.html</code> graphs.
+The two must come from the same pipeline version &mdash; the diff assumes both carry the same
+<code>DATA</code> shape and the same HGNC-normalised symbols, and it compares them without re-checking either.</div>
+
+<h2>8. Notes</h2>
+<ul>
+  <li><strong>Nothing is disease-specific.</strong> Both sides are named at the prompt and those labels flow
+      through every string in the page. The explainer goes further and is <em>derived</em>: its worked
+      examples are picked from the data (the best-connected genes, walked across the scale) rather than a
+      hardcoded gene list. A fixed gene list would be wrong for every pair but the one it was written for.</li>
+  <li><strong>The prompt refuses to overwrite an input.</strong> Naming either source graph re-prompts rather
+      than writing &mdash; the script reads those files, and a typo would destroy megabytes of upstream
+      pipeline output irrecoverably. An empty answer is rejected too; EOF aborts cleanly.</li>
+  <li><strong>Deterministic.</strong> Identical inputs and answers give a byte-identical output; there is no
+      timestamp, no randomness and no ordering that depends on dict iteration.</li>
+  <li><strong>The colour ramp is computed, not chosen.</strong> The red arm is generated to mirror the blue
+      ramp's OKLCH lightness, and both arms are monotonic in lightness &mdash; the check a diverging ramp
+      answers to. Blue&harr;red survives every simulated colour-vision deficiency (worst case protanopia,
+      &Delta;E&nbsp;15.1 against a &ge;&thinsp;8 target); a blue&harr;green scale would not.</li>
+  <li><strong>Two rounding traps</strong> lurk in the OKLab port, and both would silently shift colours:
+      JavaScript's <code>Math.round</code> breaks .5 upward while Python's <code>round()</code> breaks to even
+      (hence <code>floor(x + 0.5)</code>), and <code>Math.cbrt</code> accepts negatives while
+      <code>** (1/3)</code> raises (hence <code>copysign</code>).</li>
+  <li><strong>Expect the two graphs to overlap less than you think.</strong> In one run the inputs shared 42
+      pairs out of 550 and 2,560; of the exclusive pairs whose <em>both</em> genes existed in the other graph,
+      only 17% were an edge there. The literatures tend to connect the same genes differently rather than
+      discuss different genes &mdash; which is the whole reason to diff them.</li>
+  <li><strong>The low end of the score is noisier by construction.</strong> The floor admits relations the
+      extractor was only ~three-quarters confident about, which is why the fine steps live up top where
+      precision matters.</li>
+</ul>
+</body>
+</html>
