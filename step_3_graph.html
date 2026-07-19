@@ -90,7 +90,9 @@ confidence toggle. Run it after the bundle:
   <div class='arrow'>&darr;</div>
   <div class='node'><span class='s'>outputs</span>
     <div class='io'>out: <code>TRIPLES/high_confidence_G_D_C.json</code> (qualifying triples) &middot;
-      <code>summaries/high_confidence.html</code> (interactive graph) &middot; console threshold stats</div></div>
+      <code>summaries/high_confidence.html</code> (interactive graph) &middot;
+      <code>&lt;current_dir&gt;_YYYY_MM_DD.html</code> (a copy in the root dir) &middot;
+      console threshold stats</div></div>
 </div>
 
 <h2>2. The &ldquo;G_D_C&rdquo; qualifying filter</h2>
@@ -207,6 +209,13 @@ absent, that facet is simply empty (no year slider, no drug-target colouring, et
       polarity. <strong>Skipped with <code>--no-graph</code>.</strong></td>
 </tr>
 <tr>
+  <td><code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD.html</code></td>
+  <td>A copy of that graph in the script's own directory, named after that directory plus today's date
+      (e.g. <code>lung_large_2026_07_19.html</code>). Always written alongside the graph; re-running on the
+      same day overwrites it. The gene-only script's copy carries a <code>_G</code> suffix, so the two never
+      collide. <strong>Skipped with <code>--no-graph</code>.</strong></td>
+</tr>
+<tr>
   <td><span class='dim'>console (stdout)</span></td>
   <td>Progress + summary: the export count/sentences at <code>--score</code>, the graph line (genes, edges,
       edges with a &ge;0.99 sentence, publications of corpus size), and one stats row per
@@ -303,8 +312,8 @@ Note <code>TRIPLES/triples.json</code> is still <span class='pill req'>required<
   <td>The same self-contained interactive gene&ndash;gene graph as the G_D_C variant (same panel filters and &ge;0.8&thinsp;/&thinsp;&ge;0.95&thinsp;/&thinsp;&ge;0.99 toggle), but built from the larger gene-only universe. <strong>Skipped with <code>--no-graph</code>.</strong></td>
 </tr>
 <tr>
-  <td><code>&lt;root&gt;/&lt;pubmed_query&gt;_G.html</code></td>
-  <td>A copy of that graph in the script's own directory, named after the PubMed query with a <code>_G</code> suffix (e.g. <code>lung_adenocarcinoma_G.html</code>). Written only when a query is found; the <code>_G</code> keeps it distinct from the G_D_C script's <code>&lt;query&gt;.html</code> copy.</td>
+  <td><code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD_G.html</code></td>
+  <td>A copy of that graph in the script's own directory, named after that directory plus today's date, with a <code>_G</code> suffix (e.g. <code>lung_large_2026_07_19_G.html</code>). Always written alongside the graph; the <code>_G</code> keeps it distinct from the G_D_C script's <code>&lt;current_dir&gt;_YYYY_MM_DD.html</code> copy.</td>
 </tr>
 <tr>
   <td><span class='dim'>console (stdout)</span></td>

@@ -20,13 +20,15 @@ Inputs  : <data-root>/TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.jso
 Outputs : <data-root>/TRIPLES/high_confidence_G_D_C.json   qualifying triples at --score (default 0.8)
           <data-root>/summaries/high_confidence.html        gene-gene graph with a >=0.8 / >=0.95 / >=0.99 toggle
                                                             and a "match text in sentence" filter (substring, or /regex/)
-          <root>/<pubmed_query>.html                        a copy of that graph, named after the PubMed query
-                                                            (whitespace -> underscore); e.g. pancreatic_cancer.html
+          <root>/<current_dir>_YYYY_MM_DD.html              a copy of that graph, named after the directory
+                                                            holding this script plus today's date;
+                                                            e.g. lung_large_2026_07_19.html
 
 Run::  python high_confidence.py [--data-root kaggle_working] [--score 0.8] [--thresholds 0.8,0.95,0.99] [--no-graph]
 """
 import argparse
 import collections
+import datetime
 import html
 import json
 import re
@@ -279,7 +281,9 @@ __LIBTAG__
 <style>
  html,body{margin:0;height:100%;background:#eef1f5;color:#1c2330;font:14px/1.5 Segoe UI,Arial,sans-serif}
  #net{position:absolute;top:0;left:0;right:0;bottom:0;background:#ffffff}
- #panel{position:absolute;top:12px;left:12px;z-index:5;background:rgba(255,255,255,.97);border:1px solid #cdd5e0;border-radius:10px;padding:14px 16px;max-width:320px;box-shadow:0 2px 12px rgba(0,0,0,.18);color:#1c2330}
+ /* max-height + overflow keep the panel inside the viewport: without them a tall control list runs off the
+    bottom edge and that overflowing tail covers the graph with no way to scroll it back into reach. */
+ #panel{position:absolute;top:12px;left:12px;z-index:5;background:rgba(255,255,255,.97);border:1px solid #cdd5e0;border-radius:10px;padding:14px 16px;max-width:320px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain;box-shadow:0 2px 12px rgba(0,0,0,.18);color:#1c2330}
  #panel h1{font-size:13px;margin:0 0 8px;color:#1c2330;font-variant:small-caps;letter-spacing:.4px}
  .row{margin:8px 0}
  input[type=range]{width:150px;max-width:100%;vertical-align:middle}
@@ -493,8 +497,9 @@ def render_graph(payload, lib, miny, maxy, nxml, pubmed_query=""):
     else:
         libtag = f'<script src="{VIS_URL}"></script>'
     # legend line above the title: the PubMed query this corpus came from (empty -> nothing shown)
-    qrow = (f'<div class="row" id="pubmedq" style="font-size:18px;font-weight:600;color:#2b6cb0;'
-            f'margin-bottom:6px">PubMed query = {html.escape(pubmed_query)}</div>'
+    qrow = (f'<div class="row" id="pubmedq" style="font-size:12px;line-height:1.35;font-weight:600;'
+            f'color:#2b6cb0;word-break:break-word;margin-bottom:6px">PubMed query = '
+            f'{html.escape(pubmed_query)}</div>'
             if pubmed_query else "")
     title = html.escape(pubmed_query) if pubmed_query else "High-confidence brain-cancer gene-gene interactions"
     return (GRAPH_TEMPLATE.replace("__LIBTAG__", libtag)
@@ -552,13 +557,14 @@ def main():
         print(f"wrote graph -> {GRAPH_OUT}  ({len(payload['nodes']):,} genes, {len(payload['edges']):,} edges; "
               f"{n99:,} edges have a >=0.99 sentence; {npubs:,} of {nxml:,} input XMLs produced gene-gene triples)")
 
-        # also drop a copy in the root dir, named after the PubMed query (whitespace -> underscore;
-        # other filesystem-illegal characters likewise underscored so the name is always valid).
-        if pubmed_query:
-            fname = re.sub(r'[\\/:*?"<>|\s]+', "_", pubmed_query.strip())
-            dest = ROOT / f"{fname}.html"
-            shutil.copy2(GRAPH_OUT, dest)
-            print(f"copied graph -> {dest}")
+        # also drop a copy in the root dir, named "<current directory>_YYYY_MM_DD.html"
+        # (illegal filename characters underscored so the name is always valid).
+        # high_confidence_g.py's copy carries a "_G" suffix, so the two never collide.
+        dirname = re.sub(r'[\\/:*?"<>|\s]+', "_", ROOT.name)
+        today = datetime.date.today().strftime("%Y_%m_%d")
+        dest = ROOT / f"{dirname}_{today}.html"
+        shutil.copy2(GRAPH_OUT, dest)
+        print(f"copied graph -> {dest}")
 
     for r in rows:
         print(f"  score>={r['T']}: {r['triples']:,} triples / {r['sentences']:,} sent; "

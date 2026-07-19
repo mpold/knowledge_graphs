@@ -120,7 +120,9 @@ python high_confidence.py --data-root kaggle_working
 ```
 
 Output: `<data-root>/summaries/high_confidence.html`, `<data-root>/TRIPLES/high_confidence_G_D_C.json`,
-and a copy of the graph in the bundle root named after the query (e.g. `pancreatic_cancer.html`).
+and a copy of the graph in the bundle root named after the current directory plus today's date
+(e.g. `lung_large_2026_07_19.html`). The gene-only `high_confidence_g.py` writes the same set with a
+`_G` suffix (e.g. `lung_large_2026_07_19_G.html`).
 
 ---
 

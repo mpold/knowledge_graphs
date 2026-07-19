@@ -109,7 +109,7 @@ is triggered &mdash; it reads its inputs from that unzipped run directory (the d
 <tr><td class='cat'>Data inputs</td><td>The unzipped <code>kaggle_working/</code> tree (the data root; override with <code>--data-root</code>). Required: <code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> and <code>TRIPLES/triples.json</code>. Optional (enrich the graph): <code>databases/pmc_years.json</code>, <code>CHEMICAL/chemical_to_target.json</code>, <code>DISEASE/disease.json</code>, <code>DISEASE/disease_ambiguous.json</code>, <code>sentences/</code>, and <code>summaries/pubmed_query.html</code> (the query legend line).</td></tr>
 <tr><td class='cat'>Network <span class='dim'>(optional)</span></td><td>Fetches <code>vis-network</code> from a CDN to inline into the graph HTML. If offline, the HTML falls back to a CDN link, or run with <code>--no-graph</code> to skip it entirely.</td></tr>
 <tr><td class='cat'>Run</td><td><code>python high_confidence.py</code> <span class='dim'>(options: <code>--data-root</code>, <code>--score</code>, <code>--thresholds</code>, <code>--no-graph</code>).</span></td></tr>
-<tr><td class='cat'>Produces</td><td><code>TRIPLES/high_confidence_G_D_C.json</code>, the interactive <code>summaries/high_confidence.html</code>, and a copy of the graph in the root dir named after the PubMed query (e.g. <code>pancreatic_cancer.html</code>).</td></tr>
+<tr><td class='cat'>Produces</td><td><code>TRIPLES/high_confidence_G_D_C.json</code>, the interactive <code>summaries/high_confidence.html</code>, and a copy of the graph in the root dir named after the current directory plus today's date (e.g. <code>lung_large_2026_07_19.html</code>).</td></tr>
 </tbody>
 </table>
 
