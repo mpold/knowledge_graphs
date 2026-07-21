@@ -7,7 +7,7 @@ A biomedical relation-extraction pipeline: from a single **PubMed query** to an 
 |------:|------|---------------|-------------|
 | **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | 7 root scripts, orchestrated by `run_pipeline.py` |
 | **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (16-step chain) |
-| **3** | Triples → high-confidence gene–gene **graph** | local | `high_confidence.py` |
+| **3** | Triples → high-confidence gene–gene **graph** | local | `high_confidence_g.py` |
 
 Each stage hands off to the next **by files**. Rendered walk-throughs of every stage ship with
 this bundle: [`step_1_publications.html`](step_1_publications.html),
@@ -106,7 +106,7 @@ the GPU deps and the DB files present; preview with `python gpu_bundle/gpu.py --
 Output: `TRIPLES/` (incl. the scored + normalized triples) and `kaggle_working.zip`.
 
 ### Stage 3 — graph (local)
-`high_confidence.py` filters the scored triples to the high-confidence gene–gene set in a
+`high_confidence_g.py` filters the scored triples to the high-confidence gene–gene set in a
 disease/chemical context and renders the interactive graph.
 
 > **NB!** If stage 2 ran on Kaggle, **download `kaggle_working.zip` and unzip it here first** —
