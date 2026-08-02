@@ -22,6 +22,10 @@ is hardened to recover from interruptions and time-outs (see RECOVERY below).
 Input  : pmids/pmid_pmc_ids.tsv
          (pmid, pmc_id, source_publication, issn, journal_impact_factor, year
           -- produced by pubmed_query.py)
+         pmids/from_archive_pmcids.txt        optional; PMC ids already served
+          from the local XML archive by from_archive.py (stage 1b). Those are
+          dropped from the export dictionary so they are not downloaded twice.
+          Absent file = no effect; USE_ARCHIVE_SKIP=0 ignores it.
 Outputs: high_impact_xmls/PMC*.xml            one JATS XML per article
          high_impact_xmls/_failed.tsv         records that could not be fetched
          summaries/ncbi_xml_summary.html      summary of the exported XMLs
@@ -82,6 +86,7 @@ import requests
 # --------------------------------------------------------------------------- #
 BASE        = os.path.dirname(os.path.abspath(__file__))
 IN_TSV      = os.path.join(BASE, "pmids", "pmid_pmc_ids.tsv")
+ARCHIVE_SKIP= os.path.join(BASE, "pmids", "from_archive_pmcids.txt")
 OUT_DIR     = os.path.join(BASE, "high_impact_xmls")
 FAILED_LOG  = os.path.join(OUT_DIR, "_failed.tsv")
 SUMMARY_DIR = os.path.join(BASE, "summaries")
@@ -90,16 +95,66 @@ SUMMARY_HTML= os.path.join(SUMMARY_DIR, "high_impact_xml.html")
 EMAIL       = os.environ.get("CONTACT_EMAIL", "your-email@example.com")
 DELAY       = 0.34                                           # ~3 req/s (no API key)
 IF_OVERRIDE = os.environ.get("IF_THRESHOLD", "").strip()
-PCTL        = float(os.environ.get("PERCENTILE", "0.90"))
+PCTL        = 0.90                                           # resolved by read_percentile()
 TIME_BUDGET = float(os.environ.get("TIME_BUDGET", "0"))     # 0 = unlimited
 MAX_TRIES   = int(os.environ.get("MAX_TRIES", "5"))
 HTTP_TIMEOUT= (10, 120)                                      # (connect, read) seconds
 RETRY_FAILED= os.environ.get("RETRY_FAILED", "").strip() in ("1", "true", "yes")
+USE_ARCHIVE_SKIP = os.environ.get("USE_ARCHIVE_SKIP", "1") not in ("0", "false", "False")
 
 
 # --------------------------------------------------------------------------- #
 # 1-2. Selection -> pmid2pmcid dictionary (built from the 90th-pctile subset)
 # --------------------------------------------------------------------------- #
+def read_percentile():
+    """Resolve the impact percentile: STDIN first, PERCENTILE env as the fallback.
+
+    ``step_1_publications.html`` documents this stage as taking the percentile
+    "read from STDIN as a decimal 0-1 (a blank line falls back to
+    PERCENTILE=0.90)", so a bare ``echo 0.01 | python high_impact_xml.py`` must
+    select the 1st percentile. Resolution order:
+
+      1. ``IF_THRESHOLD``  -- overrides the percentile entirely (handled by the
+         caller); this function is not consulted.
+      2. ``PERCENTILE``    -- when explicitly set in the environment it wins and
+         STDIN is *not* read. That is how ``step_1_orchestrator.py`` passes an
+         already-validated value, and it keeps this stage from blocking on a TTY
+         after the orchestrator has prompted for it.
+      3. STDIN             -- one line, typed at the prompt or piped in.
+      4. 0.90              -- built-in default on a blank line or EOF.
+    """
+    env = os.environ.get("PERCENTILE", "").strip()
+    if env:
+        return _valid_percentile(env, "PERCENTILE env")
+
+    sys.stdout.write("Publication impact percentile (decimal between 0 and 1): ")
+    sys.stdout.flush()          # emit before blocking, even when STDIN is a pipe
+    line = sys.stdin.readline()  # "" on EOF (closed/empty STDIN)
+    entry = line.strip()
+    if not entry:
+        print("[select] no percentile entered - using the 0.90 default", file=sys.stderr)
+        return 0.90
+    return _valid_percentile(entry, "STDIN")
+
+
+def _valid_percentile(text, source):
+    """Parse a decimal in [0, 1], rejecting the two common mis-entries.
+
+    A whole-number percentile ("90" for "0.90") or a stray character would
+    otherwise silently select an unexpected subset, which reads as "my
+    percentile was ignored" -- so they are rejected here, by name.
+    """
+    try:
+        value = float(text)
+    except ValueError:
+        raise SystemExit("error: percentile from %s must be a decimal between 0 and 1, "
+                         "got %r" % (source, text))
+    if not 0.0 <= value <= 1.0:
+        raise SystemExit("error: percentile from %s must be a fraction between 0 and 1 "
+                         "(e.g. 0.90 for the 90th percentile), got %r" % (source, text))
+    return value
+
+
 def parse_if(s):
     try:
         return float((s or "").strip())
@@ -135,6 +190,27 @@ def load_selection():
             meta[pmc] = {"pmid": r["pmid"], "journal": r["source_publication"],
                          "issn": r["issn"], "if": v, "year": r["year"]}
     return threshold, pmid2pmcid, meta
+
+
+def load_archive_served():
+    """PMC ids already supplied from the local XML archive by from_archive.py.
+
+    ``from_archive.py`` (stage 1b) matches the query result against a local
+    archive and writes the ids it served to ``pmids/from_archive_pmcids.txt``.
+    Those articles are already on disk, so re-fetching them here would only spend
+    NCBI request budget on files we have. The file is optional -- when it is
+    absent (from_archive.py was never run) nothing changes. ``USE_ARCHIVE_SKIP=0``
+    ignores it and downloads the whole selection.
+    """
+    served = set()
+    if not (USE_ARCHIVE_SKIP and os.path.exists(ARCHIVE_SKIP)):
+        return served
+    with open(ARCHIVE_SKIP, encoding="utf-8") as fh:
+        for ln in fh:
+            p = ln.strip()
+            if p and not p.startswith("#"):
+                served.add(p)
+    return served
 
 
 # --------------------------------------------------------------------------- #
@@ -448,8 +524,11 @@ def build_summary(threshold, meta):
     H.append("<h1>High-impact PMC XML export &mdash; summary</h1>")
     H.append("<p class='meta'>Generated by <code>high_impact_xml.py</code> (written after "
              "<code>bacs/pmc_xml.py</code>) &middot; selection: pmc_id present AND article-weighted "
-             "impact factor &ge; <strong>%.4f</strong> (90th percentile) &middot; %d pmc_ids in the "
-             "<code>pmid2pmcid</code> dictionary</p>" % (threshold, len(meta)))
+             "impact factor &ge; <strong>%.4f</strong> (%s) &middot; %d pmc_ids in the "
+             "<code>pmid2pmcid</code> dictionary</p>"
+             % (threshold,
+                "IF_THRESHOLD override" if IF_OVERRIDE else "%gth percentile" % (PCTL * 100),
+                len(meta)))
 
     med = _pctile(0.5, if_vals)
     cards = [(_fmt(n), "XMLs exported"),
@@ -530,8 +609,8 @@ def build_summary(threshold, meta):
                      "<td class='num dim'>%.1f%%</td></tr>"
                      % (name, _fmt(v), w, (v / len(if_vals) * 100)))
         H.append("</tbody></table>")
-        H.append("<p class='dim'>All exported articles sit at or above the 90th-percentile cut "
-                 "(%.2f), so values cluster in the upper bands.</p>" % threshold)
+        H.append("<p class='dim'>All exported articles sit at or above the %gth-percentile cut "
+                 "(%.2f), so values cluster in the upper bands.</p>" % (PCTL * 100, threshold))
     else:
         H.append("<p class='dim'>No impact-factor values available.</p>")
 
@@ -573,10 +652,25 @@ def main():
     os.makedirs(os.path.dirname(IN_TSV), exist_ok=True)   # create input dir (pmids/) if missing
     if not os.path.exists(IN_TSV):
         raise SystemExit("error: input not found: %s" % IN_TSV)
+    global PCTL
+    if not IF_OVERRIDE:                       # IF_THRESHOLD bypasses the percentile
+        PCTL = read_percentile()
     threshold, pmid2pmcid, meta = load_selection()
     sel_desc = "IF_THRESHOLD override" if IF_OVERRIDE else "PERCENTILE=%g" % PCTL
     print("[select] IF threshold=%.4f (%s); pmid2pmcid has %d entries"
           % (threshold, sel_desc, len(pmid2pmcid)), file=sys.stderr)
+
+    # Drop the articles from_archive.py already served from the local archive --
+    # they are on disk, so downloading them again buys nothing. Dropped from meta
+    # too, so this summary describes exactly what THIS stage exported.
+    served = load_archive_served()
+    if served:
+        pmid2pmcid = {p: c for p, c in pmid2pmcid.items() if c not in served}
+        n_dropped = len(meta) - len([c for c in meta if c not in served])
+        meta = {c: m for c, m in meta.items() if c not in served}
+        print("[archive] %d of the selected articles are already in the local archive "
+              "(from_archive.py); %d left to download"
+              % (n_dropped, len(pmid2pmcid)), file=sys.stderr)
     complete = False
     try:
         complete = export(pmid2pmcid)

@@ -20,6 +20,7 @@ tmp_trainer/
 
 # ---- Step-1 generated corpora / intermediates (regenerated each run) ----
 pmids/
+archive_xmls/
 high_impact_xmls/
 ncbi_pdfs_grobid/
 grobid_xmls/

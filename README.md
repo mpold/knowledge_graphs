@@ -5,7 +5,7 @@ A biomedical relation-extraction pipeline: from a single **PubMed query** to an 
 
 | Stage | What | Where it runs | Entry point |
 |------:|------|---------------|-------------|
-| **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | 7 root scripts, orchestrated by `run_pipeline.py` |
+| **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (9 stages over 8 root scripts) |
 | **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (18-step chain) |
 | **3** | Triples → high-confidence gene–gene **graph** | local | `high_confidence_g.py` |
 
@@ -28,12 +28,20 @@ python -m pip install -r requirements.txt
 # 2. (stage 2 only) GPU deps — normally you run stage 2 on Kaggle instead; see below
 python -m pip install -r gpu_bundle/requirements.txt
 
-# 3. run the whole pipeline
-python run_pipeline.py --query "pancreatic cancer"
+# 3. stage 1 — query to NER corpus (prompts for the impact percentile)
+python step_1_orchestrator.py "pancreatic cancer"
+
+# 4. stage 2 — NER corpus to scored triples (needs a CUDA GPU; usually Kaggle)
+python gpu_bundle/gpu.py
+
+# 5. stage 3 — triples to the graph
+python high_confidence_g.py --data-root kaggle_working
 ```
 
-`run_pipeline.py` runs the stages in order and aborts on the first hard failure. Run a
-subset with `--steps` (e.g. `--steps 1`, `--steps 2,3`).
+**There is no single all-stage runner** — each stage has its own entry point and they hand off
+by files, because stage 2 almost always runs on different hardware than 1 and 3.
+`step_1_orchestrator.py` chains stage 1's nine steps and aborts on the first non-zero exit;
+run a sub-range with `--start` / `--stop` / `--only`.
 
 > **Realistically, stage 2 runs on Kaggle**, not your laptop — it needs a CUDA GPU and the
 > large ontology databases. The typical flow is: **stage 1 locally → stage 2 on Kaggle →
@@ -49,7 +57,7 @@ subset with `--steps` (e.g. `--steps 1`, `--steps 2,3`).
 | Packages | `requests` | `torch`, `transformers`, `datasets<4`, `numpy`, `lxml` | *stdlib only* |
 | Hardware | any | **CUDA GPU** (CPU = very slow) | any |
 | Network | NCBI / OpenAlex / CrossRef / PMC | HuggingFace (models + BigBIO), NCBI | optional (graph CDN) |
-| Extra | **Docker + GROBID** (for `grobid_xml.py`) | ontology DB files (below) | — |
+| Extra | **Docker + GROBID** (for `grobid_xml.py`); *optional* local XML archive (steps 1b/6b) | ontology DB files (below) | — |
 
 Full details per script are in the `step_*.html` docs and `requirements.html`.
 
@@ -58,12 +66,16 @@ Full details per script are in the `step_*.html` docs and `requirements.html`.
 ## The three stages
 
 ### Stage 1 — publications (local)
-Seven scripts in the bundle root, run in order by `run_pipeline.py`:
-`pubmed_query.py` → `high_impact_xml.py` → `xml_structure.py` → `ncbi_pdf.py` →
-`grobid_xml.py` → `named_entity_xml.py` → `pre_ner_xml_structure.py`.
+Eight scripts in the bundle root, run as nine steps by `step_1_orchestrator.py`:
+`pubmed_query.py` **(1)** → `from_archive.py` **(1b)** → `high_impact_xml.py` **(2)** →
+`xml_structure.py` **(3)** → `ncbi_pdf.py` **(4)** → `grobid_xml.py` **(5)** →
+`named_entity_xml.py` **(6)** → `from_archive.py` **(6b)** → `pre_ner_xml_structure.py` **(7)**.
 
-- Input: a PubMed query (read from **STDIN** by `pubmed_query.py`; `run_pipeline.py --query`
-  pipes it in). The query used for this project is:
+Steps are addressed by **label**, not position, so the seven core stages keep the numbers they
+always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` slots in as 1b/6b.
+
+- Input: a PubMed query (read from **STDIN** by `pubmed_query.py`; the orchestrator's first
+  bare argument pipes it in). The query used for this project is:
   ```
   "non-small cell lung cancer"[Title/Abstract] NOT "small cell lung carcinoma"[Title/Abstract]
   ```
@@ -73,19 +85,40 @@ Seven scripts in the bundle root, run in order by `run_pipeline.py`:
   > excludes all of them → **0 hits**. Excluding `"small cell lung carcinoma"` (carcinoma,
   > not cancer) avoids the trap and returns the intended set. A query that matches 0 records
   > now aborts step 1 fast with an explanation instead of hanging.
+- **Reuse a local archive — `from_archive.py` (steps 1b + 6b).** Matches the query result
+  against a local XML archive (`ARCHIVE_DIR`, default `../xmls`) by **PMC id** and serves every
+  publication already held there instead of re-fetching it, turning the pipeline's slowest part
+  (one eFetch per article at ~3 req/s) into a file copy. It picks one representative per paper —
+  **full-text JATS → GROBID TEI → abstract-only JATS** — **copies** it (the archive is opened
+  read-only and never modified) into `archive_xmls/` and `gpu_bundle/experimental_ner/`, and
+  writes `pmids/from_archive_pmcids.txt` so step 2 skips those ids. On the reference
+  lung large-cell run, **309 of 331** PMC-bearing hits (93%) came from the archive and only 22
+  were downloaded.
+  > **Why it runs twice.** Step 6 clean-rebuilds `gpu_bundle/experimental_ner/` and would discard
+  > the archive contribution, so step **6b** re-runs the same script to restore it from
+  > `archive_xmls/`. It is idempotent — run it a third time and nothing changes.
+
+  Steps 1b/6b are **skipped automatically, with a printed notice, when the archive directory does
+  not exist**, so a checkout with no local corpus still runs the plain seven-stage pipeline.
+  Naming one explicitly (`--archive` / `ARCHIVE_DIR`) that is missing is a hard error instead —
+  that is a typo, not an absence. `--no-archive` skips them outright.
 - **Impact percentile prompt:** when `step_1_orchestrator.py` runs step 2 it prompts
   `Publication impact percentile (decimal between 0 and 1):` on its own line right after
-  the query, and passes the entered value to `high_impact_xml.py` via the `PERCENTILE`
-  env var — the only channel that script reads it from. It selects articles whose journal
-  impact factor is at or above that percentile (e.g. `0.90` → top 10%). A blank line falls
-  back to any inherited `PERCENTILE` env var, or the built-in `0.90` default.
+  the query, and hands the entered value to `high_impact_xml.py` on its **STDIN** and as the
+  `PERCENTILE` env var (env wins there, so the validated value takes effect either way). It
+  selects articles whose journal impact factor is at or above that percentile (e.g. `0.90` →
+  top 10%; `0.01` → effectively everything). A blank line falls back to the built-in `0.90`
+  default. Run standalone, the script reads the percentile from STDIN:
+  `echo 0.01 | python high_impact_xml.py`.
 - Reaches NCBI E-utilities, OpenAlex, CrossRef, PMC. Set `NCBI_API_KEY` to lift the
   3 req/s rate limit. Optional env vars: `TIME_BUDGET`, `IF_THRESHOLD`, `PERCENTILE`,
-  `RETRY_FAILED`, `GROBID_*`, … (see `step_1_publications.html`).
+  `RETRY_FAILED`, `ARCHIVE_DIR`, `USE_ARCHIVE_SKIP`, `GROBID_*`, …
+  (see `step_1_publications.html`).
 - **`grobid_xml.py` needs Docker + a GROBID server on `:8070`** (it can auto-launch Docker
   Desktop + the container). It is skippable when every article already has JATS full text.
-- Output: the NER corpus `gpu_bundle/experimental_ner/PMC*.xml` — the input to stage 2.
-- **Optional — `subtract.py`** (not one of the seven, not run by the orchestrator): reads two
+- Output: the NER corpus `gpu_bundle/experimental_ner/PMC*.xml` — the **union** of the downloaded
+  and archive-served papers, de-duplicated by PMC id. This is the input to stage 2.
+- **Optional — `subtract.py`** (not one of the nine, not run by the orchestrator): reads two
   directory paths from **STDIN** and moves entries of `directory_1` whose names also appear in
   `directory_2` into `gpu_bundle/removed/` (relocated, not deleted; name collisions get a
   `_1`/`_2` suffix), writing `summaries/subtract_optional.html`. Handy for de-duplicating this
@@ -107,8 +140,8 @@ DISEASE/CHEMICAL normalization → rule triples → learned relation extraction 
    without it step 2 fails with `ModuleNotFoundError: No module named 'bioc'`.)
 4. Download the produced **`kaggle_working.zip`**.
 
-**Locally:** `python run_pipeline.py --steps 2` (or `cd gpu_bundle && python gpu.py`). Needs
-the GPU deps and the DB files present; preview with `python gpu_bundle/gpu.py --list`.
+**Locally:** `cd gpu_bundle && python gpu.py`. Needs the GPU deps and the DB files present;
+preview with `python gpu_bundle/gpu.py --list`.
 
 Output: `TRIPLES/` (incl. the scored + normalized triples) and `kaggle_working.zip`.
 
@@ -163,15 +196,21 @@ filter offline). The `experimental_ner/` corpus is produced by **stage 1** (or d
 own). Trained checkpoints (`ppi-biobert-re/`, `biored-biobert-re/`) and run outputs are generated,
 not committed.
 
+**Optional — a local XML archive.** If you have a directory of previously fetched
+`PMC*.xml` / `PMC*.grobid.tei.xml` files, point `ARCHIVE_DIR` (or `--archive`) at it and stage 1's
+steps 1b/6b will serve matching publications from disk instead of re-downloading them. Nothing in
+it is modified. Without one, stage 1 simply downloads everything.
+
 ---
 
 ## Repository layout
 
 ```
 cancer_knowledge_graph/
-├── run_pipeline.py            # end-to-end orchestrator (this bundle's entry point)
+├── step_1_orchestrator.py     # stage 1 entry point (chains its 9 steps)
 ├── requirements.txt           # local deps (stages 1 & 3): requests
-├── pubmed_query.py … pre_ner_xml_structure.py   # stage 1: the 7 publications scripts
+├── pubmed_query.py … pre_ner_xml_structure.py   # stage 1: the 7 core publications scripts
+├── from_archive.py            # stage 1: steps 1b/6b — serve the query from a local XML archive
 ├── subtract.py                # stage 1: optional dir-subtract utility (-> gpu_bundle/removed)
 ├── high_confidence_g.py       # stage 3: the graph (typed edges + --merge)
 ├── high_confidence.py         # stage 3: DEPRECATED "G_D_C" variant

@@ -23,11 +23,19 @@ Usage
     # query typed at the prompt (if neither of the above is given)
     python step_1_orchestrator.py
 
+    # both inputs piped in (query first, percentile second)
+    printf 'your pubmed query\n0.01\n' | python step_1_orchestrator.py
+
+    # re-seed the archive contribution after a manual step 6
+    python step_1_orchestrator.py --only 6b
+
 Options
 -------
-    --start N     start from step N (1-7) instead of step 1
-    --stop  N     stop after step N (1-7)
-    --only  N     run only step N
+    --start S     start from step S (1, 1b, 2 .. 6, 6b, 7) instead of step 1
+    --stop  S     stop after step S
+    --only  S     run only step S
+    --archive D   local XML archive for steps 1b/6b (default: ../xmls)
+    --no-archive  skip steps 1b/6b and download the whole selection
     --list        print the pipeline order and exit
     --dry-run     print what would run without executing anything
 
@@ -42,10 +50,26 @@ percentile on a dedicated line with::
 
     Publication impact percentile (decimal between 0 and 1):
 
-and passes the value to ``high_impact_xml.py`` via its ``PERCENTILE`` env var
-(which is the only place that script reads the percentile from). A blank line
-lets that script fall back to any inherited ``PERCENTILE`` env var, or its
+and hands the value to ``high_impact_xml.py`` on that script's STDIN, *and* as
+its ``PERCENTILE`` env var (env wins over STDIN there, so the validated value
+is what takes effect either way). A blank line is still fed as an empty STDIN
+line -- so the child never blocks re-prompting -- and it falls back to its
 built-in default of 0.90.
+
+The archive steps (1b / 6b)
+---------------------------
+``from_archive.py`` appears **twice**. As step 1b it matches the query result
+against a local XML archive and serves every publication already held there,
+writing ``pmids/from_archive_pmcids.txt`` so step 2 does not re-download them.
+Step 6 (``named_entity_xml.py``) clean-rebuilds ``gpu_bundle/experimental_ner/``
+and would discard that contribution, so step 6b re-runs the same script to
+restore it from ``archive_xmls/``.
+
+Both are skipped automatically -- with a printed notice -- when the archive
+directory does not exist, so a checkout with no local archive still runs the
+plain seven-stage pipeline. Naming an archive explicitly (``--archive`` or the
+``ARCHIVE_DIR`` env var) makes a missing directory a hard error instead, since
+that is a typo rather than an absence. ``--no-archive`` skips them outright.
 """
 
 import os
@@ -53,36 +77,56 @@ import sys
 import subprocess
 
 # Scripts in execution order (matches step_1_publications.html section 1).
+#
+# Steps are keyed by LABEL, not by position: from_archive.py runs twice, as "1b"
+# and "6b", so keeping the seven core stages numbered 1-7 means --start 4 still
+# means what it always did and the labels match the documentation.
 PIPELINE = [
-    "pubmed_query.py",          # 1. PubMed query (STDIN) -> pmids/pmid_pmc_ids.tsv
-    "high_impact_xml.py",       # 2. pmid_pmc_ids.tsv     -> high_impact_xmls/PMC*.xml
-    "xml_structure.py",         # 3. high_impact_xmls/    -> summaries/xml_structure.html
-    "ncbi_pdf.py",              # 4. no-<body> XMLs       -> ncbi_pdfs_grobid/PMC*.pdf
-    "grobid_xml.py",            # 5. PDFs (Docker+GROBID) -> grobid_xmls/PMC*.grobid.tei.xml
-    "named_entity_xml.py",      # 6. grobid+high_impact   -> gpu_bundle/experimental_ner/
-    "pre_ner_xml_structure.py", # 7. experimental_ner/    -> summaries/pre_ner_xml_structure.html
+    ("1",  "pubmed_query.py",          "PubMed query (STDIN) -> pmids/pmid_pmc_ids.tsv"),
+    ("1b", "from_archive.py",          "query result vs local archive -> experimental_ner/ + skip-list"),
+    ("2",  "high_impact_xml.py",       "pmid_pmc_ids.tsv (minus skip-list) -> high_impact_xmls/"),
+    ("3",  "xml_structure.py",         "high_impact_xmls/ -> summaries/xml_structure.html"),
+    ("4",  "ncbi_pdf.py",              "no-<body> XMLs -> ncbi_pdfs_grobid/PMC*.pdf"),
+    ("5",  "grobid_xml.py",            "PDFs (Docker+GROBID) -> grobid_xmls/PMC*.grobid.tei.xml"),
+    ("6",  "named_entity_xml.py",      "grobid+high_impact -> gpu_bundle/experimental_ner/ (REBUILD)"),
+    ("6b", "from_archive.py",          "archive_xmls/ -> experimental_ner/ (re-seed after the rebuild)"),
+    ("7",  "pre_ner_xml_structure.py", "experimental_ner/ -> summaries/pre_ner_xml_structure.html"),
 ]
+
+# Steps served by from_archive.py -- skipped together when there is no archive.
+ARCHIVE_STEPS = {"1b", "6b"}
+
+# label -> position in PIPELINE, for resolving --start/--stop/--only.
+STEP_INDEX = {key: i for i, (key, _script, _desc) in enumerate(PIPELINE)}
 
 # Directory this orchestrator lives in -- all paths are script-relative so the
 # pipeline can be launched from any working directory.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Default archive for steps 1b/6b -- the same default from_archive.py itself uses.
+DEFAULT_ARCHIVE = os.path.join(BASE_DIR, os.pardir, "xmls")
+
 
 def parse_step(value):
-    """Parse a 1-based step number, validating it against the pipeline length."""
-    try:
-        n = int(value)
-    except ValueError:
-        sys.exit("error: step must be an integer 1-%d, got %r" % (len(PIPELINE), value))
-    if not 1 <= n <= len(PIPELINE):
-        sys.exit("error: step out of range: %d (valid: 1-%d)" % (n, len(PIPELINE)))
-    return n
+    """Resolve a step label ("1", "1b", "6b", "7") to its position in PIPELINE.
+
+    Labels rather than bare indices, so that inserting from_archive.py as 1b/6b
+    leaves the seven core stages numbered exactly as they always were (and as
+    step_1_publications.html documents them).
+    """
+    key = str(value).strip().lower()
+    if key not in STEP_INDEX:
+        sys.exit("error: unknown step %r (valid: %s)"
+                 % (value, ", ".join(k for k, _s, _d in PIPELINE)))
+    return STEP_INDEX[key]
 
 
 def print_list():
     print("Step 1 publications pipeline -- order of execution:")
-    for i, script in enumerate(PIPELINE, 1):
-        print("  %d. %s" % (i, script))
+    for key, script, desc in PIPELINE:
+        print("  %-3s %-26s %s" % (key + ".", script, desc))
+    print("\n  1b/6b are the same script (from_archive.py): 1b serves the query result")
+    print("  from a local XML archive, 6b restores it after step 6 rebuilds the corpus.")
 
 
 def get_query(cli_query):
@@ -107,9 +151,10 @@ def get_percentile():
     """Read + validate the publication-impact percentile for step 2 from STDIN.
 
     Prompted on its own dedicated line *after* the query is entered; the value is
-    passed to ``high_impact_xml.py`` via its ``PERCENTILE`` env var (the only place
-    that script reads the percentile). A blank line (or EOF) is returned as "" so
-    that script falls back to its inherited PERCENTILE env / 0.90 default.
+    handed to ``high_impact_xml.py`` on its STDIN and as its ``PERCENTILE`` env
+    var (env wins there, so the validated value takes effect either way). A blank
+    line (or EOF) is returned as "" and fed on as an empty STDIN line, so that
+    script falls back to its 0.90 default without re-prompting.
 
     A non-blank entry must be a decimal in [0, 1]. The two common mis-entries --
     a whole-number percentile ("90" instead of "0.90") or a stray character --
@@ -134,16 +179,50 @@ def get_percentile():
     return pctl
 
 
-def run_stage(step_no, script, stdin_text, dry_run, env_extra=None):
+def resolve_archive(cli_archive, no_archive, wanted):
+    """Decide the archive directory for steps 1b/6b. Returns (dir_or_None, skip).
+
+    An archive named *explicitly* -- ``--archive`` or the ``ARCHIVE_DIR`` env var
+    -- that does not exist is a hard error: the user meant a specific directory
+    and got the path wrong, and silently downloading ~3 req/s instead is a poor
+    way to find that out. An absent *default* archive is not an error at all: a
+    fresh checkout simply has no local corpus, so 1b/6b are skipped with a notice
+    and the plain seven-stage pipeline runs.
+    """
+    if not wanted:
+        return None, True
+    if no_archive:
+        print("[orchestrator] --no-archive: skipping steps 1b/6b; the whole "
+              "selection will be downloaded", flush=True)
+        return None, True
+
+    env_archive = os.environ.get("ARCHIVE_DIR", "").strip()
+    explicit = cli_archive or env_archive
+    path = os.path.abspath(explicit or DEFAULT_ARCHIVE)
+
+    if os.path.isdir(path):
+        print("[orchestrator] archive for steps 1b/6b: %s" % path, flush=True)
+        return path, False
+    if explicit:
+        sys.exit("error: archive not found: %s\n"
+                 "       (named via %s) -- fix the path or pass --no-archive"
+                 % (path, "--archive" if cli_archive else "ARCHIVE_DIR"))
+    print("[orchestrator] no local archive at %s -- skipping steps 1b/6b; every "
+          "selected article will be downloaded" % path, flush=True)
+    return None, True
+
+
+def run_stage(step_key, script, stdin_text, dry_run, env_extra=None):
     """Run a single pipeline stage, returning its exit code.
 
     ``stdin_text`` is the text fed to the child's STDIN (with a trailing newline),
     or ``None`` for stages that take no STDIN input. ``env_extra`` is an optional
     dict of environment variables layered over the inherited environment for the
-    child (e.g. ``PERCENTILE`` for ``high_impact_xml.py``).
+    child (e.g. ``PERCENTILE`` for ``high_impact_xml.py``, ``ARCHIVE_DIR`` for
+    ``from_archive.py``).
     """
     path = os.path.join(BASE_DIR, script)
-    label = "[%d/%d] %s" % (step_no, len(PIPELINE), script)
+    label = "[step %s of %d] %s" % (step_key, len(PIPELINE), script)
 
     if not os.path.isfile(path):
         print("%s -- MISSING (%s)" % (label, path), file=sys.stderr)
@@ -185,7 +264,8 @@ def run_stage(step_no, script, stdin_text, dry_run, env_extra=None):
 def main(argv):
     args = argv[1:]
 
-    start, stop, cli_query, dry_run = 1, len(PIPELINE), None, False
+    start, stop, cli_query, dry_run = 0, len(PIPELINE) - 1, None, False
+    archive, no_archive = None, False
     i = 0
     while i < len(args):
         a = args[i]
@@ -206,6 +286,11 @@ def main(argv):
         elif a == "--only":
             i += 1
             start = stop = parse_step(args[i])
+        elif a == "--archive":
+            i += 1
+            archive = args[i]
+        elif a == "--no-archive":
+            no_archive = True
         elif a.startswith("--"):
             sys.exit("error: unknown option %r (try --help)" % a)
         else:
@@ -216,41 +301,57 @@ def main(argv):
         i += 1
 
     if start > stop:
-        sys.exit("error: --start (%d) is after --stop (%d)" % (start, stop))
+        sys.exit("error: --start (%s) is after --stop (%s)"
+                 % (PIPELINE[start][0], PIPELINE[stop][0]))
+
+    selected = [(key, script) for key, script, _desc in PIPELINE[start:stop + 1]]
+    archive_dir, skip_archive = resolve_archive(archive, no_archive,
+                                                any(k in ARCHIVE_STEPS for k, _s in selected))
+    if skip_archive:
+        selected = [(k, s) for k, s in selected if k not in ARCHIVE_STEPS]
 
     # Collect each stage's input in the order the prompts are consumed: the query
-    # (step 1, fed on STDIN) first, then the impact percentile (step 2, passed as
-    # the PERCENTILE env var since high_impact_xml.py reads it only from there).
-    stdin_by_script = {}
-    env_by_script = {}
-    if start == 1:
-        stdin_by_script["pubmed_query.py"] = get_query(cli_query)
-    if start <= 2 <= stop:
+    # (step 1, fed on STDIN) first, then the impact percentile (step 2).
+    stdin_by_step = {}
+    env_by_step = {}
+    keys = {k for k, _s in selected}
+    if "1" in keys:
+        stdin_by_step["1"] = get_query(cli_query)
+    if "2" in keys:
         pctl = get_percentile()
+        # Fed on STDIN (the documented input) *and* as PERCENTILE, which wins in
+        # high_impact_xml.py -- so the value validated here is what takes effect
+        # either way. A blank entry is still fed as an empty STDIN line, so the
+        # child falls through to its 0.90 default instead of re-prompting on a
+        # TTY the orchestrator has already prompted on.
+        stdin_by_step["2"] = pctl
         if pctl:
-            env_by_script["high_impact_xml.py"] = {"PERCENTILE": pctl}
-            # Confirm the value that will reach step 2 -- high_impact_xml.py reads
-            # it from PERCENTILE only, so echoing it here makes "did my percentile
-            # get through?" answerable without reading the child's [select] line.
+            env_by_step["2"] = {"PERCENTILE": pctl}
+            # Echoing it makes "did my percentile get through?" answerable
+            # without reading the child's [select] line.
             print("[orchestrator] step 2 (high_impact_xml.py) will run with "
                   "PERCENTILE=%s" % pctl, flush=True)
         else:
             print("[orchestrator] no percentile entered; step 2 (high_impact_xml.py) "
-                  "will use its PERCENTILE env / 0.90 default", flush=True)
+                  "will use its 0.90 default", flush=True)
+    if archive_dir:
+        for key in ARCHIVE_STEPS:
+            env_by_step[key] = {"ARCHIVE_DIR": archive_dir}
 
-    for step_no in range(start, stop + 1):
-        script = PIPELINE[step_no - 1]
-        code = run_stage(step_no, script, stdin_by_script.get(script), dry_run,
-                         env_by_script.get(script))
+    for key, script in selected:
+        code = run_stage(key, script, stdin_by_step.get(key), dry_run,
+                         env_by_step.get(key))
         if code != 0:
             print(
-                "\nPIPELINE ABORTED at step %d (%s): exit code %d"
-                % (step_no, script, code),
+                "\nPIPELINE ABORTED at step %s (%s): exit code %d"
+                % (key, script, code),
                 file=sys.stderr,
             )
             return code
 
-    print("\nPIPELINE COMPLETE: steps %d-%d finished successfully." % (start, stop))
+    print("\nPIPELINE COMPLETE: steps %s-%s finished successfully (%d stage%s run)."
+          % (PIPELINE[start][0], PIPELINE[stop][0], len(selected),
+             "" if len(selected) == 1 else "s"))
     return 0
 
 

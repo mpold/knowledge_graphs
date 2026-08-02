@@ -42,9 +42,9 @@ covered separately). The seven scripts form a single linear pipeline that turns 
 into a de-duplicated, full-text corpus ready for named-entity recognition.</p>
 
 <div class='stat-grid'>
-  <div class='stat'><div class='v'>7</div><div class='k'>scripts in the pipeline</div></div>
+  <div class='stat'><div class='v'>8</div><div class='k'>scripts in the pipeline (7 + <code>from_archive.py</code>)</div></div>
   <div class='stat'><div class='v'>2</div><div class='k'>STDIN inputs (PubMed query, impact percentile)</div></div>
-  <div class='stat'><div class='v'>7</div><div class='k'>HTML summaries produced</div></div>
+  <div class='stat'><div class='v'>8</div><div class='k'>HTML summaries produced</div></div>
   <div class='stat'><div class='v'>linear</div><div class='k'>each step feeds the next</div></div>
 </div>
 
@@ -63,6 +63,9 @@ needs the same network and Docker access.</div>
   <div class='node'><span class='s'>1. pubmed_query.py</span>
     <div class='io'>in: PubMed query (STDIN) &nbsp;&rarr;&nbsp; out: <code>pmids/pmid_pmc_ids.tsv</code></div></div>
   <div class='arrow'>&darr;&nbsp; pmid_pmc_ids.tsv</div>
+  <div class='node'><span class='s'>1b. from_archive.py</span> <span class='pill'>reuses a local archive</span>
+    <div class='io'>in: <code>pmids/pmid_pmc_ids.tsv</code> + a local XML archive (<code>ARCHIVE_DIR</code>, default <code>../xmls</code>) &nbsp;&rarr;&nbsp; out: <code>archive_xmls/</code>, <code>gpu_bundle/experimental_ner/</code>, <code>pmids/from_archive_pmcids.txt</code></div></div>
+  <div class='arrow'>&darr;&nbsp; pmid_pmc_ids.tsv &minus; from_archive_pmcids.txt</div>
   <div class='node'><span class='s'>2. high_impact_xml.py</span>
     <div class='io'>in: <code>pmids/pmid_pmc_ids.tsv</code> + impact percentile (STDIN) &nbsp;&rarr;&nbsp; out: <code>high_impact_xmls/PMC*.xml</code></div></div>
   <div class='arrow'>&darr;&nbsp; high_impact_xmls/</div>
@@ -77,7 +80,10 @@ needs the same network and Docker access.</div>
   <div class='arrow'>&darr;&nbsp; grobid_xmls/ + high_impact_xmls/</div>
   <div class='node'><span class='s'>6. named_entity_xml.py</span>
     <div class='io'>in: <code>grobid_xmls/</code> + <code>high_impact_xmls/</code> &nbsp;&rarr;&nbsp; out: <code>named_entity_xmls/</code>, <code>gpu_bundle/experimental_ner/</code></div></div>
-  <div class='arrow'>&darr;&nbsp; gpu_bundle/experimental_ner/</div>
+  <div class='arrow'>&darr;&nbsp; gpu_bundle/experimental_ner/ <span class='dim'>(clean-rebuilt &mdash; archive copies dropped)</span></div>
+  <div class='node'><span class='s'>6b. from_archive.py</span> <span class='pill'>re-seed</span>
+    <div class='io'>in: <code>archive_xmls/</code> &nbsp;&rarr;&nbsp; out: <code>gpu_bundle/experimental_ner/</code> <span class='dim'>(restores the archive contribution step 6 wiped)</span></div></div>
+  <div class='arrow'>&darr;&nbsp; gpu_bundle/experimental_ner/ <span class='dim'>(downloaded &cup; archive)</span></div>
   <div class='node'><span class='s'>7. pre_ner_xml_structure.py</span>
     <div class='io'>in: <code>gpu_bundle/experimental_ner/</code> &nbsp;&rarr;&nbsp; out: <code>summaries/pre_ner_xml_structure.html</code></div></div>
   <div class='arrow'>&middot;&middot;&middot;&nbsp; optional &middot; run by hand</div>
@@ -108,11 +114,31 @@ wiping its output dir; it is also skipped entirely when every article already ha
       <code>JIF_TABLE</code>). The resumable <code>pmids/</code> caches are <em>not</em> wiped between runs.</td>
 </tr>
 <tr>
+  <td class='num'>1b</td>
+  <td><code>from_archive.py</code> <span class='pill'>archive reuse</span></td>
+  <td><code>pmids/pmid_pmc_ids.tsv</code><br>a local XML archive
+      <span class='dim'>(env: <code>ARCHIVE_DIR</code> default <code>../xmls</code>, <code>MIN_IF</code>,
+      <code>ORIGINAL_ONLY</code>, <code>NO_SKIP_LIST</code>, <code>DRY_RUN</code>)</span></td>
+  <td><code>archive_xmls/PMC*.{xml,grobid.tei.xml}</code><br><code>gpu_bundle/experimental_ner/PMC*.{...}</code><br><code>pmids/from_archive_pmcids.txt</code><br><code>summaries/from_archive.html</code></td>
+  <td>Determines which publications of the query result <strong>already exist</strong> in a local XML
+      archive (identity = PMC id) and serves them from there instead of re-downloading. Picks one
+      representative per paper &mdash; <strong>full-text JATS &rarr; GROBID TEI &rarr; abstract-only
+      JATS</strong> &mdash; <strong>copies</strong> it (the archive is opened read-only and never
+      modified) into <code>archive_xmls/</code> and <code>gpu_bundle/experimental_ner/</code>, and writes
+      the PMC ids it served to <code>pmids/from_archive_pmcids.txt</code> so step&nbsp;2 skips them.
+      <strong>Run again as step&nbsp;6b</strong>, since step&nbsp;6 clean-rebuilds
+      <code>experimental_ner/</code> and would otherwise discard the archive contribution. Prunes
+      <code>archive_xmls/</code> to the current hit set but <strong>never empties</strong>
+      <code>experimental_ner/</code>, which holds the union of both sources. Idempotent.</td>
+</tr>
+<tr>
   <td class='num'>2</td>
   <td><code>high_impact_xml.py</code></td>
   <td><code>pmids/pmid_pmc_ids.tsv</code><br>impact percentile read from <strong>STDIN</strong>
-      (a decimal 0&ndash;1)
-      <span class='dim'>(env: <code>IF_THRESHOLD</code>, <code>PERCENTILE</code>=0.90 fallback when STDIN is blank,
+      (a decimal 0&ndash;1)<br><code>pmids/from_archive_pmcids.txt</code> <span class='dim'>(optional,
+      from step&nbsp;1b &mdash; these ids are dropped from the export dictionary and not downloaded)</span>
+      <span class='dim'>(env: <code>IF_THRESHOLD</code>, <code>PERCENTILE</code> &mdash; when set it wins and
+      STDIN is not read; 0.90 default, <code>USE_ARCHIVE_SKIP</code>=0 to download the archive hits too,
       <code>RETRY_FAILED</code>, <code>TIME_BUDGET</code>)</span></td>
   <td><code>high_impact_xmls/PMC*.xml</code><br><code>high_impact_xmls/_failed.tsv</code><br><code>summaries/high_impact_xml.html</code></td>
   <td>Selects the high-impact subset (articles with a PMC id whose article-weighted impact factor is
@@ -199,12 +225,21 @@ wiping its output dir; it is also skipped entirely when every article already ha
 <h2>3. How to run</h2>
 
 <h3>One command &mdash; the orchestrator</h3>
-<p><code>step_1_orchestrator.py</code> runs all seven scripts in the order above, in one process.
-It collects two inputs on <code>STDIN</code> up front &mdash; the <strong>PubMed query</strong> for
-step&nbsp;1, then the <strong>publication impact percentile</strong> for step&nbsp;2 &mdash; and feeds
-each to the stage that consumes it. It <strong>aborts the moment any stage exits non-zero</strong> (so
-a failed stage never silently poisons the next). Every path is script-relative, so it can be launched
-from any working directory.</p>
+<p><code>step_1_orchestrator.py</code> runs all nine stages &mdash; the seven core scripts plus
+<code>from_archive.py</code> at <strong>1b</strong> and <strong>6b</strong> &mdash; in the order above,
+in one process. It collects two inputs on <code>STDIN</code> up front &mdash; the <strong>PubMed
+query</strong> for step&nbsp;1, then the <strong>publication impact percentile</strong> for
+step&nbsp;2 &mdash; and feeds each to the stage that consumes it. It <strong>aborts the moment any
+stage exits non-zero</strong> (so a failed stage never silently poisons the next). Every path is
+script-relative, so it can be launched from any working directory.</p>
+<p>Steps are addressed by <strong>label</strong>, not position &mdash; <code>1</code>, <code>1b</code>,
+<code>2</code>&hellip;<code>6</code>, <code>6b</code>, <code>7</code> &mdash; so the seven core stages
+keep the numbers they always had (<code>--start 4</code> still resumes at <code>ncbi_pdf.py</code>).
+Steps&nbsp;1b/6b are <strong>skipped automatically, with a printed notice, when the archive directory
+does not exist</strong>, so a checkout with no local corpus still runs the plain seven-stage pipeline;
+naming one explicitly (<code>--archive</code> or <code>ARCHIVE_DIR</code>) that is missing is a hard
+error instead, since that is a typo rather than an absence. <code>--no-archive</code> skips them
+outright and downloads the whole selection.</p>
 <pre># query as an argument (fed to step 1's STDIN);
 # the impact percentile is still prompted on its own line
 python step_1_orchestrator.py "your pubmed query"
@@ -214,15 +249,24 @@ Publication impact percentile (decimal between 0 and 1): 0.90
 printf 'your pubmed query\n0.90\n' | python step_1_orchestrator.py
 
 # or type each at its prompt
-python step_1_orchestrator.py</pre>
+python step_1_orchestrator.py
+
+# point steps 1b/6b at a specific archive, or turn them off
+python step_1_orchestrator.py --archive /path/to/xmls "your pubmed query"
+python step_1_orchestrator.py --no-archive "your pubmed query"
+
+# re-seed the archive contribution after re-running step 6 by hand
+python step_1_orchestrator.py --only 6b</pre>
 <p class='dim'>The orchestrator prompts for the percentile on its own dedicated line <em>after</em> the
 query and hands it to <code>high_impact_xml.py</code> on that script's STDIN. Enter a decimal between
 0 and 1 (e.g. <code>0.90</code> = top 10% by article-weighted impact factor); a <strong>blank line</strong>
 (or EOF) falls back to <code>PERCENTILE</code>=0.90, and <code>IF_THRESHOLD</code> overrides the
 percentile entirely.</p>
-<p class='dim'>Options: <code>--start N</code> / <code>--stop N</code> / <code>--only N</code> run a
-sub-range of steps 1&ndash;7 (e.g. <code>--only 5</code> to re-run just GROBID, or
-<code>--start 4</code> to resume after a manual step 3); <code>--list</code> prints the pipeline order;
+<p class='dim'>Options: <code>--start S</code> / <code>--stop S</code> / <code>--only S</code> run a
+sub-range by label (e.g. <code>--only 5</code> to re-run just GROBID, <code>--start 4</code> to resume
+after a manual step 3, or <code>--only 6b</code> to re-seed the archive files);
+<code>--archive D</code> / <code>--no-archive</code> control steps 1b/6b;
+<code>--list</code> prints the pipeline order;
 <code>--dry-run</code> shows what would run without executing anything. The query is only read when
 step&nbsp;1 is in the selected range, and the percentile only when step&nbsp;2 is. Environment variables
 (<code>NCBI_API_KEY</code>, <code>TIME_BUDGET</code>, GROBID settings, &hellip;) are passed straight
@@ -233,15 +277,29 @@ the network stages still reach out and step&nbsp;5 still needs Docker + GROBID.<
 <ol class='steps'>
   <li><span class='step-no'>1</span><code>echo "your query" | python pubmed_query.py</code>
       <span class='dim'>&mdash; or run it and type the query at the prompt.</span></li>
+  <li><span class='step-no'>1b</span><code>python from_archive.py</code>
+      <span class='dim'>&mdash; serve everything the query returned that is already in the local archive
+      (<code>ARCHIVE_DIR</code>, default <code>../xmls</code>); <code>DRY_RUN=1</code> to see the match
+      first. Skip this step to download the whole selection.</span></li>
   <li><span class='step-no'>2</span><code>echo 0.90 | python high_impact_xml.py</code>
       <span class='dim'>&mdash; or run it and type the impact percentile (decimal 0&ndash;1) at the prompt;
-      blank falls back to <code>PERCENTILE</code>=0.90.</span></li>
+      blank falls back to 0.90. A <code>PERCENTILE</code> env var, when set, wins over STDIN.</span></li>
   <li><span class='step-no'>3</span><code>python xml_structure.py</code></li>
   <li><span class='step-no'>4</span><code>python ncbi_pdf.py</code></li>
   <li><span class='step-no'>5</span><code>python grobid_xml.py</code> <span class='pill'>needs Docker + GROBID</span></li>
   <li><span class='step-no'>6</span><code>python named_entity_xml.py</code></li>
+  <li><span class='step-no'>6b</span><code>python from_archive.py</code>
+      <span class='dim'>&mdash; only if step&nbsp;1b was run: step&nbsp;6 clean-rebuilds
+      <code>gpu_bundle/experimental_ner/</code>, so re-run this to restore the archive contribution
+      from <code>archive_xmls/</code>. Cheap and idempotent.</span></li>
   <li><span class='step-no'>7</span><code>python pre_ner_xml_structure.py</code></li>
 </ol>
+<div class='key'><strong>Where <code>from_archive.py</code> pays off.</strong> It turns the expensive part
+of the pipeline &mdash; one eFetch per article at ~3&nbsp;req/s &mdash; into a local file copy for every
+publication already held in the archive, and the skip-list guarantees no paper is fetched twice. On the
+lung large-cell run, 309 of the 331 PMC-bearing hits (93.4%) came from <code>../xmls</code> and only 22
+were downloaded. The corpus that reaches step&nbsp;7 is the <strong>union</strong> of the two sources,
+de-duplicated by PMC id.</div>
 <p class='dim'><strong>Optional &mdash; <code>subtract.py</code></strong> <span class='pill'>optional</span>: not one
 of the seven and <em>not</em> chained by the orchestrator. Run it by hand to remove from one directory the
 entries whose names also appear in another. It reads the two directory paths on <code>STDIN</code>
