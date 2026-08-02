@@ -336,6 +336,17 @@ global default, so nothing has to be remembered at the call site.
 | `run_re_pipeline.py` (gpu.py step 1)        | `ppi` (also chemprot/gad/ddi) | **isotonic** |
 | `run_re_pipeline.py --task biored` (step 2) | `biored`                      | **platt**    |
 
+> **SUPERSEDED (2026-08-02).** The table above is kept for the reasoning; the split no
+> longer holds. `train_re.CALIBRATION_DEFAULT` is now **platt for every task**, because
+> the argument made here for BioRED turned out to apply to BioInfer too: its 780-row dev
+> split collapsed 197 isotonic breakpoints onto 8 output levels topping out at a hard
+> 1.0. Two checkpoints calibrated by different methods do not share a scale, and
+> `relation_extraction.py --route-mode additive` has both score the same pair — on the
+> reference run the saturating isotonic map won 65 of 69 cross-model comparisons on the
+> strength of the calibrator alone. Isotonic remains available via `--calibration
+> isotonic`, and `calibration.py` now clips every output into `[CLIP, 1-CLIP]` so no
+> calibrator of either kind can assert certainty. See `step_2_triples.html` section 6.
+
 In both `run_re_pipeline.py` and `train_re.py` the `--calibration` default is `None`
 and is resolved after parsing: `platt` if `--task biored`, else `isotonic`. An
 explicit `--calibration ...` still wins, and the resolved value is printed in the

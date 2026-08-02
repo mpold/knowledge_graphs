@@ -471,7 +471,9 @@ def main():
                          "ships a dev split; default 0.1, or 0 for biored)")
     ap.add_argument("--test-frac", type=float, default=0.0, help="carve a test split if none exists")
     ap.add_argument("--neg-ratio", type=float, default=None, help="cap negatives to N x positives")
-    ap.add_argument("--epochs", type=float, default=3.0)
+    ap.add_argument("--epochs", type=float, default=None,
+                    help="training epochs (default per task: 2 for ppi, 3 for biored -- "
+                         "train_re.EPOCH_DEFAULTS)")
     ap.add_argument("--max-len", type=int, default=128, help="tokenizer max length (training + calibration)")
     ap.add_argument("--base-model", default=None,
                     help="base LM to fine-tune (train_re --model; default BioBERT, e.g. "
@@ -483,8 +485,9 @@ def main():
     ap.add_argument("--seed", type=int, default=42, help="training seed (reproducibility)")
     ap.add_argument("--convert-seed", type=int, default=0, help="conversion seed (sampling/shuffle)")
     ap.add_argument("--calibration", choices=["isotonic", "platt", "none"],
-                    default=None, help="dev calibrator fit on dev positives "
-                                       "(default isotonic, or platt for biored)")
+                    default=None, help="dev calibrator fit on dev positives (default platt for "
+                                       "every task, so scores from different checkpoints share "
+                                       "one scale -- see train_re.CALIBRATION_DEFAULT)")
     ap.add_argument("--require-cue", action="store_true",
                     help="biored: pass --require-cue to the converter -- demote a document-level "
                          "positive whose connecting text carries no relational stem")
@@ -503,23 +506,28 @@ def main():
                          "'cpu'/'' (force CPU)")
     args = ap.parse_args()
 
-    # per-task defaults: only fill in what the caller left unset (see TASK DEFAULTS above)
+    # per-task defaults: only fill in what the caller left unset (see TASK DEFAULTS above).
+    # The calibrator and the epoch count come from train_re, so the orchestrated path and a
+    # direct `python train_re.py` cannot drift apart.
+    sys.path.insert(0, str(ROOT))
+    from train_re import CALIBRATION_DEFAULT, EPOCH_DEFAULTS
+    _cal, _ep = CALIBRATION_DEFAULT, EPOCH_DEFAULTS
     TASK_DEFAULTS = {
         "ppi": dict(dataset="bigbio/bioinfer", data="ppi_data", model="ppi-biobert-re",
-                    val_frac=0.1, calibration="isotonic"),
+                    val_frac=0.1, calibration=_cal, epochs=_ep["ppi"]),
         "biored": dict(dataset="bigbio/biored", data="biored_data", model="biored-biobert-re",
-                       val_frac=0.0, calibration="platt"),
+                       val_frac=0.0, calibration=_cal, epochs=_ep["biored"]),
     }
     d = TASK_DEFAULTS.get(args.task, dict(dataset=f"bigbio/{args.task}", data=f"{args.task}_data",
                                           model=f"{args.task}-biobert-re", val_frac=0.1,
-                                          calibration="isotonic"))
+                                          calibration=_cal, epochs=_ep[None]))
     applied = []
-    for k in ("dataset", "data", "model", "val_frac", "calibration"):
+    for k in ("dataset", "data", "model", "val_frac", "calibration", "epochs"):
         if getattr(args, k) is None:
             setattr(args, k, d[k])
             applied.append(f"--{k.replace('_', '-')} {d[k]}")
     print(f"[task] {args.task}: dataset={args.dataset} data={args.data}/ model={args.model}/ "
-          f"val-frac={args.val_frac} calibration={args.calibration}"
+          f"val-frac={args.val_frac} calibration={args.calibration} epochs={args.epochs}"
           + (f"\n[task] defaults applied: {', '.join(applied)}" if applied else ""))
 
     setup_device(args.gpus)

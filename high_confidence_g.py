@@ -77,6 +77,7 @@ Run::  python high_confidence_g.py [--data-root kaggle_working] [--score 0.8] [-
        python high_confidence_g.py --merge none         # pre-merge behaviour (duplicates survive)
 """
 import argparse
+import bisect
 import collections
 import datetime
 import html
@@ -225,6 +226,72 @@ def rel_cat(t):
 # With only one checkpoint in the file every policy is a no-op.
 MERGE_POLICIES = ("gate", "union", "typed", "none")
 
+# How to decide WHICH model's verdict wins when several scored the same pair. The policies
+# above choose which pairs survive; this chooses whose number represents the survivor.
+#
+#   rank (default)  compare each model's score to that model's OWN distribution and let the
+#                   higher percentile win. Two checkpoints calibrated against different
+#                   corpora do not share a scale even after calibration -- on the reference
+#                   run a raw max() handed PPI 65 of 69 corroborated pairs, because its
+#                   isotonic map saturated at 1.0 while BioRED's Platt fit tops out at 0.90.
+#                   That is an artefact of the calibrators, not evidence about the pair.
+#   calibrated      the previous behaviour: plain max() of the calibrated probabilities.
+#                   Use it to reproduce pre-2026-08 runs.
+#
+# Either way the surviving `score` is the winner's own calibrated probability, so it stays a
+# probability and every downstream threshold keeps its meaning. Only the CHOICE changes.
+MERGE_SCALES = ("rank", "calibrated")
+
+
+def model_percentiles(triples):
+    """(pct(model, score), n_by_model) -- empirical percentile of a score within the
+    distribution of scores that model wrote across the whole file."""
+    dist = collections.defaultdict(list)
+    for t in triples:
+        m = (t.get("predicate") or {}).get("model")
+        s = t.get("score")
+        if m and isinstance(s, (int, float)):
+            dist[m].append(float(s))
+    for v in dist.values():
+        v.sort()
+
+    def pct(model, score):
+        v = dist.get(model)
+        return bisect.bisect_right(v, float(score)) / len(v) if v else 0.0
+
+    return pct, {m: len(v) for m, v in dist.items()}
+
+
+def score_ceilings(triples):
+    """model -> highest composite score it achieved anywhere in the file. A threshold above
+    a model's ceiling is unreachable for it: the cutoff silently becomes other-model-only."""
+    out = {}
+    for t in triples:
+        m = (t.get("predicate") or {}).get("model")
+        s = t.get("score")
+        if m and isinstance(s, (int, float)):
+            out[m] = max(out.get(m, 0.0), float(s))
+    return out
+
+
+def ceiling_report(triples, thresholds):
+    """Lines naming any threshold that one model's scores can never reach."""
+    ceil = score_ceilings(triples)
+    if not ceil:
+        return []
+    lines = ["  score ceilings (max composite reached per model): "
+             + ", ".join(f"{m.split('/')[-1]} {c:.4f}" for m, c in sorted(ceil.items()))]
+    for T in sorted({float(t) for t in thresholds}):
+        blocked = sorted(m for m, c in ceil.items() if c < T)
+        if blocked and len(blocked) < len(ceil):
+            reachable = sorted(m for m in ceil if m not in blocked)
+            lines.append(f"  !! score>={T:g} is unreachable for "
+                         f"{', '.join(m.split('/')[-1] for m in blocked)} -- that cutoff is "
+                         f"effectively {'/'.join(m.split('/')[-1] for m in reachable)}-only")
+        elif blocked:
+            lines.append(f"  !! score>={T:g} is above EVERY model's ceiling -- it selects nothing")
+    return lines
+
 
 def _pair_key(t):
     """Stable identity of one entity pair in one sentence. relation_extraction.py writes
@@ -244,9 +311,12 @@ def classify_models(triples, typed_name=None, gate_name=None):
     return models, typed, gate
 
 
-def merge_models(triples, policy="gate", typed_name=None, gate_name=None):
-    """One triple per entity pair under `policy`. Returns (triples, summary_string)."""
+def merge_models(triples, policy="gate", typed_name=None, gate_name=None, scale="rank"):
+    """One triple per entity pair under `policy`. Returns (triples, summary_string).
+
+    `scale` decides whose score represents a pair both models claimed -- see MERGE_SCALES."""
     models, typed, gate = classify_models(triples, typed_name, gate_name)
+    pct, _ = model_percentiles(triples)
     if policy == "none":
         return triples, f"merge: skipped (--merge none); {len(models)} model(s): {', '.join(models) or 'none'}"
     if len(models) < 2 or typed is None:
@@ -264,6 +334,7 @@ def merge_models(triples, policy="gate", typed_name=None, gate_name=None):
 
     out = []
     n_drop = n_typed_lab = n_corr = 0
+    won = collections.Counter()          # who supplied the score on corroborated pairs
     for k in sorted(groups, key=lambda key: order[key]):
         by = groups[k]
         g, ty = by.get(gate), by.get(typed)
@@ -280,18 +351,31 @@ def merge_models(triples, policy="gate", typed_name=None, gate_name=None):
         t["subject"], t["object"] = dict(base["subject"]), dict(base["object"])
         t["predicate"] = dict(base["predicate"])
         scores = {m: float(v.get("score") or 0.0) for m, v in by.items()}
-        t["score"] = max(scores.values())
+        # which model's number represents this pair. Ranks are compared within each model's
+        # own distribution (score breaks ties), so a saturating calibrator cannot win by
+        # construction; the kept value is still the winner's calibrated probability.
+        if scale == "rank":
+            win = max(scores, key=lambda m: (pct(m, scores[m]), scores[m]))
+            t["score_pct_by_model"] = {m: round(pct(m, s), 4) for m, s in sorted(scores.items())}
+        else:
+            win = max(scores, key=lambda m: scores[m])
+        t["score"] = scores[win]
         t["score_by_model"] = {m: round(s, 4) for m, s in sorted(scores.items())}
+        t["score_from"] = win
         t["models"] = sorted(by)
         t["corroborated"] = len(by) > 1
+        if t["corroborated"]:
+            won[win] += 1
         n_corr += bool(t["corroborated"])
         n_typed_lab += bool(ty is not None)          # label came from the typed model
         out.append(t)
     dropped = f", {n_drop:,} dropped by the gate" if policy == "gate" else \
               (f", {n_drop:,} without a typed verdict dropped" if policy == "typed" else "")
+    scored = (f"\n  score[{scale}]: on the {n_corr:,} corroborated pairs the kept score came from "
+              + ", ".join(f"{m.split('/')[-1]} {c:,}" for m, c in won.most_common())) if n_corr else ""
     return out, (f"merge[{policy}]: {len(triples):,} triples ({', '.join(models)}) -> {len(out):,} pairs; "
                  f"gate={gate} typed={typed}; {n_corr:,} corroborated by both, "
-                 f"{n_typed_lab:,} took the typed label{dropped}")
+                 f"{n_typed_lab:,} took the typed label{dropped}{scored}")
 
 
 # ----- qualifying filter -----------------------------------------------------
@@ -944,6 +1028,13 @@ def main():
                          "every pair either model kept and prefers the typed label; gate is the "
                          "stricter variant that keeps only pairs the binary model also kept; "
                          "typed uses the BioRED-style model alone; none disables the merge")
+    ap.add_argument("--merge-scale", choices=MERGE_SCALES, default="rank",
+                    help="which model's score represents a pair BOTH models kept: rank "
+                         "(default) compares each score against its own model's distribution, "
+                         "so a saturating calibrator cannot win by construction; calibrated "
+                         "takes a plain max() of the calibrated probabilities (pre-2026-08 "
+                         "behaviour). The kept value is the winner's calibrated probability "
+                         "either way -- only the choice of winner changes")
     ap.add_argument("--typed-model", default=None,
                     help="checkpoint name supplying the typed/signed labels (default: the one "
                          "whose name contains 'biored')")
@@ -967,9 +1058,15 @@ def main():
         raise SystemExit(f"ERROR: {RE_FILE} not found under data root {DATA_ROOT} "
                          f"(run the gpu_bundle pipeline first, or pass --data-root).")
 
-    d = json.loads(RE_FILE.read_text(encoding="utf-8"))
-    d, merge_note = merge_models(d, args.merge, args.typed_model, args.gate_model)
+    raw = json.loads(RE_FILE.read_text(encoding="utf-8"))
+    d, merge_note = merge_models(raw, args.merge, args.typed_model, args.gate_model, args.merge_scale)
     print(merge_note)
+    # Ceilings are read from the PRE-merge triples: after the merge a pair keeps the typed
+    # model's name but may carry the other model's score, so post-merge attribution is wrong.
+    # Every absolute cutoff this run applies, including the in-browser slider's stops.
+    for line in ceiling_report(raw, [args.score] + [float(x) for x in args.thresholds.split(",")]
+                               + ([GRAPH_BASE, 0.95, 0.99] if not args.no_graph else [])):
+        print(line)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1) JSON export at --score

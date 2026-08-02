@@ -44,78 +44,90 @@
 <code>lung/gpu_bundle/</code> &mdash; the Kaggle/GPU bundle that takes the NER corpus handed
 over by step&nbsp;1 (<code>experimental_ner/</code>) and turns it into normalized, learned-scored
 relation <strong>triples</strong>. One orchestrator, <code>gpu.py</code>, runs a fixed
-<strong>16-step</strong> chain in dependency order; each step is a standalone script run as a
+<strong>18-step</strong> chain in dependency order; each step is a standalone script run as a
 subprocess in a single writable working directory, and the final step zips that directory
 into one downloadable archive.</p>
 
 <div class='stat-grid'>
-  <div class='stat'><div class='v'>16</div><div class='k'>steps in the chain</div></div>
+  <div class='stat'><div class='v'>18</div><div class='k'>steps in the chain</div></div>
   <div class='stat'><div class='v'>gpu.py</div><div class='k'>the orchestrator</div></div>
-  <div class='stat'><div class='v'>3</div><div class='k'>GPU steps (1, 2, 15)</div></div>
-  <div class='stat'><div class='v'>2</div><div class='k'>optional steps (13, 14)</div></div>
-  <div class='stat'><div class='v'>kaggle_working.zip</div><div class='k'>final bundle (step 16)</div></div>
+  <div class='stat'><div class='v'>4</div><div class='k'>GPU steps (1, 2, 3, 16)</div></div>
+  <div class='stat'><div class='v'>4</div><div class='k'>optional steps (2, 14, 15, 17)</div></div>
+  <div class='stat'><div class='v'>2</div><div class='k'>RE checkpoints trained (1, 2)</div></div>
+  <div class='stat'><div class='v'>kaggle_working.zip</div><div class='k'>final bundle (step 18)</div></div>
 </div>
 
 <div class='key'>You normally run <strong>one command &mdash; <code>python gpu.py</code></strong> &mdash; and it
-executes all 16 steps for you, in the order below, in one staged working directory
+executes all 18 steps for you, in the order below, in one staged working directory
 (<code>/kaggle/working/</code> on Kaggle, or in place locally). It is <em>not</em> a loose set of
 scripts you run by hand: <code>gpu.py</code> copies the scripts, symlinks the read-only
 <code>experimental_ner/</code> corpus, makes a writable copy of <code>databases/</code>, creates the
 output dirs (<code>GENETIC/ DISEASE/ CHEMICAL/ TRIPLES/</code>, plus <code>sentences/</code> and
-<code>summaries/</code>), and sets <code>RE_MODEL_PPI</code> for the learned RE step. Steps&nbsp;1, 2
-and 15 use CUDA; steps&nbsp;1, 2 and 14 reach the network. Steps&nbsp;13 and 14 are optional &mdash;
-if they fail the orchestrator warns and continues to the critical RE step. The last step
+<code>summaries/</code>), and sets <code>RE_MODEL_PPI</code> and <code>RE_MODEL_BIORED</code> for the
+learned RE step. Steps&nbsp;1, 2, 3 and 16 use CUDA; steps&nbsp;1, 2, 3 and 15 reach the network.
+Steps&nbsp;2, 14, 15 and 17 are optional &mdash; if they fail the orchestrator warns and continues to
+the critical RE step. The last step
 (<code>zip_work.py</code>) bundles the whole working directory into
 <code>kaggle_working.zip</code> so the entire run is a single download. Run a subset with
 <code>--steps a,b,c</code> and preview the plan with <code>--list</code>.</div>
 
 <h2>1. Order of execution (data flow)</h2>
 <div class='flow'>
-  <div class='grp'>A. Train the relation model &nbsp;<span class='dim'>(most upstream; its own 3-script sub-pipeline)</span></div>
+  <div class='grp'>A. Train the relation models &nbsp;<span class='dim'>(most upstream; one script, two invocations, each its own 3-script sub-pipeline)</span></div>
   <div class='node'><span class='s'>1. run_re_pipeline.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span>
     <div class='io'>in: BigBIO <code>bioinfer</code> corpus (HF <code>datasets</code>) &nbsp;&rarr;&nbsp; out: <code>ppi-biobert-re/</code> checkpoint + <code>summaries/calibration.html</code>
-      <span class='dim'>&mdash; runs bigbio_to_re.py &rarr; train_re.py &rarr; calibration.py</span></div></div>
-  <div class='arrow'>&darr;&nbsp; ppi-biobert-re/ (loaded by step 15 via RE_MODEL_PPI)</div>
+      <span class='dim'>&mdash; runs bigbio_to_re.py &rarr; train_re.py &rarr; calibration.py; binary &ldquo;interacts&rdquo;, 2 epochs, Platt calibrator</span></div></div>
+  <div class='node'><span class='s'>2. run_re_pipeline.py --task biored</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span> <span class='pill opt'>optional</span>
+    <div class='io'>in: BigBIO <code>biored</code> corpus &nbsp;&rarr;&nbsp; out: <code>biored-biobert-re/</code> checkpoint + <code>biored_data/*.tsv</code>
+      <span class='dim'>&mdash; same script, typed + SIGNED labels (upregulator/activator, downregulator/inhibitor, binds, associated), 3 epochs, Platt calibrator. Runs ALONGSIDE the PPI model, not instead of it; if it fails the run continues with PPI alone</span></div></div>
+  <div class='arrow'>&darr;&nbsp; ppi-biobert-re/ + biored-biobert-re/ (loaded by step 16 via RE_MODEL_PPI / RE_MODEL_BIORED)</div>
 
   <div class='grp'>B. NER: corpus &rarr; result-sentence entities</div>
-  <div class='node'><span class='s'>2. sentences.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span>
+  <div class='node'><span class='s'>3. sentences.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span>
     <div class='io'>in: <code>experimental_ner/PMC*.xml</code> &nbsp;&rarr;&nbsp; out: <code>sentences/PMC*.json</code> + <code>summaries/sentences.html</code></div></div>
   <div class='arrow'>&darr;&nbsp; sentences/*.json  (every later step reads this)</div>
 
   <div class='grp'>C. Build the GENETIC / DISEASE / CHEMICAL normalization libraries</div>
-  <div class='node'><span class='s'>3. roman.py</span> &nbsp;<span class='s'>4. greek.py</span> &nbsp;<span class='s'>5. keys_values.py</span> &nbsp;<span class='s'>6. controls.py</span>
+  <div class='node'><span class='s'>4. roman.py</span> &nbsp;<span class='s'>5. greek.py</span> &nbsp;<span class='s'>6. keys_values.py</span> &nbsp;<span class='s'>7. controls.py</span>
     <div class='io'>GENETIC surfaces &rarr; HGNC &nbsp;(<code>GENETIC/</code>: roman*.json, greek*.json, coverage + control flag)</div></div>
-  <div class='node'><span class='s'>7. disease.py</span> &nbsp;<span class='s'>8. phenotypes.py</span>
+  <div class='node'><span class='s'>8. disease.py</span> &nbsp;<span class='s'>9. phenotypes.py</span>
     <div class='io'>DISEASE surfaces &rarr; MONDO + phenotype flag &nbsp;(<code>DISEASE/</code>)</div></div>
-  <div class='node'><span class='s'>9. chemical.py</span> &nbsp;<span class='s'>10. nonchemical.py</span> &nbsp;<span class='s'>11. target_pharm.py</span>
+  <div class='node'><span class='s'>10. chemical.py</span> &nbsp;<span class='s'>11. nonchemical.py</span> &nbsp;<span class='s'>12. target_pharm.py</span>
     <div class='io'>CHEMICAL surfaces &rarr; ChEBI + non-chemical flag + chemical&harr;gene cross-links &nbsp;(<code>CHEMICAL/</code>)</div></div>
   <div class='arrow'>&darr;&nbsp; GENETIC/ + DISEASE/ + CHEMICAL/ lookup libraries</div>
 
   <div class='grp'>D. Triples: extract, normalize, score</div>
-  <div class='node'><span class='s'>12. triples.py</span>
+  <div class='node'><span class='s'>13. triples.py</span>
     <div class='io'>in: <code>sentences/*.json</code> + the libraries &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples.json</code>, <code>triples_*_normalized.json</code>, <code>triples.html</code></div></div>
   <div class='arrow'>&darr;&nbsp; TRIPLES/</div>
-  <div class='node'><span class='s'>13. relationships.py</span> <span class='pill opt'>optional</span>
+  <div class='node'><span class='s'>14. relationships.py</span> <span class='pill opt'>optional</span>
     <div class='io'>in: <code>TRIPLES/triples*.json</code> &nbsp;&rarr;&nbsp; out: <code>TRIPLES/genetic_genetic.json</code> + <code>relationships.html</code></div></div>
   <div class='arrow'>&darr;&nbsp; genetic_genetic.json</div>
-  <div class='node'><span class='s'>14. pub_years.py</span> <span class='pill opt'>optional</span> <span class='pill net'>internet</span>
+  <div class='node'><span class='s'>15. pub_years.py</span> <span class='pill opt'>optional</span> <span class='pill net'>internet</span>
     <div class='io'>in: <code>TRIPLES/genetic_genetic.json</code> &nbsp;&rarr;&nbsp; out: adds <code>year</code> to each triple; caches <code>databases/pmc_years.json</code></div></div>
-  <div class='arrow'>&darr;&nbsp; (independent of step 15)</div>
-  <div class='node'><span class='s'>15. relation_extraction.py --normalize</span> <span class='pill gpu'>GPU</span>
-    <div class='io'>in: <code>sentences/*.json</code> + <code>ppi-biobert-re/</code> (RE_MODEL_PPI) &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples_re.json</code> (BioBERT-scored) + normalized variant</div></div>
+  <div class='arrow'>&darr;&nbsp; (independent of step 16)</div>
+  <div class='node'><span class='s'>16. relation_extraction.py --normalize --route-mode additive</span> <span class='pill gpu'>GPU</span>
+    <div class='io'>in: <code>sentences/*.json</code> + <code>ppi-biobert-re/</code> (RE_MODEL_PPI) + <code>biored-biobert-re/</code> (RE_MODEL_BIORED) &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples_re.json</code> (BioBERT-scored) + normalized variant
+      <span class='dim'>&mdash; additive routing: EVERY applicable checkpoint scores each pair, so the file holds up to two triples per pair, joined by <code>pair_id</code></span></div></div>
+  <div class='arrow'>&darr;&nbsp; TRIPLES/triples_re*.json</div>
+  <div class='node'><span class='s'>17. compare_re.py</span> <span class='pill opt'>optional</span>
+    <div class='io'>in: <code>TRIPLES/triples_re.json</code> (both models, joined on <code>pair_id</code>) &nbsp;&rarr;&nbsp; out: <code>summaries/compare_re.html</code>
+      <span class='dim'>&mdash; coverage, label agreement, how many edges gained a sign, score deltas + samples to hand-read: the evidence for the replace-or-not decision</span></div></div>
 
   <div class='grp'>E. Bundle the run for download &nbsp;<span class='dim'>(most downstream; runs after everything else)</span></div>
-  <div class='node'><span class='s'>16. zip_work.py</span>
+  <div class='node'><span class='s'>18. zip_work.py</span>
     <div class='io'>in: the whole working dir (all outputs above) &nbsp;&rarr;&nbsp; out: <code>kaggle_working.zip</code> (single downloadable archive)</div></div>
 </div>
-<p class='dim'>Steps 3&ndash;11 all read the same <code>sentences/*.json</code> and only touch their own type's
-library dir, so within a type they are ordered by dependency: <code>roman.py</code> (step&nbsp;3) builds the
+<p class='dim'>Steps 4&ndash;12 all read the same <code>sentences/*.json</code> and only touch their own type's
+library dir, so within a type they are ordered by dependency: <code>roman.py</code> (step&nbsp;4) builds the
 GENETIC libraries that <code>greek.py</code>/<code>keys_values.py</code>/<code>controls.py</code> extend or
-report on; <code>controls.py</code> (6) re-annotates those libraries in place, so it runs after
-<code>roman.py</code>/<code>greek.py</code> rewrite them. <code>triples.py</code> (12) reads all three finished
-libraries; <code>relationships.py</code> (13) reads <code>triples.py</code>'s output; <code>pub_years.py</code> (14)
-reads <code>relationships.py</code>'s <code>genetic_genetic.json</code>. The learned RE step (15) depends only on
-step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&ndash;14 branch.</p>
+report on; <code>controls.py</code> (7) re-annotates those libraries in place, so it runs after
+<code>roman.py</code>/<code>greek.py</code> rewrite them. <code>triples.py</code> (13) reads all three finished
+libraries; <code>relationships.py</code> (14) reads <code>triples.py</code>'s output; <code>pub_years.py</code> (15)
+reads <code>relationships.py</code>'s <code>genetic_genetic.json</code>. The learned RE step (16) depends only on
+the step&nbsp;1&ndash;2 models and step&nbsp;3's sentences, so it is independent of the 14&ndash;15 branch.
+<code>compare_re.py</code> (17) reads only step&nbsp;16's output and needs <em>both</em> checkpoints to
+have been produced, so it is skipped when step&nbsp;2 did not run.</p>
 
 <h2>2. Per-script inputs &amp; outputs</h2>
 <table>
@@ -126,13 +138,32 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
   <td><code>run_re_pipeline.py</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span></td>
   <td>BigBIO <code>bigbio/bioinfer</code> KB corpus <span class='dim'>(downloaded via HF <code>datasets&lt;4</code>)</span></td>
   <td><code>ppi-biobert-re/</code> checkpoint (weights, config+label map, tokenizer, <code>calibration.json</code>)<br><code>ppi_data/{train,dev,test}.tsv</code><br><code>summaries/calibration.html</code></td>
-  <td>Fine-tunes BioBERT into the PPI relation model that step&nbsp;15 needs. Itself a 3-script
+  <td>Fine-tunes BioBERT into the PPI relation model that step&nbsp;16 needs. Itself a 3-script
       sub-pipeline run as one subprocess: <code>bigbio_to_re.py</code> (corpus &rarr; entity-blinded TSVs)
-      &rarr; <code>train_re.py</code> (fine-tune) &rarr; <code>calibration.py</code> (evaluate on test + fit a
-      probability calibrator). Skip it with <code>--steps</code> if you upload a checkpoint.</td>
+      &rarr; <code>train_re.py</code> (fine-tune, <strong><code>--epochs 2</code></strong>) &rarr;
+      <code>calibration.py</code> (evaluate on test + fit a <strong>Platt</strong> calibrator). Skip it
+      with <code>--steps</code> if you upload a checkpoint. <span class='dim'>Both defaults are per-task
+      and were changed on 2026-08-02 &mdash; see sections&nbsp;5&ndash;6 for the measurements behind
+      them.</span></td>
 </tr>
 <tr>
   <td class='num'>2</td>
+  <td><code>run_re_pipeline.py --task biored</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span> <span class='pill opt'>optional</span></td>
+  <td>BigBIO <code>bigbio/biored</code> KB corpus <span class='dim'>(downloaded via HF <code>datasets&lt;4</code>)</span></td>
+  <td><code>biored-biobert-re/</code> checkpoint (weights, config+label map, tokenizer, <code>calibration.json</code>)<br><code>biored_data/{train,dev,test}.tsv</code><br><code>summaries/calibration.html</code> <span class='dim'>(overwrites step&nbsp;1's)</span></td>
+  <td>The same script with <code>--task biored</code>. BioRED (Luo et al. 2022) is a typed, <strong>signed</strong>
+      corpus, so this checkpoint predicts <code>upregulator/activator</code>,
+      <code>downregulator/inhibitor</code>, <code>binds</code> and <code>associated</code> instead of a bare
+      &ldquo;interacts&rdquo;, and one checkpoint covers every entity-type pair the corpus produces &mdash;
+      gene&ndash;disease and chemical&ndash;gene included. Trained for <strong>3</strong> epochs and
+      calibrated with <strong>Platt</strong> &mdash; the calibrator that BioRED's 100-abstract dev split
+      forced (<code>BioRED_task_mapping.md:324-331</code>) and that is now the default for every task, so
+      the two checkpoints' scores share one scale. It runs <em>alongside</em> the PPI model, not instead of
+      it: <strong>optional</strong>, so if the download or training fails the run continues with PPI alone
+      and nothing is lost.</td>
+</tr>
+<tr>
+  <td class='num'>3</td>
   <td><code>sentences.py</code> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span></td>
   <td><code>experimental_ner/PMC*.xml</code> (JATS + GROBID TEI, from step&nbsp;1 of the publications pipeline)
       <span class='dim'>(HF BioBERT models fetched on first use)</span></td>
@@ -144,7 +175,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       later step reads.</strong></td>
 </tr>
 <tr>
-  <td class='num'>3</td>
+  <td class='num'>4</td>
   <td><code>roman.py</code></td>
   <td><code>sentences/*.json</code><br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
   <td><code>GENETIC/</code>: <code>clean_genetic_ne.tsv</code>, <code>roman_clean_genetic_ne.tsv</code>,
@@ -156,7 +187,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       ambiguous &rarr; <code>roman_ambiguous.json</code>.</td>
 </tr>
 <tr>
-  <td class='num'>4</td>
+  <td class='num'>5</td>
   <td><code>greek.py</code></td>
   <td><code>GENETIC/greek_clean_genetic_ne.tsv</code> (from step&nbsp;3)<br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
   <td><code>GENETIC/</code>: <code>full_greek.json</code>, <code>greek.json</code>,
@@ -164,10 +195,10 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       <span class='dim'>(+ HTML)</span></td>
   <td>Expands Greek-symbol-bearing GENETIC surfaces (IFN-&gamma; &rarr; IFN-gamma&hellip;) and links them to
       HGNC, including multi-protein complexes (NF-&kappa;B &rarr; NFKB1+RELA). Each entry keeps the original
-      glyph key and the <code>greek_expanded</code> form &mdash; both are match routes in step&nbsp;12.</td>
+      glyph key and the <code>greek_expanded</code> form &mdash; both are match routes in step&nbsp;13.</td>
 </tr>
 <tr>
-  <td class='num'>5</td>
+  <td class='num'>6</td>
   <td><code>keys_values.py</code></td>
   <td>the seven GENETIC libraries (roman*.json + greek*.json)</td>
   <td><code>GENETIC/hgnc.html</code>, <code>GENETIC/hgnc_1_to_1.html</code>, <code>GENETIC/nested_keys.html</code></td>
@@ -175,7 +206,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       libraries (all, and the 1-to-1 subset), plus a nested-key coverage/type matrix. Transforms no data.</td>
 </tr>
 <tr>
-  <td class='num'>6</td>
+  <td class='num'>7</td>
   <td><code>controls.py</code></td>
   <td><code>GENETIC/clean_genetic_ne.tsv</code> (or rebuilt from <code>sentences/</code>)<br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
   <td><code>GENETIC/controls.html</code><br><em>in-place</em> <code>"control":"yes"/"no"</code> on all seven
@@ -185,7 +216,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       <code>control</code> flag. Re-run after <code>roman.py</code>/<code>greek.py</code> (which rewrite those files).</td>
 </tr>
 <tr>
-  <td class='num'>7</td>
+  <td class='num'>8</td>
   <td><code>disease.py</code></td>
   <td><code>sentences/*.json</code><br><code>databases/mondo-clingen.json</code></td>
   <td><code>DISEASE/</code>: <code>clean_disease_ne.tsv</code>, <code>disease.json</code>,
@@ -194,7 +225,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       multiple &rarr; <code>disease_ambiguous.json</code>).</td>
 </tr>
 <tr>
-  <td class='num'>8</td>
+  <td class='num'>9</td>
   <td><code>phenotypes.py</code></td>
   <td><code>DISEASE/clean_disease_ne.tsv</code> (or rebuilt from <code>sentences/</code>)</td>
   <td><code>DISEASE/phenotypes.html</code><br><em>in-place</em> <code>"phenotype":"yes"/"no"</code> on the disease libraries</td>
@@ -203,7 +234,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       the disease libraries.</td>
 </tr>
 <tr>
-  <td class='num'>9</td>
+  <td class='num'>10</td>
   <td><code>chemical.py</code></td>
   <td><code>sentences/*.json</code><br><code>databases/chebi.json</code></td>
   <td><code>CHEMICAL/</code>: <code>clean_chemical_ne.tsv</code>, <code>chemical.json</code>,
@@ -212,7 +243,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       <code>chemical.json</code>, multiple &rarr; <code>chemical_ambiguous.json</code>).</td>
 </tr>
 <tr>
-  <td class='num'>10</td>
+  <td class='num'>11</td>
   <td><code>nonchemical.py</code></td>
   <td><code>CHEMICAL/clean_chemical_ne.tsv</code> + <code>chemical*.json</code><br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
   <td><code>CHEMICAL/nonchemical.html</code><br><em>in-place</em> <code>"non_chemical":"yes"/"no"</code> on the chemical libraries</td>
@@ -220,7 +251,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       gene/protein, a nucleic-acid element, or a process/therapy concept rather than a compound.</td>
 </tr>
 <tr>
-  <td class='num'>11</td>
+  <td class='num'>12</td>
   <td><code>target_pharm.py</code></td>
   <td><code>databases/chebi.json</code>, <code>databases/hgnc_complete_set_2026-05-01.json</code><br><code>CHEMICAL/chemical*.json</code>, <code>GENETIC/roman*.json</code> + <code>greek*.json</code></td>
   <td><code>CHEMICAL/</code>: <code>target_pharm.json</code>, <code>chemical_to_target.json</code>, <code>target_pharm.html</code></td>
@@ -229,7 +260,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       gene&rarr;chemicals view.</td>
 </tr>
 <tr>
-  <td class='num'>12</td>
+  <td class='num'>13</td>
   <td><code>triples.py</code></td>
   <td><code>sentences/*.json</code><br>the finished <code>GENETIC/</code>, <code>DISEASE/</code>, <code>CHEMICAL/</code> libraries</td>
   <td><code>TRIPLES/triples.json</code><br><code>TRIPLES/triples_GENETIC_normalized.json</code><br><code>TRIPLES/triples_GENETIC_DISEASE_normalized.json</code><br><code>TRIPLES/triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code><br><code>TRIPLES/triples.html</code></td>
@@ -239,7 +270,7 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       CHEMICAL&rarr;ChEBI label &mdash; the last file is the fully ID-normalized set.</td>
 </tr>
 <tr>
-  <td class='num'>13</td>
+  <td class='num'>14</td>
   <td><code>relationships.py</code> <span class='pill opt'>optional</span></td>
   <td><code>TRIPLES/triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code><br><code>TRIPLES/triples.json</code></td>
   <td><code>TRIPLES/genetic_genetic.json</code><br><code>TRIPLES/relationships.html</code></td>
@@ -247,29 +278,47 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
       the orchestrator warns and continues.</td>
 </tr>
 <tr>
-  <td class='num'>14</td>
+  <td class='num'>15</td>
   <td><code>pub_years.py</code> <span class='pill opt'>optional</span> <span class='pill net'>net</span></td>
-  <td><code>TRIPLES/genetic_genetic.json</code> (from step&nbsp;13)</td>
+  <td><code>TRIPLES/genetic_genetic.json</code> (from step&nbsp;14)</td>
   <td><code>TRIPLES/genetic_genetic.json</code> (adds a <code>year</code> field per triple)<br><code>databases/pmc_years.json</code> (cache)</td>
   <td>Resolves each PMC accession to a publication year via NCBI E-utilities (esummary, db=pmc) and caches
       the lookups so it is fetched only once. Non-fatal (needs internet).</td>
 </tr>
 <tr>
-  <td class='num'>15</td>
-  <td><code>relation_extraction.py --normalize</code> <span class='pill gpu'>GPU</span></td>
-  <td><code>sentences/*.json</code><br><code>ppi-biobert-re/</code> via env <code>RE_MODEL_PPI</code> (from step&nbsp;1)<br><span class='dim'>imports <code>triples.py</code> for the normalization chain</span></td>
+  <td class='num'>16</td>
+  <td><code>relation_extraction.py --normalize --route-mode additive</code> <span class='pill gpu'>GPU</span></td>
+  <td><code>sentences/*.json</code><br><code>ppi-biobert-re/</code> via env <code>RE_MODEL_PPI</code> (from step&nbsp;1)<br><code>biored-biobert-re/</code> via env <code>RE_MODEL_BIORED</code> (from step&nbsp;2, when it ran)<br><span class='dim'>imports <code>triples.py</code> for the normalization chain and <code>calibration.py</code> for the per-checkpoint calibrators</span></td>
   <td><code>TRIPLES/triples_re.json</code> (BioBERT-scored triples; predicate carries a relation
       probability/score) + its normalized variant</td>
   <td>The learned relation-extraction step: blinds each entity pair with type markers, scores the pair with
-      the fine-tuned PPI model, and writes model-scored GENETIC&ndash;GENETIC triples &mdash; the trained-model
-      counterpart to the rule-based <code>triples.py</code>.</td>
+      the fine-tuned model(s), and writes model-scored triples &mdash; the trained-model counterpart to the
+      rule-based <code>triples.py</code>. <strong><code>--route-mode additive</code> makes <em>every</em>
+      applicable checkpoint score each pair</strong>, so with both models present the file holds up to two
+      triples per entity pair, each tagged with <code>predicate.model</code> and a shared
+      <code>pair_id</code> &mdash; filter or merge on those before building a graph
+      (<code>high_confidence_g.py --merge</code> does this). The kept <code>score</code> is a
+      <em>composite</em>, not the raw softmax: the calibrated <code>p_rel</code> multiplied by NER, cue,
+      margin, section and self-pair factors, clamped to [0,1] &mdash; see section&nbsp;6.</td>
 </tr>
 <tr>
-  <td class='num'>16</td>
+  <td class='num'>17</td>
+  <td><code>compare_re.py</code> <span class='pill opt'>optional</span></td>
+  <td><code>TRIPLES/triples_re.json</code> (from step&nbsp;16, both models joined on <code>pair_id</code>)</td>
+  <td><code>summaries/compare_re.html</code> <span class='dim'>(+ a text summary on stdout)</span></td>
+  <td>Puts the two checkpoints side by side on the <em>same</em> entity pairs. Dev-set F1 cannot settle
+      whether the extra edge types are <em>right</em> &mdash; the two models are scored on different corpora
+      with different label sets &mdash; so the comparison happens on this corpus's own sentences. Reports
+      coverage (pairs kept by both / by only one), the label cross-tab on shared pairs, how many edges gained
+      a <strong>sign</strong>, mean score per model, and samples of the disagreements and BioRED-only edges to
+      hand-read. Needs both checkpoints, so it is skipped when step&nbsp;2 did not run.</td>
+</tr>
+<tr>
+  <td class='num'>18</td>
   <td><code>zip_work.py</code></td>
-  <td>the whole working directory (every dir produced by steps&nbsp;1&ndash;15:
-      <code>ppi-biobert-re/</code>, <code>sentences/</code>, <code>summaries/</code>,
-      <code>GENETIC/ DISEASE/ CHEMICAL/ TRIPLES/</code>&hellip;)</td>
+  <td>the whole working directory (every dir produced by steps&nbsp;1&ndash;17:
+      <code>ppi-biobert-re/</code>, <code>biored-biobert-re/</code>, <code>sentences/</code>,
+      <code>summaries/</code>, <code>GENETIC/ DISEASE/ CHEMICAL/ TRIPLES/</code>&hellip;)</td>
   <td><code>kaggle_working.zip</code> (in the working dir)</td>
   <td>Final packaging step: archives the entire run into one zip so the whole output is a single download.
       The archive is built in a temp dir (so the growing zip can't include itself) then moved into the
@@ -282,50 +331,428 @@ step&nbsp;1's model and step&nbsp;2's sentences, so it is independent of the 13&
 <h2>3. How to run</h2>
 <ol class='steps'>
   <li><span class='step-no'>1</span><code>python gpu.py --list</code>
-      <span class='dim'>&mdash; preview the plan (roots, input count, accelerator, the 16 steps).</span></li>
+      <span class='dim'>&mdash; preview the plan (roots, input count, accelerator, the 18 steps).</span></li>
   <li><span class='step-no'>2</span><code>python gpu.py</code>
-      <span class='dim'>&mdash; run all 16 steps end-to-end. On Kaggle: enable the GPU accelerator + internet, and
-      <code>!pip install -q 'datasets&lt;4'</code> first (for step&nbsp;1's BigBIO download).</span></li>
+      <span class='dim'>&mdash; run all 18 steps end-to-end. On Kaggle: enable the GPU accelerator + internet, and
+      <code>!pip install -q 'datasets&lt;4'</code> first (for the BigBIO downloads in steps&nbsp;1&ndash;2).</span></li>
   <li><span class='step-no'>3</span><code>python gpu.py --steps triples,relation_extraction</code>
       <span class='dim'>&mdash; run a subset (e.g. re-derive triples from existing <code>sentences/</code> and libraries).</span></li>
 </ol>
 <p class='dim'>Individual scripts can still be run directly (<code>python triples.py</code>, etc.) &mdash; each
 resolves its paths relative to its own file &mdash; but <code>gpu.py</code> is the intended entry point
-because it stages inputs, orders the steps, and wires up <code>RE_MODEL_PPI</code>.</p>
+because it stages inputs, orders the steps, and wires up <code>RE_MODEL_PPI</code> and
+<code>RE_MODEL_BIORED</code>.</p>
 
-<div class='warn'>Step&nbsp;1 (<code>run_re_pipeline.py</code>) needs internet + <code>datasets&lt;4</code> to
-download BigBIO bioinfer; step&nbsp;2 (<code>sentences.py</code>) pulls the BioBERT NER models from Hugging
-Face on first use; step&nbsp;14 (<code>pub_years.py</code>) calls NCBI. Steps&nbsp;1, 2 and 15 run on CUDA
-(they fall back to CPU &mdash; slow &mdash; if no GPU is visible). Upload <code>ppi-biobert-re/</code> and
-skip step&nbsp;1, or upload <code>sentences/</code> and skip step&nbsp;2, to reuse prior results.</div>
+<div class='warn'>Steps&nbsp;1&ndash;2 (<code>run_re_pipeline.py</code>) need internet +
+<code>datasets&lt;4</code> to download BigBIO bioinfer and biored; step&nbsp;3 (<code>sentences.py</code>)
+pulls the BioBERT NER models from Hugging Face on first use; step&nbsp;15 (<code>pub_years.py</code>)
+calls NCBI. Steps&nbsp;1, 2, 3 and 16 run on CUDA (they fall back to CPU &mdash; slow &mdash; if no GPU is
+visible). Upload <code>ppi-biobert-re/</code> and/or <code>biored-biobert-re/</code> and skip
+steps&nbsp;1&ndash;2, or upload <code>sentences/</code> and skip step&nbsp;3, to reuse prior results.
+Skipping step&nbsp;2 without supplying its checkpoint also disables step&nbsp;17.</div>
 
 <h2>4. Notes</h2>
 <ul>
   <li><strong>One orchestrator, one working dir.</strong> <code>gpu.py</code> stages the scripts,
       <code>experimental_ner/</code> (symlinked), a writable <code>databases/</code> copy, and the output dirs
       into a single run root, then runs each step there as a subprocess with the same environment.</li>
-  <li><strong>The hub file is <code>sentences/*.json</code>.</strong> Step&nbsp;2 produces it from the XML
-      corpus; steps&nbsp;3&ndash;12 and 15 all read it. Three parallel normalization branches
+  <li><strong>The hub file is <code>sentences/*.json</code>.</strong> Step&nbsp;3 produces it from the XML
+      corpus; steps&nbsp;4&ndash;13 and 16 all read it. Three parallel normalization branches
       (GENETIC / DISEASE / CHEMICAL) fan out from it and reconverge in <code>triples.py</code>.</li>
-  <li><strong>Two triple producers.</strong> <code>triples.py</code> (12) is rule-based (relation-cue text
-      between consecutive entities); <code>relation_extraction.py</code> (15) is the trained BioBERT model.
-      Both write into <code>TRIPLES/</code>; step&nbsp;15's scores are the learned counterpart to step&nbsp;12's
+  <li><strong>Two triple producers.</strong> <code>triples.py</code> (13) is rule-based (relation-cue text
+      between consecutive entities); <code>relation_extraction.py</code> (16) is the trained BioBERT model.
+      Both write into <code>TRIPLES/</code>; step&nbsp;16's scores are the learned counterpart to step&nbsp;13's
       candidates.</li>
+  <li><strong>Two relation models, scored additively.</strong> Steps&nbsp;1 and 2 train the same architecture
+      on different corpora &mdash; BioInfer (binary &ldquo;interacts&rdquo;, sentence-scoped, cleanly labelled)
+      and BioRED (typed and signed, document-level annotation). Step&nbsp;16 runs <em>both</em> over every
+      applicable pair rather than picking one, step&nbsp;17 compares them, and the replace-or-not decision is
+      deferred to the graph step, where <code>--merge union|gate|typed|none</code> chooses the policy. Nothing
+      in the bundle commits to one model.</li>
   <li><strong>Normalization is layered.</strong> <code>triples.py</code> writes the base triples then three
       progressively normalized files: +HGNC, +MONDO, +ChEBI &mdash; the last
       (<code>triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code>) is the fully ID-normalized set.</li>
-  <li><strong>In-place annotators.</strong> <code>controls.py</code> (6), <code>phenotypes.py</code> (8) and
-      <code>nonchemical.py</code> (10) add yes/no flags <em>onto existing library JSON</em> rather than
+  <li><strong>In-place annotators.</strong> <code>controls.py</code> (7), <code>phenotypes.py</code> (9) and
+      <code>nonchemical.py</code> (11) add yes/no flags <em>onto existing library JSON</em> rather than
       producing new corpora &mdash; so they must run after the libraries they annotate are built.</li>
   <li><strong>Hand-off from step&nbsp;1.</strong> The input <code>experimental_ner/</code> is exactly what the
       publications pipeline (<code>step_1_publications.html</code>) assembled; this bundle is the "step&nbsp;2"
       referenced there.</li>
-  <li><strong>Single-download bundle.</strong> The last step, <code>zip_work.py</code> (16), packs the whole
+  <li><strong>Single-download bundle.</strong> The last step, <code>zip_work.py</code> (18), packs the whole
       working directory into <code>kaggle_working.zip</code> &mdash; so the entire run (model, sentences,
       normalization libraries, <code>TRIPLES/</code> and the HTML summaries) comes off Kaggle as one file. It
       runs after every other step, and builds the archive in a temp dir so the growing zip can't include
       itself.</li>
 </ul>
+
+<h2>5. What the 3 training epochs bought <span class='dim'>(measured, 2026-08-02)</span></h2>
+<p class='meta'><code>train_re.py --epochs</code> defaults to <strong>3.0</strong>
+(<code>train_re.py:228</code>, passed through by <code>run_re_pipeline.py:474</code>) and both
+checkpoints kept their <code>checkpoint-*/trainer_state.json</code>, so the per-epoch dev curve is
+recoverable without retraining. <code>load_best_model_at_end</code> evaluates once per epoch and
+selects on dev F1.</p>
+
+<div class='warn'><strong>NER is not trained here &mdash; it gets zero epochs.</strong> The
+&ldquo;three fine-tuned BioBERT NER models&rdquo; in the step-2 row above were fine-tuned by
+<em>their authors</em>; this pipeline runs them frozen through the Transformers
+<code>token-classification</code> pipeline (<code>sentences.py:255-263</code>). There is no
+<code>train_ner.py</code>, no NER dev split and no NER checkpoint in the bundle. Every epoch count on
+this page refers to <strong>relation extraction only</strong>.</div>
+
+<h3><code>ppi-biobert-re</code> <span class='dim'>(BigBIO bioinfer; 439 steps/epoch, 1,317 total)</span></h3>
+<table>
+<thead><tr><th class='num'>epoch</th><th class='num'>dev F1</th><th class='num'>&Delta;</th><th class='num'>precision</th><th class='num'>recall</th><th class='num'>accuracy</th><th class='num'>eval loss</th></tr></thead>
+<tbody>
+<tr><td class='num'>1</td><td class='num'>0.8122</td><td class='num'>&mdash;</td><td class='num'>0.7805</td><td class='num'>0.8466</td><td class='num'>0.9050</td><td class='num'>0.2373</td></tr>
+<tr><td class='num'>2</td><td class='num'>0.8525</td><td class='num'><strong>+0.0403</strong></td><td class='num'>0.8641</td><td class='num'>0.8413</td><td class='num'>0.9294</td><td class='num'>0.2308</td></tr>
+<tr><td class='num'>3</td><td class='num'>0.8549</td><td class='num'>+0.0024</td><td class='num'>0.8376</td><td class='num'>0.8730</td><td class='num'>0.9281</td><td class='num'>0.2578</td></tr>
+</tbody>
+</table>
+<p><strong>Epoch 3 is not necessary for this checkpoint.</strong> It bought <strong>+0.24 F1
+points</strong> while eval loss rose 12% (0.2308&nbsp;&rarr;&nbsp;0.2578) and accuracy fell
+(0.9294&nbsp;&rarr;&nbsp;0.9281) &mdash; the onset of overfitting. <code>load_best_model_at_end</code>
+nonetheless selected epoch&nbsp;3, on a margin of 0.0024 measured against BioInfer's 780-row dev split.
+<code>BioRED_task_mapping.md:349-352</code> already warns not to read small dev-F1 differences as real;
+this is one of them. Essentially the whole gain is in epoch&nbsp;2.
+<strong>Acted on:</strong> <code>train_re.EPOCH_DEFAULTS["ppi"] = 2.0</code> as of 2026-08-02
+(recommendation&nbsp;5 in section&nbsp;6); the checkpoint in the bundle predates the change and still has
+three epochs in it.</p>
+
+<h3><code>biored-biobert-re</code> <span class='dim'>(BigBIO biored; 2,119 steps/epoch, 6,357 total)</span></h3>
+<table>
+<thead><tr><th class='num'>epoch</th><th class='num'>dev F1</th><th class='num'>&Delta;</th><th class='num'>precision</th><th class='num'>recall</th><th class='num'>accuracy</th><th class='num'>eval loss</th></tr></thead>
+<tbody>
+<tr><td class='num'>1</td><td class='num'>0.5769</td><td class='num'>&mdash;</td><td class='num'>0.5893</td><td class='num'>0.5650</td><td class='num'>0.6573</td><td class='num'>1.1116</td></tr>
+<tr><td class='num'>2</td><td class='num'>0.6150</td><td class='num'><strong>+0.0381</strong></td><td class='num'>0.5993</td><td class='num'>0.6315</td><td class='num'>0.6774</td><td class='num'>1.2601</td></tr>
+<tr><td class='num'>3</td><td class='num'>0.6238</td><td class='num'>+0.0088</td><td class='num'>0.6049</td><td class='num'>0.6439</td><td class='num'>0.6854</td><td class='num'><strong>1.5041</strong></td></tr>
+</tbody>
+</table>
+<p><strong>Epoch 3 is marginal but defensible here.</strong> +0.88 F1 points is small, but precision and
+recall are both still climbing, so the model has not turned over on the metric that matters.</p>
+
+<div class='key'><strong>The epochs and the calibrator are the same story told twice.</strong> BioRED's
+eval loss rose <strong>35%</strong> (1.11&nbsp;&rarr;&nbsp;1.50) across the three epochs <em>while F1
+improved</em>. That divergence is the model becoming more <em>confident</em> faster than it becomes
+more <em>correct</em> &mdash; and it is exactly what produced the raw ECE of 0.2761 that section&nbsp;6
+has Platt undo. The fitted <code>a&nbsp;=&nbsp;0.3878</code> is, in effect, dividing the logits by
+~2.6: stripping back out the overconfidence epochs&nbsp;2&ndash;3 put in. Cutting BioRED to two epochs
+would cost ~0.9 F1 and start from a better-calibrated model; keeping epoch&nbsp;3 and letting the
+calibrator clean up is the better trade, but <em>only</em> because the calibrator runs. The two
+settings should not be changed independently.</div>
+
+<p class='meta'>Note the dev <code>eval_f1</code> above and the 0.6601 in
+<code>summaries/calibration.html</code> are different metrics &mdash; the latter is micro-averaged over
+positive classes only, on <em>test</em>, at a decision threshold of 0.2653 tuned on dev. They are not
+comparable figures.</p>
+
+<h2>6. Calibration: how much it changes, and what it does not <span class='dim'>(measured, 2026-08-02)</span></h2>
+<p class='meta'><code>calibration.py</code> maps each model's raw softmax to a probability. <span
+class='dim'>(Historic: this was resolved per task &mdash; <strong>isotonic</strong> for
+<code>ppi</code>, <strong>Platt</strong> for <code>biored</code>. Everything measured below describes
+that arrangement, which is what produced the triples currently in <code>TRIPLES/</code>. Recommendation
+2a moved every task to Platt.)</span> The calibrated value feeds
+<code>p_rel</code> in the composite score
+(<code>score = p_rel &times; ner &times; cue &times; margin &times; section &times; self_pair</code>,
+clamped to <code>[0,1]</code> at <code>relation_extraction.py:565</code>). Because the composite is
+multiplicative and each triple records both the raw <code>predicate.score</code> and the calibrated
+<code>score_components.p_rel</code>, the <code>RE_CALIBRATE=0</code> pipeline can be reconstructed
+exactly &mdash; <code>score_raw = score_cal / p_rel_cal &times; p_raw</code> &mdash; without re-running
+the GPU step. Everything below comes from that ablation over the 1,247-triple corpus.</p>
+
+<h3>What it measurably buys</h3>
+<table>
+<thead><tr><th></th><th class='num'>raw</th><th class='num'>calibrated</th></tr></thead>
+<tbody>
+<tr><td>ECE, <code>biored-biobert-re</code> <span class='dim'>(test, 4,645 positives; Platt fit on 5,829 dev positives)</span></td>
+    <td class='num'>0.2761</td><td class='num'><strong>0.0734</strong></td></tr>
+</tbody>
+</table>
+<p class='dim'>From <code>summaries/calibration.html</code>. A 73% reduction &mdash; but in-domain, on
+BioRED's own test split. This corpus is lung-cancer PubMed through GROBID, and there is no gold
+standard for it, so the calibrated score is not a true probability on <em>your</em> data either.</p>
+
+<h3>What it does not change: the graph</h3>
+<table>
+<thead><tr><th></th><th>calibrated <span class='dim'>(shipped)</span></th><th>raw</th></tr></thead>
+<tbody>
+<tr><td>M-view nodes</td><td>157 &mdash; 108 gene, 27 chemical, 22 disease</td><td><strong>157, identical</strong></td></tr>
+<tr><td>M-view edges</td><td>235</td><td><strong>235, identical</strong></td></tr>
+<tr><td>edges by node-type pair</td><td>105 / 60 / 49 / 13 / 8</td><td><strong>identical</strong></td></tr>
+<tr><td>M triples in the &ge;0.5 universe</td><td class='num'>464</td><td class='num'>464</td></tr>
+</tbody>
+</table>
+<p>This is structural, not luck. Both calibrators are <strong>monotonic</strong> &mdash; Platt is a
+sigmoid of the logit, isotonic a PAV step function &mdash; so neither can reorder triples within a
+model, and the graph universe is cut at <code>GRAPH_BASE = 0.5</code>, below where the cross-model
+reordering bites. <strong>Calibration cannot improve precision, recall or F1 in this pipeline, by
+construction.</strong></p>
+
+<h3>What it does change: whether an absolute threshold means anything</h3>
+<table>
+<thead><tr><th class='num'>threshold</th><th class='num'>G calibrated</th><th class='num'>G raw</th><th class='num'>M calibrated</th><th class='num'>M raw</th></tr></thead>
+<tbody>
+<tr><td class='num'>&ge;0.8</td><td class='num'>219</td><td class='num'>845</td><td class='num'>112</td><td class='num'>448</td></tr>
+<tr><td class='num'>&ge;0.95</td><td class='num'>47</td><td class='num'>587</td><td class='num'>11</td><td class='num'>298</td></tr>
+<tr><td class='num'>&ge;0.99</td><td class='num'>40</td><td class='num'>503</td><td class='num'>11</td><td class='num'>253</td></tr>
+</tbody>
+</table>
+<p class='meta'>Same effect on the graph's own summary line: of the 235 M-view edges, the number
+carrying a &ge;0.99 sentence is <strong>10 calibrated</strong> against <strong>152 raw</strong>.</p>
+<div class='key'>Un-calibrated, the composite clamps at 1.0 and the scores pile up on the ceiling:
+<strong>53% of BioRED triples (512 of 967) and 42% of PPI triples (118 of 280) land at exactly
+1.000</strong>. Calibrated, that is 0 and 40 respectively. The &ge;0.99 slider stop would select 57% of
+the corpus instead of 4.5%. <strong>This is the whole case for calibration:</strong> every threshold in
+the pipeline is an <em>absolute number</em> (<code>--score</code>, <code>--thresholds</code>, the
+0.5&ndash;0.99 browser slider), and against raw softmax those numbers point at nothing. Threshold by
+rank or percentile instead and calibration becomes a genuine no-op.</div>
+
+<h3>The weak point: the two calibrators are not on one scale</h3>
+<p class='meta'><code>--merge union</code> takes <code>max()</code> of the two models' scores for a pair
+both claim. That is a cross-model comparison, and it is where miscalibration actually bites.</p>
+<table>
+<thead><tr><th>of the 69 corroborated pairs, the max score came from</th><th class='num'>PPI</th><th class='num'>BioRED</th></tr></thead>
+<tbody>
+<tr><td>calibrated <span class='dim'>(shipped)</span></td><td class='num'><strong>65</strong></td><td class='num'>4</td></tr>
+<tr><td>raw</td><td class='num'>35</td><td class='num'>34</td></tr>
+</tbody>
+</table>
+<p>Calibration did not remove a cross-model bias here &mdash; it <em>created</em> one. Platt on BioRED
+is aggressive (<code>a=0.3878, b=-1.2197</code>: raw&nbsp;0.99&nbsp;&rarr;&nbsp;0.637,
+0.999&nbsp;&rarr;&nbsp;0.811), and its highest composite anywhere in the corpus is <strong>0.9022</strong>
+&mdash; so <strong>no BioRED triple can ever reach the &ge;0.95 slider stop</strong>. PPI's isotonic
+saturates at exactly 1.0. Under <code>union</code> the PPI verdict therefore wins the score almost
+always, and the typed model &mdash; which supplied 948 of 1,159 labels &mdash; is structurally locked
+out of the high-confidence view.</p>
+
+<div class='warn'><strong>The PPI isotonic is the weaker of the two.</strong> 197 breakpoints collapse
+onto just <strong>8 distinct output levels</strong> &mdash; 0.0, 0.5556, 0.6667, 0.6923, 0.8077,
+0.8529, 0.9756, 1.0 &mdash; with an 82-breakpoint plateau at 0.9756. It quantizes PPI scores into eight
+buckets (45 triples on 0.692, 32 on 0.808), and it emits a hard <strong>1.0</strong> and a hard
+<strong>0.0</strong>, asserting certainty from a 780-row dev split.
+<code>BioRED_task_mapping.md:324-331</code> argues isotonic &ldquo;overfits small calibration sets
+badly&hellip; will fit a step function to a few hundred points&rdquo; and switches BioRED to Platt on
+that basis. The staircase above is that exact failure, on the PPI side, where the argument was not
+applied.
+<br><br><strong>Fixed both ways</strong> (recommendations 2a and 3): the default calibrator is now
+Platt for every task, and <code>calibration.py</code> clips every output into
+[<code>CLIP</code>,&nbsp;1&minus;<code>CLIP</code>] with <code>CLIP&nbsp;=&nbsp;1e-3</code> at fit
+<em>and</em> apply time. Passing the existing, unmodified <code>ppi-biobert-re/calibration.json</code>
+through the new code now yields 0.0010 at the bottom and 0.9990 at the top instead of 0.0 and 1.0 &mdash;
+no refit required, though the scores already in <code>TRIPLES/</code> keep the old values until the RE
+step runs again.</div>
+
+<h3>Recommendations <span class='dim'>&mdash; all five implemented 2026-08-02</span></h3>
+<table>
+<thead><tr><th class='num'>#</th><th>recommendation</th><th>how it was implemented</th><th>live?</th></tr></thead>
+<tbody>
+<tr>
+  <td class='num'>1</td>
+  <td><strong>Keep calibration on.</strong> One lookup per pair at inference, and it is load-bearing
+      for every absolute threshold downstream.</td>
+  <td>Already the default (<code>RE_CALIBRATE=1</code>). Turning it off, or a checkpoint with no
+      <code>calibration.json</code>, is no longer silent: <code>relation_extraction.py</code> prints
+      <code>!! UNCALIBRATED</code> per checkpoint plus a warning that every absolute threshold
+      downstream stops discriminating. The per-checkpoint line now also reports the calibrator's
+      <em>ceiling</em>.</td>
+  <td>next RE run</td>
+</tr>
+<tr>
+  <td class='num'>2</td>
+  <td><strong>Put both models on one scale</strong> &mdash; fit PPI with Platt too, or compare
+      per-model percentile ranks rather than calibrated probabilities.</td>
+  <td><strong>Both.</strong> (a) <code>train_re.CALIBRATION_DEFAULT = "platt"</code> for every task,
+      consumed by <code>train_re.py</code> and <code>run_re_pipeline.py</code> alike so the two entry
+      points cannot drift; <code>--calibration isotonic</code> still overrides. (b) New
+      <code>high_confidence_g.py --merge-scale rank|calibrated</code>, default <strong>rank</strong>:
+      on a pair both models kept, each score is compared against <em>its own model's</em>
+      distribution and the higher percentile wins, so a saturating calibrator cannot win by
+      construction. The kept value is still the winner's calibrated probability &mdash; only the
+      choice of winner changes.</td>
+  <td>(a) next training run<br>(b) <strong>now</strong></td>
+</tr>
+<tr>
+  <td class='num'>3</td>
+  <td><strong>Clip isotonic to [&epsilon;, 1&minus;&epsilon;]</strong> so no calibrator can output a
+      hard 0 or 1.</td>
+  <td><code>calibration.py</code> gained <code>CLIP = 1e-3</code>, applied to <em>both</em> methods
+      when fitting <strong>and</strong> when applying. Applying at use time is deliberate: it corrects
+      <code>calibration.json</code> files written before the change without refitting, so the existing
+      <code>ppi-biobert-re</code> spec stops emitting a hard 1.0 immediately.</td>
+  <td>next RE run</td>
+</tr>
+<tr>
+  <td class='num'>4</td>
+  <td><strong>Document the BioRED ceiling</strong> (0.9022): it makes <code>--score 0.95</code> a
+      gene-only filter in disguise.</td>
+  <td>Promoted from a docs note to a runtime check. <code>high_confidence_g.py</code> prints the max
+      composite each model reached and flags every cutoff this run applies &mdash;
+      <code>--score</code>, each <code>--thresholds</code> value and the slider's stops &mdash; that
+      one model cannot reach. Read from the <em>pre-merge</em> triples, since after the merge a pair
+      keeps the typed model's name but may carry the other model's score.</td>
+  <td><strong>now</strong></td>
+</tr>
+<tr>
+  <td class='num'>5</td>
+  <td><strong><code>--epochs 2</code> for PPI</strong> &mdash; per section&nbsp;5 it costs 0.24 F1
+      points and saves a third of that training run.</td>
+  <td><code>train_re.EPOCH_DEFAULTS = {"ppi": 2.0, "biored": 3.0, None: 3.0}</code>, resolved after
+      parsing so an explicit <code>--epochs</code> still wins, and echoed in the startup
+      <code>[task]</code> line. Unmeasured tasks (chemprot/gad/ddi) keep 3.</td>
+  <td>next training run</td>
+</tr>
+</tbody>
+</table>
+
+<div class='warn'><strong>Three of the five need a GPU re-run to take effect.</strong> Recommendations
+1, 3 and 5 change how triples are <em>scored</em> and how checkpoints are <em>trained</em>, so they
+apply from the next <code>gpu.py</code> run onward &mdash; the triples currently in
+<code>TRIPLES/</code> were scored by the old code and are unchanged. Recommendations 2b and 4 act on
+the existing scored file and are live now.</div>
+
+<h3>What changed in the merge, on this corpus</h3>
+<p class='meta'>Re-running <code>high_confidence_g.py --nodes all</code> under the new default, against
+the same unchanged <code>triples_re_*.json</code>:</p>
+<table>
+<thead><tr><th>of the 69 corroborated pairs, the kept score came from</th><th class='num'>PPI</th><th class='num'>BioRED</th></tr></thead>
+<tbody>
+<tr><td><code>--merge-scale calibrated</code> <span class='dim'>(old default)</span></td><td class='num'>65</td><td class='num'>4</td></tr>
+<tr><td><code>--merge-scale rank</code> <span class='dim'>(new default)</span></td><td class='num'>55</td><td class='num'><strong>14</strong></td></tr>
+</tbody>
+</table>
+<p>BioRED's share of the cross-model comparisons goes from 6% to 20%. It does not reach parity, and it
+should not be expected to: the rank rule only removes the <em>calibrator's</em> thumb on the scale, and
+PPI genuinely sits higher in its own distribution on most of these pairs. The blast radius is small
+because only corroborated pairs are affected &mdash; 69 of 1,159 &mdash; and the graph is unchanged at
+157 nodes / 235 edges. The visible difference is in the exports: <strong>112&nbsp;&rarr;&nbsp;111</strong>
+M triples and <strong>219&nbsp;&rarr;&nbsp;217</strong> G triples at &ge;0.8, where a pair now takes
+BioRED's lower, better-calibrated number instead of PPI's saturated one.</p>
+
+<pre>merge[union]: 1,247 triples (biored-biobert-re, ppi-biobert-re) -&gt; 1,159 pairs; 69 corroborated by both, 948 took the typed label
+  score[rank]: on the 69 corroborated pairs the kept score came from ppi-biobert-re 55, biored-biobert-re 14
+  score ceilings (max composite reached per model): biored-biobert-re 0.9022, ppi-biobert-re 1.0000
+  !! score&gt;=0.95 is unreachable for biored-biobert-re -- that cutoff is effectively ppi-biobert-re-only
+  !! score&gt;=0.99 is unreachable for biored-biobert-re -- that cutoff is effectively ppi-biobert-re-only</pre>
+
+<p class='meta'>The ceiling warning is the point of recommendation&nbsp;4: the 0.95 and 0.99 stops were
+already gene-only in every prior run, and nothing said so. Note <code>ppi-biobert-re</code> still shows
+a ceiling of exactly <strong>1.0000</strong> &mdash; those triples were scored by the un-clipped
+isotonic map. After the next RE run the clip lands and that becomes 0.9990.</p>
+
+<p class='meta'>Each merged triple now also carries <code>score_from</code> (which model supplied the
+kept score) and, under <code>--merge-scale rank</code>, <code>score_pct_by_model</code> &mdash; so the
+choice is auditable per triple rather than implicit in a <code>max()</code>.</p>
+
+<h2>7. Implementation log <span class='dim'>&mdash; 2026-08-02</span></h2>
+<p class='meta'>File-by-file view of the same work section&nbsp;6 describes recommendation-by-recommendation,
+plus the two design choices that are not obvious from the diff.</p>
+
+<h3>Code changes</h3>
+<table>
+<thead><tr><th class='num'>rec</th><th>files</th><th>change</th></tr></thead>
+<tbody>
+<tr><td class='num'>1</td><td><code>relation_extraction.py</code></td>
+    <td><code>!! UNCALIBRATED</code> per checkpoint plus a warning that absolute thresholds stop
+        discriminating; the calibrated line now also reports the calibrator's ceiling.</td></tr>
+<tr><td class='num'>2a</td><td><code>train_re.py</code>, <code>run_re_pipeline.py</code></td>
+    <td><code>CALIBRATION_DEFAULT = "platt"</code> for every task. <code>run_re_pipeline.py</code> now
+        <em>imports</em> it from <code>train_re.py</code> rather than keeping its own copy, so the
+        orchestrated path and a direct <code>python train_re.py</code> cannot drift apart.</td></tr>
+<tr><td class='num'>2b</td><td><code>high_confidence_g.py</code></td>
+    <td>New <code>--merge-scale rank|calibrated</code>, default <strong>rank</strong>.</td></tr>
+<tr><td class='num'>3</td><td><code>calibration.py</code></td>
+    <td><code>CLIP = 1e-3</code> applied at fit <strong>and</strong> apply time, plus a
+        <code>ceiling()</code> helper.</td></tr>
+<tr><td class='num'>4</td><td><code>high_confidence_g.py</code></td>
+    <td><code>score_ceilings()</code> / <code>ceiling_report()</code> &mdash; a runtime warning for
+        unreachable cutoffs.</td></tr>
+<tr><td class='num'>5</td><td><code>train_re.py</code>, <code>run_re_pipeline.py</code></td>
+    <td><code>EPOCH_DEFAULTS = {"ppi": 2.0, "biored": 3.0, None: 3.0}</code>.</td></tr>
+</tbody>
+</table>
+<p class='meta'>The per-task calibrator table in <code>BioRED_task_mapping.md</code> was marked
+<strong>superseded</strong> in the same pass, with the reasoning kept &mdash; leaving it to say
+&ldquo;isotonic for ppi&rdquo; while the code did otherwise is the same drift that produced this page's
+stale step numbering.</p>
+
+<h3>Two design choices worth flagging</h3>
+<div class='key'><strong>1. Clipping at apply time, not just fit time.</strong> This corrects
+<code>calibration.json</code> files written before the change <em>without a refit</em>: the existing
+<code>ppi-biobert-re</code> spec yields 0.0010 / 0.9990 instead of hard 0.0 / 1.0 the moment the code
+loads it. Verified against the unmodified file on disk. Clipping only at fit time would have left the
+shipped checkpoint asserting certainty until someone retrained it on a GPU.
+<br><br><strong>2. <code>rank</code> keeps the score a probability.</strong> It changes only
+<em>which</em> model's verdict represents a corroborated pair, comparing each score against its own
+model's distribution. The kept value is still the winner's calibrated probability, so
+<code>--score</code>, <code>--thresholds</code> and the browser slider all keep their meaning. The
+alternative &mdash; storing the percentile itself as <code>score</code> &mdash; would have put a number
+that is not a probability behind thresholds that assume one.</div>
+
+<h3>Measured effect</h3>
+<p>Cross-model bias on the same unchanged input file: <strong>65/4 &rarr; 55/14</strong> PPI/BioRED
+across the 69 corroborated pairs &mdash; 6% to 20% for BioRED. Not parity, and it should not be: the
+rank rule removes the calibrator's thumb on the scale, not PPI's genuine edge. The graph is unchanged at
+157 nodes / 235 edges; the exports moved <strong>112&nbsp;&rarr;&nbsp;111</strong> (M) and
+<strong>219&nbsp;&rarr;&nbsp;217</strong> (G) triples at &ge;0.8. Section&nbsp;6 has the full table.</p>
+<p>The ceiling check earned its place on the first run:</p>
+<pre>!! score&gt;=0.95 is unreachable for biored-biobert-re -- that cutoff is effectively ppi-biobert-re-only
+!! score&gt;=0.99 is unreachable for biored-biobert-re -- that cutoff is effectively ppi-biobert-re-only</pre>
+<p>Those two stops have been gene-only in every prior run with nothing saying so.</p>
+<div class='warn'><strong>One bug found and fixed during implementation.</strong> The ceiling check
+first read the <em>post-merge</em> triples, which mis-attributes scores: after the merge a pair keeps
+the typed model's name in <code>predicate.model</code> but may carry the other model's number, so
+BioRED appeared to have a ceiling of 1.0000. It now reads the pre-merge file, which reports the true
+0.9022. The wrong version would have silently suppressed the very warning the recommendation asked
+for.</div>
+
+<h3>Scope: what is live and what is not</h3>
+<table>
+<thead><tr><th>recommendation</th><th>takes effect</th><th>why</th></tr></thead>
+<tbody>
+<tr><td>2b (merge scale), 4 (ceiling report)</td><td><strong>now</strong></td>
+    <td>They act on the already-scored <code>triples_re_*.json</code> at graph-build time.</td></tr>
+<tr><td>1 (uncalibrated warning), 3 (clipping)</td><td>next <code>gpu.py</code> run</td>
+    <td>They change how triples are <em>scored</em>; the triples in <code>TRIPLES/</code> were written
+        by the old code and are unchanged.</td></tr>
+<tr><td>5 (epochs), 2a (Platt everywhere)</td><td>next training run</td>
+    <td>They change how checkpoints are <em>trained and calibrated</em>. The two checkpoints in the
+        bundle predate the change.</td></tr>
+</tbody>
+</table>
+<p class='meta'>This is why <code>ppi-biobert-re</code> still reports a ceiling of exactly
+<strong>1.0000</strong> above: those scores came from the un-clipped isotonic map. After the next RE
+step it becomes 0.9990. Re-running <code>high_confidence_g.py</code> alone cannot change it &mdash; the
+clip lives in the scoring step, not the graph step.</p>
+
+<h3>Incidental: the NER gate is saturated</h3>
+<p class='meta'>Related, since it sets what the composite's other factors can contribute. Over the same
+1,247 triples, the <code>ner</code> factor (min of the two endpoint NER confidences):</p>
+<table>
+<thead><tr><th></th><th class='num'>value</th></tr></thead>
+<tbody>
+<tr><td>gate at exactly 1.0</td><td class='num'>799 (64.1%)</td></tr>
+<tr><td>gate &ge;0.95</td><td class='num'>1,159 (92.9%)</td></tr>
+<tr><td>gate &lt;0.9</td><td class='num'>57</td></tr>
+<tr><td>median span score &mdash; GENETIC / DISEASE / CHEMICAL</td><td class='num'>1.0000 / 1.0000 / 1.0000</td></tr>
+</tbody>
+</table>
+<p><code>relation_extraction.py:186</code> says NER &ldquo;acts as a gate&rdquo; rather than
+discriminating; the data confirms it contributes almost no discrimination. The NER errors that actually
+reach the graph are <strong>confident and wrong</strong> &mdash; <code>TBX3</code>&nbsp;&times;7 typed
+CHEMICAL though it is a gene, <code>HLF</code>/<code>HLFs</code>&nbsp;&times;11 and
+<code>HGNEC</code>&nbsp;&times;4 as unresolvable DISEASE surfaces &mdash; so a lower
+<code>NER_MIN_SCORE</code> would not catch them. Those are fixed in the normalization layer
+(<code>disease.py</code>, <code>chemical.py</code>, <code>nonchemical.py</code>), not by any amount of
+training. <span class='dim'>(<code>TBX3</code> was in fact dropped for having no ChEBI id rather than
+by <code>nonchemical.py</code>'s <code>non_chemical</code> flag &mdash; right outcome, wrong
+mechanism.)</span></p>
+
+<div class='warn'><strong><code>summaries/calibration.html</code> is written once per run, so
+step&nbsp;2 overwrites step&nbsp;1's report.</strong> The file on disk describes whichever invocation
+ran last &mdash; <code>task = biored</code> in the current bundle &mdash; so the PPI test metrics,
+confusion matrix and ECE figures are not recoverable without re-running step&nbsp;1 alone. The
+per-checkpoint <code>calibration.json</code> files are unaffected (one per model dir), and the
+per-epoch curves in section&nbsp;5 survive in each checkpoint's
+<code>checkpoint-*/trainer_state.json</code>. Giving the report a per-task filename would fix it.</div>
 
 </body>
 </html>

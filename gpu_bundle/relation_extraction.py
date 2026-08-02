@@ -625,9 +625,20 @@ def run(limit=None, route_mode=None):
     for name, items in buckets.items():
         tok, model, device, id2label, neg_ids = get_model(name)
         cal = _CALIBRATORS.get(name)
-        print(f"  [{name}] labels={list(id2label.values())}"
-              f"{' calibrated(' + cal['method'] + ')' if cal else ''} -> scoring {len(items):,} pairs",
+        if cal:
+            note = f" calibrated({cal['method']}, ceiling {Cal.ceiling(cal):.4f})"
+        elif not CALIBRATE:
+            note = "  !! UNCALIBRATED (RE_CALIBRATE=0)"
+        else:
+            note = "  !! UNCALIBRATED (no calibration.json next to the checkpoint)"
+        print(f"  [{name}] labels={list(id2label.values())}{note} -> scoring {len(items):,} pairs",
               flush=True)
+        if not cal:
+            print(f"     WARNING: `score` will be a raw softmax composite, NOT a probability. On the "
+                  f"reference corpus ~half of all triples then pile up on the clamp at exactly 1.000, "
+                  f"so every ABSOLUTE threshold downstream (--score, --thresholds, the graph's "
+                  f"0.5-0.99 slider) stops discriminating. Ranking within this model is unaffected.",
+                  flush=True)
         kept = 0
         for i in range(0, len(items), BATCH_SIZE):
             chunk = items[i:i + BATCH_SIZE]

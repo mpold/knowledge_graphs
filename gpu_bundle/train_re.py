@@ -60,6 +60,28 @@ from pathlib import Path
 NEG = "false"                                  # canonical negative class (after mapping)
 MARKER_RE = re.compile(r"@[A-Z]+\$")           # entity marker in a blinded sentence
 
+# ONE calibrator for every task, so scores from different checkpoints are comparable.
+# relation_extraction.py --route-mode additive has several checkpoints score the same
+# pair and the graph step takes a max() across them; that max is only meaningful if the
+# scores live on one scale. Platt (two parameters, fit on the logit) degrades gracefully
+# on a small dev split, where isotonic -- nonparametric -- overfits: on the reference run
+# BioInfer's 780-row dev split collapsed 197 isotonic breakpoints onto 8 output levels
+# whose top was a hard 1.0, which then won 65 of 69 cross-model comparisons outright.
+# Isotonic is still selectable with --calibration isotonic.
+CALIBRATION_DEFAULT = "platt"
+
+# Per-task epochs. Measured on the reference run (each checkpoint's
+# checkpoint-*/trainer_state.json):
+#   ppi     dev F1 .8122 -> .8525 -> .8549. Epoch 3 bought +0.0024 F1 while eval loss
+#           ROSE 12% (.2308 -> .2578) and accuracy fell -- overfitting, and a margin far
+#           inside the noise of a 780-row dev split. Epoch 2 holds the whole gain.
+#   biored  dev F1 .5769 -> .6150 -> .6238, precision AND recall still climbing at 3.
+#           Eval loss rises 35% (1.11 -> 1.50): the model gains confidence faster than
+#           correctness, which is exactly the overconfidence the Platt fit removes. Worth
+#           keeping only because calibration runs afterwards.
+# Other tasks are unmeasured here and keep the original default.
+EPOCH_DEFAULTS = {"ppi": 2.0, "biored": 3.0, None: 3.0}
+
 # task registry: label_names maps RAW corpus labels -> readable predicate (the
 # negative raw label MUST map to NEG); known_raw is the set of raw label strings
 # used to locate the label column; markers are added as special tokens with
@@ -225,23 +247,26 @@ def main():
     ap.add_argument("--model", default="dmis-lab/biobert-base-cased-v1.1",
                     help="base LM to fine-tune (default BioBERT)")
     ap.add_argument("--out", help="output checkpoint dir (default <task>-biobert-re)")
-    ap.add_argument("--epochs", type=float, default=3.0)
+    ap.add_argument("--epochs", type=float, default=None,
+                    help="training epochs (default: 2 for ppi, 3 otherwise -- see EPOCH_DEFAULTS)")
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--max-len", type=int, default=128)
     ap.add_argument("--add-marker-tokens", action="store_true",
                     help="add the task's @MARKER$ tokens as special tokens (default off, matches BioBERT)")
     ap.add_argument("--calibration", choices=["isotonic", "platt", "none"], default=None,
-                    help="fit a probability calibrator on the dev split (default: platt for "
-                         "biored, whose dev split is only 100 abstracts -- isotonic is "
-                         "nonparametric and overfits small calibration sets; isotonic otherwise)")
+                    help="fit a probability calibrator on the dev split (default platt for every "
+                         "task -- see CALIBRATION_DEFAULT)")
     ap.add_argument("--seed", type=int, default=42,
                     help="random seed for reproducibility (data shuffling + classifier-head init)")
     args = ap.parse_args()
     cfg = TASKS[args.task]
     out = args.out or f"{args.task}-biobert-re"
     if args.calibration is None:
-        args.calibration = "platt" if args.task == "biored" else "isotonic"
+        args.calibration = CALIBRATION_DEFAULT
+    if args.epochs is None:
+        args.epochs = EPOCH_DEFAULTS.get(args.task, EPOCH_DEFAULTS[None])
+    print(f"[task] {args.task}: epochs={args.epochs} calibration={args.calibration}")
 
     if args.smoke:
         args.data = write_smoke(args.task, f"{args.task}_smoke")

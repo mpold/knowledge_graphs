@@ -538,5 +538,117 @@ rule. Only one file is required.</p>
 <code>python high_confidence_g.py --nodes all</code> for the multi-type view. Both can be run against
 the same data root; their outputs do not overlap.</p>
 
+<h2>9. A worked <code>--nodes all</code> run <span class='dim'>&mdash; this corpus, 2026-08-01</span></h2>
+<p class='meta'>What the multi-type view actually produced on the <code>biored_end2end</code> data root, as a
+concrete companion to the reference figures in section&nbsp;8 (which come from a different run and are
+left as they are). Command: <code>python high_confidence_g.py --nodes all</code> &mdash; every other
+option at its default (<code>--score 0.8</code>, <code>--merge union</code>, graph universe at
+<code>GRAPH_BASE = 0.5</code>).</p>
+
+<div class='key'><strong>The multi-type view is not a garnish on the gene&ndash;gene graph &mdash; it is
+most of the graph.</strong> Only <strong>60 of 235 edges</strong> are gene&ndash;gene, so the default
+<code>--nodes gene</code> view discards roughly three quarters of what the BioRED checkpoint found on
+this corpus. Disease&ndash;gene alone (105) outnumbers gene&ndash;gene nearly two to one.</div>
+
+<div class='stat-grid'>
+  <div class='stat'><div class='v'>157</div><div class='k'>nodes (108 gene, 27 chemical, 22 disease)</div></div>
+  <div class='stat'><div class='v'>235</div><div class='k'>edges</div></div>
+  <div class='stat'><div class='v'>112</div><div class='k'>triples exported at &ge;0.8</div></div>
+  <div class='stat'><div class='v'>59 / 311</div><div class='k'>input XMLs that produced triples</div></div>
+</div>
+
+<h3>Outputs written</h3>
+<table>
+<thead><tr><th>path</th><th>what landed there</th></tr></thead>
+<tbody>
+<tr><td><code>kaggle_working/TRIPLES/high_confidence_M.json</code></td>
+    <td>112 triples across 80 sentences at score&nbsp;&ge;&nbsp;0.8.</td></tr>
+<tr><td><code>kaggle_working/summaries/high_confidence_M.html</code></td>
+    <td>The interactive multi-type graph &mdash; 157 nodes, 235 edges, 10 of them carrying a
+        &ge;0.99 sentence.</td></tr>
+<tr><td><code>biored_end2end_2026_08_01_M.html</code></td>
+    <td>The root copy, named after the working directory plus the date. This is the file the
+        <code>_G</code> default run never writes.</td></tr>
+</tbody>
+</table>
+<p class='meta'>The <code>_G</code> outputs from the earlier default run were left untouched, as the
+suffix scheme intends.</p>
+
+<h3>Edges by node-type pair</h3>
+<table>
+<thead><tr><th>pair</th><th class='num'>edges</th><th></th></tr></thead>
+<tbody>
+<tr><td>disease&ndash;gene</td><td class='num'>105</td><td class='dim'>the largest single category &mdash; entirely absent from the <code>_G</code> view</td></tr>
+<tr><td>gene&ndash;gene</td><td class='num'>60</td><td class='dim'>the only category the gene-only view keeps</td></tr>
+<tr><td>chemical&ndash;gene</td><td class='num'>49</td><td class='dim'>drug/compound &rarr; target</td></tr>
+<tr><td>chemical&ndash;disease</td><td class='num'>13</td><td></td></tr>
+<tr><td>chemical&ndash;chemical</td><td class='num'>8</td><td></td></tr>
+</tbody>
+</table>
+
+<h3>Relations</h3>
+<p>associated&nbsp;97, inhibits&nbsp;53, interacts&nbsp;44, <em>not</em>&nbsp;associated&nbsp;20,
+activates&nbsp;14, <em>not</em>&nbsp;interacts&nbsp;5, <em>not</em>&nbsp;inhibits&nbsp;2 &mdash;
+<strong>69 signed</strong> (activates/inhibits and their negations), 27 negated.</p>
+
+<h3>What the node hygiene did</h3>
+<p class='meta'>These counters run over <em>endpoint mentions</em> in every triple qualifying at
+<code>GRAPH_BASE</code>, not over distinct nodes &mdash; one gene appearing in forty triples counts forty
+times. That is why &ldquo;gene 928 kept&rdquo; sits alongside &ldquo;108 gene nodes&rdquo;.</p>
+<table>
+<thead><tr><th>kept</th><th class='num'>mentions</th><th>dropped</th><th class='num'>mentions</th></tr></thead>
+<tbody>
+<tr><td>gene</td><td class='num'>928</td><td>gene: no HGNC symbol</td><td class='num'>447</td></tr>
+<tr><td>disease</td><td class='num'>374</td><td>disease: generic (<code>DISEASE_IGNORE</code>)</td><td class='num'>261</td></tr>
+<tr><td>chemical</td><td class='num'>197</td><td>disease: no MONDO id</td><td class='num'>67</td></tr>
+<tr><td></td><td class='num'></td><td>chemical: no ChEBI id</td><td class='num'>26</td></tr>
+<tr><td></td><td class='num'></td><td>gene: control / MKI67</td><td class='num'>16</td></tr>
+</tbody>
+</table>
+<p>The curated tables fired as designed: <code>DISEASE_SURFACE</code> corrected
+<strong>6</strong> <code>lcc</code> mentions, and <code>DISEASE_MERGE</code> folded
+<em>lung neoplasm</em>&nbsp;&rarr;&nbsp;<strong>lung cancer</strong> (&times;3) and
+<em>breast carcinoma</em>&nbsp;&rarr;&nbsp;<strong>breast cancer</strong> (&times;2).</p>
+
+<div class='warn'><strong>The un-normalized surfaces are upstream bugs, not exclusions made here.</strong>
+Top offenders this run: <code>TBX3</code>&nbsp;&times;7 is <em>typed CHEMICAL</em> though it is a gene;
+<code>HLFs</code>&nbsp;&times;7, <code>HLF</code>&nbsp;&times;4 and <code>HGNEC</code>&nbsp;&times;4 are
+DISEASE surfaces with no MONDO id; then <code>tumoral</code>&nbsp;&times;4,
+<code>LLC</code>&nbsp;&times;2, <code>SMARCA4 deficiency</code>&nbsp;&times;2 and
+<code>pituitary neuroendocrine tumors</code>&nbsp;&times;2. Fixing these means touching the NER /
+normalization libraries (<code>disease.py</code>, <code>chemical.py</code>, and whatever assigned the
+CHEMICAL type), <strong>not</strong> <code>high_confidence_g.py</code> &mdash; adding them to
+<code>DISEASE_IGNORE</code> would hide the gap rather than close it.</div>
+
+<h3>Threshold rows</h3>
+<table>
+<thead><tr><th class='num'>score &ge;</th><th class='num'>triples</th><th class='num'>sentences</th><th class='num'>G triples</th><th class='num'>G sentences</th><th class='num'>M triples</th></tr></thead>
+<tbody>
+<tr><td class='num'>0.8</td><td class='num'>254</td><td class='num'>154</td><td class='num'>219</td><td class='num'>134</td><td class='num'>112</td></tr>
+<tr><td class='num'>0.95</td><td class='num'>48</td><td class='num'>36</td><td class='num'>47</td><td class='num'>35</td><td class='num'>11</td></tr>
+<tr><td class='num'>0.99</td><td class='num'>41</td><td class='num'>32</td><td class='num'>40</td><td class='num'>31</td><td class='num'>11</td></tr>
+</tbody>
+</table>
+<p class='meta'>M is <em>below</em> G at every threshold even though the M graph has far more edges, and
+that is not a contradiction: <code>qualifies_multi()</code> additionally requires both endpoints to
+resolve to distinct nodes, so the 447 un-symboled gene mentions and the 261 generic diseases cost it
+triples that the looser gene-only filter keeps as text. M trades triple count for node identity.</p>
+
+<h3>Console output <span class='dim'>(verbatim)</span></h3>
+<pre>merge[union]: 1,247 triples (/kaggle/working/biored-biobert-re, /kaggle/working/ppi-biobert-re) -&gt; 1,159 pairs; gate=/kaggle/working/ppi-biobert-re typed=/kaggle/working/biored-biobert-re; 69 corroborated by both, 948 took the typed label
+exported 112 triples (80 sentences) at score&gt;=0.8 -&gt; kaggle_working\TRIPLES\high_confidence_M.json
+wrote graph -&gt; kaggle_working\summaries\high_confidence_M.html  (108 gene, 27 chemical, 22 disease; 235 edges; 10 edges have a &gt;=0.99 sentence; 59 of 311 input XMLs produced triples)
+  edge relations: associated 97, inhibits 53, interacts 44, not associated 20, activates 14, not interacts 5, not inhibits 2  (69 signed)
+  nodes kept: gene 928, disease 374, chemical 197
+  DISEASE_SURFACE overrides applied: 6 mention(s) (lcc)
+  DISEASE_MERGE (one disease, one node): lung neoplasm -&gt; lung cancer x3, breast carcinoma -&gt; breast cancer x2
+  endpoints dropped: gene: no HGNC symbol 447, disease: generic (DISEASE_IGNORE) 261, disease: no MONDO id 67, chemical: no ChEBI id 26, gene: control / MKI67 16
+  top un-normalized surfaces (fix upstream, not here): DISEASE 'HLFs' x7, CHEMICAL 'TBX3' x7, DISEASE 'tumoral' x4, DISEASE 'HGNEC' x4, DISEASE 'HLF' x4, DISEASE 'LLC' x2, DISEASE 'SMARCA4 deficiency' x2, DISEASE 'pituitary neuroendocrine tumors' x2
+  edges by node-type pair: disease-gene 105, gene-gene 60, chemical-gene 49, chemical-disease 13, chemical-chemical 8
+copied graph -&gt; biored_end2end_2026_08_01_M.html
+  score&gt;=0.8: 254 triples / 154 sent; G 219 triples / 134 sent; M 112 triples
+  score&gt;=0.95: 48 triples / 36 sent; G 47 triples / 35 sent; M 11 triples
+  score&gt;=0.99: 41 triples / 32 sent; G 40 triples / 31 sent; M 11 triples</pre>
+
 </body>
 </html>

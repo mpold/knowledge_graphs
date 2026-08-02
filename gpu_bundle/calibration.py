@@ -16,6 +16,15 @@ A calibrator is fit on (p, y) pairs where p is the softmax of the PREDICTED labe
 and y=1 iff that prediction was correct -- restricted to POSITIVE predictions
 (the ones that become triples). The spec is a small JSON dict saved next to the
 checkpoint as calibration.json.
+
+NO CALIBRATOR MAY ASSERT CERTAINTY. Every output is clipped into
+[CLIP, 1-CLIP]. Isotonic is a step function fit by PAV, so a pure top bin
+(every dev example correct) produces a hard 1.0 and a pure bottom bin a hard
+0.0 -- on the reference run ppi-biobert-re's 197 breakpoints collapsed onto 8
+levels whose extremes were exactly 0.0 and 1.0, i.e. "this pair is certain",
+asserted from a 780-row dev split. Clipping is applied BOTH when fitting and
+when applying, so specs written before this change are corrected on load
+without refitting.
 """
 
 import bisect
@@ -24,6 +33,13 @@ import math
 from pathlib import Path
 
 _EPS = 1e-6
+# no calibrated probability may be 0 or 1: a finite dev split cannot justify
+# certainty, and a hard 1.0 lets one model monopolize a cross-model max().
+CLIP = 1e-3
+
+
+def _clip(p):
+    return min(1.0 - CLIP, max(CLIP, float(p)))
 
 
 def _logit(p):
@@ -51,10 +67,10 @@ def _fit_isotonic(xs, ys):
     bx, by = [], []
     for x, y in zip(X, fitted):
         if bx and x == bx[-1]:
-            by[-1] = y                                   # same x -> keep monotone latest
+            by[-1] = _clip(y)                            # same x -> keep monotone latest
         else:
-            bx.append(x); by.append(y)
-    return {"method": "isotonic", "x": bx, "y": by}
+            bx.append(x); by.append(_clip(y))
+    return {"method": "isotonic", "x": bx, "y": by, "clip": CLIP}
 
 
 def _fit_platt(xs, ys, iters=3000, lr=0.1):
@@ -69,7 +85,7 @@ def _fit_platt(xs, ys, iters=3000, lr=0.1):
             ga += e * fi; gb += e
         a -= lr * ga / n
         b -= lr * gb / n
-    return {"method": "platt", "a": a, "b": b}
+    return {"method": "platt", "a": a, "b": b, "clip": CLIP}
 
 
 def fit(xs, ys, method="isotonic"):
@@ -79,19 +95,33 @@ def fit(xs, ys, method="isotonic"):
 
 
 def apply(spec, p):
-    """Calibrated probability for a raw softmax value p (identity if spec is None)."""
+    """Calibrated probability for a raw softmax value p (identity if spec is None).
+
+    The result is clipped into [CLIP, 1-CLIP] regardless of what the spec holds, so
+    calibration.json files fitted before clipping existed are corrected here."""
     if not spec:
         return p
     if spec["method"] == "platt":
-        return 1 / (1 + math.exp(-(spec["a"] * _logit(p) + spec["b"])))
+        return _clip(1 / (1 + math.exp(-(spec["a"] * _logit(p) + spec["b"]))))
     xs, ys = spec["x"], spec["y"]
     if p <= xs[0]:
-        return ys[0]
+        return _clip(ys[0])
     if p >= xs[-1]:
-        return ys[-1]
+        return _clip(ys[-1])
     i = bisect.bisect_right(xs, p) - 1
     x0, x1, y0, y1 = xs[i], xs[i + 1], ys[i], ys[i + 1]
-    return y0 if x1 == x0 else y0 + (y1 - y0) * (p - x0) / (x1 - x0)
+    return _clip(y0 if x1 == x0 else y0 + (y1 - y0) * (p - x0) / (x1 - x0))
+
+
+def ceiling(spec):
+    """Highest calibrated probability this calibrator can ever emit.
+
+    A threshold above this is unreachable for the model behind `spec` -- which is how
+    a 0.95 cutoff silently became gene-only once BioRED got a Platt calibrator whose
+    ceiling sits below it. Used by the graph step to warn instead of quietly filtering."""
+    if not spec:
+        return 1.0
+    return apply(spec, 1.0 - _EPS) if spec["method"] == "platt" else _clip(max(spec["y"]))
 
 
 def ece(ps, ys, bins=10):
