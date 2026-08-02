@@ -1,0 +1,23 @@
+CELL 1:
+!pip install -q "datasets<4" bioc
+
+CELL 2:
+import glob, os
+hits = glob.glob("/kaggle/input/**/gpu.py", recursive=True)
+assert hits, "gpu.py not found under /kaggle/input -- is the dataset attached?"
+INPUT_ROOT = os.path.dirname(hits[0])
+print("INPUT_ROOT =", INPUT_ROOT)
+for need in ("roman.py", "experimental_ner", "databases/hgnc_complete_set_2026-05-01.json",
+             "databases/mondo-clingen.json", "databases/chebi.json"):
+    print(("  OK   " if os.path.exists(f"{INPUT_ROOT}/{need}") else "  MISSING "), need)
+	
+CELL 3:
+!nvidia-smi -L
+!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} --list
+
+CELL 4:
+!python {INPUT_ROOT}/bigbio_to_re.py --task biored --dataset bigbio/biored --print-types
+
+CELL 5:
+!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT}
+
