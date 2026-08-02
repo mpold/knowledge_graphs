@@ -151,6 +151,12 @@ CURATED = {
     "5-aza-dC": "CHEBI:50131",  # 5-aza-2'-deoxycytidine (decitabine)
     "TFP":  "CHEBI:45951",   # trifluoperazine
     "Ce6":  "CHEBI:168630",  # chlorin e6
+    # research-code / contraction forms ChEBI carries only under another name --
+    # the two highest-frequency unmatched CHEMICAL surfaces in the reference run
+    "SchB": "CHEBI:132471",  # schisandrin B; ChEBI's term is '(+)-schisandrin B' (69 mentions)
+    "SchB.": "CHEBI:132471",
+    "AUY922": "CHEBI:83656",  # luminespib (NVP-AUY922), an HSP90 inhibitor (13 mentions)
+    "AUY-922": "CHEBI:83656",
 }
 
 

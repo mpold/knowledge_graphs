@@ -2,7 +2,7 @@
 <html lang='en'>
 <head>
 <meta charset='utf-8'>
-<title>Step 3 &mdash; graph (high_confidence.py &amp; high_confidence_g.py): inputs &amp; outputs</title>
+<title>Step 3 &mdash; graph (high_confidence_g.py): inputs &amp; outputs</title>
 <style>
  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         margin: 2rem auto; max-width: 1100px; color: #222; line-height: 1.45; padding: 0 1rem; }
@@ -39,41 +39,57 @@
 </style>
 </head>
 <body>
-<h1>Step 3 &mdash; graph <span class='dim'>(high_confidence.py &amp; high_confidence_g.py)</span></h1>
+<h1>Step 3 &mdash; graph <span class='dim'>(high_confidence_g.py; high_confidence.py deprecated)</span></h1>
 <p style="font-family: Georgia, 'Times New Roman', serif; font-size: 1.4rem; font-weight: 700;
    color: #b3243b; background: #fdeef0; border: 2px solid #b3243b; border-radius: 8px;
    padding: .75rem 1rem; margin: 1rem 0;">NB!&nbsp; <code style="background:#fbdce1;color:#b3243b;">kaggle_working.zip</code>
-   must be downloaded to the local computer and unzipped before <code style="background:#fbdce1;color:#b3243b;">high_confidence.py</code>
-   or <code style="background:#fbdce1;color:#b3243b;">high_confidence_g.py</code>
+   must be downloaded to the local computer and unzipped before <code style="background:#fbdce1;color:#b3243b;">high_confidence_g.py</code>
    is triggered.</p>
-<p class='meta'>Inputs and outputs of the two step-3 analysis scripts that read the triples the GPU bundle
-(step&nbsp;2) produced and draw the interactive brain-cancer gene&ndash;gene graph. They are standalone
-scripts (not orchestrated by <code>gpu.py</code>) &mdash; one command in, one JSON export plus one
-self-contained HTML graph out &mdash; and differ in exactly one place, the qualifying filter:
-<strong><code>high_confidence.py</code></strong> (sections&nbsp;1&ndash;7 below) keeps the high-confidence
-gene&ndash;gene relations <strong>in a disease/chemical context</strong> (the &ldquo;G_D_C&rdquo; filter),
-while <strong><code>high_confidence_g.py</code></strong> (section&nbsp;8) drops that context requirement and
-keeps <strong>every</strong> high-confidence gene&ndash;gene relation (the gene-only &ldquo;G&rdquo; filter).
-Their <code>_G</code>-suffixed outputs never clobber each other, so both can target the same data root.</p>
+<div class='warn'><strong><code>high_confidence.py</code> is DEPRECATED &mdash; use
+<code>high_confidence_g.py</code> (section&nbsp;8).</strong> It still runs, unchanged, but it is no longer
+developed and it now understates what step&nbsp;2 produces: it categorizes graph edges by
+<em>polarity</em> and never reads <code>predicate.text</code>, so the typed, <strong>signed</strong>
+labels from the BioRED checkpoint (<code>upregulator/activator</code> vs
+<code>downregulator/inhibitor</code> vs <code>binds</code>) all collapse into one indistinguishable
+edge; and it has no multi-model merge, so with
+<code>relation_extraction.py --route-mode additive</code> writing up to two triples per entity pair its
+counts double-count and the higher score silently wins per (pair, sentence) &mdash; an implicit
+&ldquo;union&rdquo; policy nobody chose. <code>high_confidence_g.py</code> does both properly
+(<code>--merge gate|union|typed|none</code> and relation-typed edges). Sections&nbsp;1&ndash;7 below
+describe the deprecated script and are kept for reference; the one thing it still does that the
+&ldquo;G&rdquo; step does not is the disease/chemical context restriction (rule&nbsp;5) &mdash; apply that
+by filtering the &ldquo;G&rdquo; output rather than reviving this file.</div>
+
+<p class='meta'>Inputs and outputs of the step-3 analysis that reads the triples the GPU bundle
+(step&nbsp;2) produced and draws the interactive graph. <strong><code>high_confidence_g.py</code>
+(section&nbsp;8) is the maintained script</strong> &mdash; one command in, one JSON export plus one
+self-contained HTML graph out, standalone (not orchestrated by <code>gpu.py</code>). It offers two
+views: <code>--nodes gene</code> (default), the gene&ndash;gene graph with <code>_G</code> outputs, and
+<code>--nodes all</code>, which additionally draws DISEASE and CHEMICAL nodes and writes
+<code>_M</code> outputs. <strong><code>high_confidence.py</code></strong>, the older
+&ldquo;G_D_C&rdquo; variant that required a disease/chemical sentence context, is <strong>deprecated</strong>;
+sections&nbsp;1&ndash;7 document it for reference and its file names still appear there. All three output
+sets are suffixed differently, so nothing clobbers anything in a shared data root.</p>
 
 <div class='stat-grid'>
-  <div class='stat'><div class='v'>2</div><div class='k'>scripts (G_D_C &amp; G)</div></div>
-  <div class='stat'><div class='v'>2 + 6</div><div class='k'>required + optional inputs</div></div>
-  <div class='stat'><div class='v'>2</div><div class='k'>file outputs each (JSON + HTML)</div></div>
+  <div class='stat'><div class='v'>1 + 1</div><div class='k'>maintained + deprecated script</div></div>
+  <div class='stat'><div class='v'>1 + 7</div><div class='k'>required + optional inputs</div></div>
+  <div class='stat'><div class='v'>_G / _M</div><div class='k'>output sets (<code>--nodes</code>)</div></div>
   <div class='stat'><div class='v'>kaggle_working/</div><div class='k'>default <code>--data-root</code></div></div>
 </div>
 
 <div class='key'>Everything is read from and written under one <strong>data root</strong> &mdash; the writable
 run directory the GPU bundle produced (<code>kaggle_working/</code> next to the script by default;
-override with <code>--data-root</code>). The script applies the <strong>&ldquo;G_D_C&rdquo; qualifying
-filter</strong> (below) to the scored RE triples, writes the survivors to
-<code>TRIPLES/high_confidence_G_D_C.json</code>, and renders the gene&ndash;gene graph to
-<code>summaries/high_confidence.html</code> with an in-browser &ge;0.8&thinsp;/&thinsp;&ge;0.95&thinsp;/&thinsp;&ge;0.99
-confidence toggle. Run it after the bundle:
-<code>python high_confidence.py</code> (optionally <code>--data-root</code>, <code>--score</code>,
-<code>--no-graph</code>).</div>
+override with <code>--data-root</code>). <code>high_confidence_g.py</code> merges the per-pair verdicts
+of however many RE checkpoints step&nbsp;2 ran (<code>--merge</code>), applies the <strong>&ldquo;G&rdquo;
+qualifying filter</strong> to the scored triples, writes the survivors to
+<code>TRIPLES/high_confidence_G.json</code>, and renders the graph to
+<code>summaries/high_confidence_G.html</code> with an in-browser score slider, relation-type filters
+and a copy in the bundle root. Run it after the bundle:
+<code>python high_confidence_g.py</code> (optionally <code>--data-root</code>, <code>--score</code>,
+<code>--merge</code>, <code>--nodes</code>, <code>--no-graph</code>).</div>
 
-<h2>1. Data flow (inputs &rarr; script &rarr; outputs)</h2>
+<h2>1. Data flow (inputs &rarr; script &rarr; outputs) <span class='dim'>&mdash; deprecated <code>high_confidence.py</code></span></h2>
 <div class='flow'>
   <div class='node'><span class='s'>inputs</span> <span class='dim'>(all under <code>&lt;data-root&gt;/</code>, from the step-2 GPU bundle)</span>
     <div class='io'><strong>required:</strong> <code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> (scored + ID-normalized RE triples),
@@ -95,7 +111,7 @@ confidence toggle. Run it after the bundle:
       console threshold stats</div></div>
 </div>
 
-<h2>2. The &ldquo;G_D_C&rdquo; qualifying filter</h2>
+<h2>2. The &ldquo;G_D_C&rdquo; qualifying filter <span class='dim'>&mdash; deprecated <code>high_confidence.py</code></span></h2>
 <p class='meta'>A scored RE triple is kept only when <strong>all five</strong> conditions hold
 (<code>qualifies()</code>). This is what separates &ldquo;high-confidence gene&ndash;gene in a
 disease/chemical context&rdquo; from the raw scored output.</p>
@@ -107,7 +123,7 @@ disease/chemical context&rdquo; from the raw scored output.</p>
   <li><strong>disease/chemical context</strong> &mdash; the triple's <code>sentence</code> also carries a DISEASE or CHEMICAL entity, per <code>triples.json</code>.</li>
 </ol>
 
-<h2>3. Inputs</h2>
+<h2>3. Inputs <span class='dim'>&mdash; deprecated <code>high_confidence.py</code></span></h2>
 <p class='meta'>Paths are resolved beneath <code>--data-root</code> (default <code>kaggle_working/</code>).
 The two <span class='pill req'>required</span> files are read directly (missing the first is a fatal
 error); the <span class='pill opt'>optional</span> ones are read defensively for the graph &mdash; if
@@ -187,7 +203,7 @@ absent, that facet is simply empty (no year slider, no drug-target colouring, et
 </tbody>
 </table>
 
-<h2>4. Outputs</h2>
+<h2>4. Outputs <span class='dim'>&mdash; deprecated <code>high_confidence.py</code></span></h2>
 <table>
 <thead><tr><th>path (under <code>&lt;data-root&gt;/</code>)</th><th>what it is</th></tr></thead>
 <tbody>
@@ -224,7 +240,7 @@ absent, that facet is simply empty (no year slider, no drug-target colouring, et
 </tbody>
 </table>
 
-<h2>5. Options</h2>
+<h2>5. Options <span class='dim'>&mdash; deprecated <code>high_confidence.py</code></span></h2>
 <table>
 <thead><tr><th>flag</th><th>default</th><th>effect</th></tr></thead>
 <tbody>
@@ -235,7 +251,7 @@ absent, that facet is simply empty (no year slider, no drug-target colouring, et
 </tbody>
 </table>
 
-<h2>6. How to run</h2>
+<h2>6. How to run <span class='dim'>&mdash; deprecated <code>high_confidence.py</code></span></h2>
 <ol class='steps'>
   <li><span class='step-no'>1</span><code>python high_confidence.py</code>
       <span class='dim'>&mdash; reads <code>kaggle_working/</code>, writes the JSON + graph at the defaults (score&nbsp;0.8).</span></li>
@@ -252,7 +268,7 @@ just enrich the graph's filters; the graph still renders without them. Building 
 <code>vis-network</code> from the CDN &mdash; harmless if offline (it falls back to a CDN link, or use
 <code>--no-graph</code>).</div>
 
-<h2>7. Notes</h2>
+<h2>7. Notes <span class='dim'>&mdash; deprecated <code>high_confidence.py</code></span></h2>
 <ul>
   <li><strong>Hand-off from step&nbsp;2.</strong> Every required input is a file the GPU bundle
       (<code>step_2_triples.html</code>) wrote into <code>TRIPLES/</code>; the optional inputs come from the
@@ -267,13 +283,125 @@ just enrich the graph's filters; the graph still renders without them. Building 
       network once written.</li>
 </ul>
 
-<h2>8. Gene-only variant &mdash; <code>high_confidence_g.py</code> <span class='dim'>(the &ldquo;G&rdquo; step)</span></h2>
-<p class='meta'>A sibling script, <code>high_confidence_g.py</code>, runs the <strong>same pipeline as a separate
-step</strong> with <strong>one logic difference</strong>: it applies the gene-only <strong>&ldquo;G&rdquo;
-filter</strong> instead of the &ldquo;G_D_C&rdquo; filter above. Everything else &mdash; inputs, graph
-rendering, options, the in-browser confidence toggle &mdash; is identical. Its output filenames all differ
-(a <code>_G</code> suffix), so the two scripts can be run against the same data root without clobbering each
-other.</p>
+<h2>8. The maintained step&nbsp;3 &mdash; <code>high_confidence_g.py</code> <span class='dim'>(the &ldquo;G&rdquo; step)</span></h2>
+<p class='meta'>Originally the gene-only sibling of the script above, now the <strong>maintained</strong>
+step-3 entry point. It applies the gene-only <strong>&ldquo;G&rdquo; filter</strong> instead of the
+&ldquo;G_D_C&rdquo; filter, and it is the only one of the two that consumes what the BioRED model adds.
+Its output filenames all carry a <code>_G</code> suffix, so it never clobbers the deprecated script's
+outputs.</p>
+
+<div class='key'><strong>Two things it does that <code>high_confidence.py</code> does not.</strong>
+<br><br><strong>1. Typed, signed edges.</strong> Each edge is categorized by the <em>relation</em> the
+model predicted &mdash; <code>activates</code> / <code>inhibits</code> / <code>binds</code> /
+<code>interacts</code> / <code>associated</code>, prefixed <code>not&nbsp;</code> when the statement is
+negated &mdash; instead of by polarity alone. Colour encodes the relation
+(<span style='color:#2e9e5b'><strong>green</strong></span> activates,
+<span style='color:#e0533d'><strong>red</strong></span> inhibits,
+<span style='color:#3b7dd8'><strong>blue</strong></span> binds,
+<span style='color:#6b3fa0'><strong>purple</strong></span> interacts,
+<span style='color:#8a8f98'><strong>grey</strong></span> associated,
+<span style='color:#d59a2e'><strong>amber</strong></span> negated), negated edges are dashed, the
+in-panel filter list is now &ldquo;Relation type&rdquo; with <strong>live counts</strong>
+(<code>total &middot; N in view</code> &mdash; the total is every edge of that type in the file, the
+second number is how many survive the current score / year / text / min-connections / min-cluster
+settings, shown red when a ticked type is entirely pruned; <em>Min cluster size</em> now defaults to
+<strong>2</strong> so a lone two-gene edge is no longer silently dropped), and the tooltip carries each
+<em>sentence's own</em> label &mdash; an edge shows its best-supported relation, so a minority reading
+stays visible there rather than disappearing.
+<br><br><em>Negation and speculation are shown differently, on purpose.</em> A tooltip line reading
+<code>[interacts ?]</code> is not a second relation type &mdash; the <strong>?</strong> marks
+<strong>speculated modality</strong>: that sentence hedges the claim instead of asserting it. It comes
+from <code>relation_extraction.py</code>'s <code>negation_modality()</code>, a cue-list scan of a window
+around the pair (&plusmn;40 chars before the subject, &plusmn;30 after the object) for
+<em>may / might / could / likely / possibly / potential / putative / suggest* / appears / seems /
+propose* / predict* / hypothes* / candidate</em>; the words that fired are kept in
+<code>assertion_cues</code> in the JSON. 38 sentences carry it in the reference graph, e.g.
+<code>ASCL1 &rarr; small cell lung carcinoma [associated ?]</code> from &ldquo;&hellip;are
+<strong>likely</strong> associated with the prognosis of SCLC&rdquo;.
+<table>
+<thead><tr><th></th><th>how it is shown</th><th>why that way</th></tr></thead>
+<tbody>
+<tr><td><strong>negation</strong><br><span class='dim'>polarity</span></td>
+    <td>folded into the category itself &mdash; <code>not interacts</code> &mdash; drawn <strong>dashed</strong>
+        and in amber, and filterable as its own relation type</td>
+    <td>&ldquo;X does <em>not</em> bind Y&rdquo; is a <em>different claim</em> from &ldquo;X binds Y&rdquo;,
+        so it must not share an edge category with it</td></tr>
+<tr><td><strong>speculation</strong><br><span class='dim'>modality</span></td>
+    <td>a <code>?</code> after the relation in the <em>per-sentence</em> tooltip line only; the edge's own
+        category and colour are unaffected</td>
+    <td>&ldquo;X <em>may</em> bind Y&rdquo; is the <em>same claim</em> held more weakly &mdash; worth
+        flagging for the reader, not worth splitting the graph over</td></tr>
+</tbody>
+</table>
+Both are <strong>per sentence</strong>, so an edge can rest on three asserted sentences
+and one hedged one; the edge takes its best-supported relation regardless. And both are <strong>kept at
+full score</strong> &mdash; neither is dropped nor down-weighted, because a negated or hedged statement is
+still what the paper said. Flagging beats discarding.
+<br><br><strong>2. A multi-model merge.</strong> <code>--merge</code> collapses the two triples an
+additive RE run writes per pair (binary PPI + typed BioRED, joined on <code>pair_id</code>) into one:
+<table>
+<thead><tr><th><code>--merge</code></th><th>keeps</th><th>label</th><th>use when</th></tr></thead>
+<tbody>
+<tr><td><code>union</code> <span class='dim'>(default)</span></td><td>pairs <strong>either</strong> model kept &mdash; BioRED-only edges included</td><td>the typed one wherever BioRED fired</td><td>you want everything both models found, signed where BioRED could sign it</td></tr>
+<tr><td><code>gate</code></td><td>pairs the <strong>binary</strong> model kept</td><td>the typed model's, where it also fired</td><td>BioRED-only edges prove noisy (its annotation is document-level) and you want BioInfer to decide <em>whether</em> an edge exists, BioRED only <em>what kind</em></td></tr>
+<tr><td><code>typed</code></td><td>pairs the <strong>typed</strong> model kept</td><td>typed</td><td>BioRED replaces PPI outright</td></tr>
+<tr><td><code>none</code></td><td>everything</td><td>as written</td><td>reproducing pre-merge behaviour</td></tr>
+</tbody>
+</table>
+Each merged triple carries <code>models</code>, <code>corroborated</code> and
+<code>score_by_model</code>; <code>score</code> is the max across the models that contributed it.
+<br><br><strong>3. <code>--nodes all</code> &mdash; the multi-type graph.</strong> The gene-only view
+draws an edge only when <em>both</em> endpoints carry a single HGNC symbol, so everything BioRED adds
+beyond gene&ndash;gene is discarded &mdash; on the reference run, <strong>649 of its 655 solo
+pairs</strong> (466 gene&ndash;disease, 117 chemical&ndash;gene, 29 chemical&ndash;disease, 24
+chemical&ndash;chemical). With <code>--nodes all</code>, DISEASE and CHEMICAL endpoints become nodes
+too, identified by their normalized id (<code>mondo_label</code> / <code>chebi_label</code>) so one
+entity is one node across documents. Node hygiene reuses the pipeline's own annotations &mdash;
+<code>control</code> for genes, <code>phenotype</code> from <code>DISEASE/disease.json</code>,
+<code>non_chemical</code> from <code>CHEMICAL/chemical.json</code> &mdash; plus two small curated tables.
+<code>DISEASE_IGNORE</code> drops terms too generic to be a useful node, matched against
+<em>both</em> the surface text and the MONDO label: <code>neoplasm</code> (the label
+&ldquo;tumor&rdquo;/&ldquo;tumors&rdquo;/&ldquo;tumour&rdquo; normalize onto &mdash; 167 endpoint
+mentions on the reference run, ~40% of all disease mentions, so removing this entry is how you get
+them back), <code>cancer</code> (18), and the surface <code>os</code> (&ldquo;overall survival&rdquo;,
+a metric the NER mislabels as DISEASE and which never appears as a MONDO label &mdash; a label-only
+check could never catch it). The match is exact, so <em>breast cancer</em> and <em>lung neoplasm</em>
+survive. <code>DISEASE_SURFACE</code> fixes mappings that are wrong for this corpus rather than
+ignoring them: <code>lcc</code> normalizes to <em>leukoencephalopathy with calcifications and
+cysts</em>, which in a lung-large-cell corpus is large cell carcinoma (6 mentions).
+<code>DISEASE_MERGE</code> then folds distinct MONDO terms that name the <em>same disease at the same
+granularity</em> into one node &mdash; <em>lung carcinoma</em> and <em>lung neoplasm</em> (the surfaces
+&ldquo;lung tumor&rdquo;/&ldquo;lung tumours&rdquo;) join <strong>lung cancer</strong>, and
+<em>breast carcinoma</em> joins <strong>breast cancer</strong>. Which of those terms a mention lands on
+depends only on the wording the author happened to use, so splitting them across nodes is an artefact
+of ontology structure rather than a finding. <strong>Subtypes are deliberately not merged:</strong>
+non-small cell lung carcinoma, small cell lung carcinoma, lung adenocarcinoma, lung large cell
+carcinoma and pulmonary LCNEC remain separate nodes.
+The run prints what every node filter dropped &mdash; including the top
+<strong>un-normalized</strong> surfaces, which are gaps in <code>disease.py</code>/
+<code>chemical.py</code> upstream, not exclusions made here.
+Shape encodes type (gene &#9679; / disease &#9670; / chemical &#9632;), a <em>Node type</em> filter
+appears in the panel (an edge shows only when both endpoint types are ticked), and the score slider
+opens at <strong>&ge;0.8</strong> rather than &ge;0.99 because most gene&ndash;disease edges sit
+between 0.5 and 0.8. <strong>Only gene names are drawn on the canvas</strong> &mdash; a disease or
+chemical name is long, repeats across many edges and would bury the gene symbols, so those nodes are
+drawn unlabelled and their names appear on <em>hover</em> (node tooltip, and in every edge tooltip)
+or on click. The set of labelled kinds is one constant, <code>LABEL_KINDS</code>. Outputs take an <code>_M</code> suffix
+(<code>high_confidence_M.json</code>, <code>summaries/high_confidence_M.html</code>,
+<code>&lt;dir&gt;_&lt;date&gt;_M.html</code>), so all three views can coexist in one data root.
+<table>
+<thead><tr><th>view</th><th>nodes</th><th>edges</th><th>edges by node-type pair</th></tr></thead>
+<tbody>
+<tr><td><code>--nodes gene</code> <span class='dim'>(default)</span></td><td>62 gene</td><td>55</td><td>gene&ndash;gene 55</td></tr>
+<tr class='changed'><td><code>--nodes all</code></td><td>151 &mdash; 105 gene, 27 chemical, 19 disease</td><td>205</td>
+    <td>disease&ndash;gene 82, gene&ndash;gene 55, chemical&ndash;gene 46, chemical&ndash;chemical 11, chemical&ndash;disease 11</td></tr>
+</tbody>
+</table>
+<span class='dim'>(Reference run, universe at &ge;0.5, <code>--merge union</code>. The gene&ndash;gene
+count is identical in both views, as it should be.)</span>
+With a single checkpoint in the file every policy is a no-op. Override the model roles with
+<code>--typed-model</code> / <code>--gate-model</code> (the typed one is otherwise recognized by
+&ldquo;biored&rdquo; in its name, matching <code>compare_re.py</code>).</div>
 
 <div class='key'><strong>The one difference:</strong> <code>high_confidence_g.py</code> <strong>drops
 qualifying rule&nbsp;5</strong> &mdash; the requirement that the triple's sentence also carry a DISEASE or
@@ -292,39 +420,123 @@ filter, without rule&nbsp;5:</p>
   <li><strong>no MKI67</strong> &mdash; neither endpoint's <code>hgnc_symbol</code> is <code>MKI67</code>.</li>
   <li class='dim'><s>disease/chemical context</s> &mdash; <strong>not applied</strong> in this variant (this is the only difference from the G_D_C filter).</li>
 </ol>
+<p class='meta'>Under <code>--nodes all</code> the filter is <code>qualifies_multi()</code> instead: the
+same score rule, both endpoints must resolve to distinct <em>nodes</em> (a normalized id, surviving the
+hygiene tables), and rules&nbsp;2&ndash;4 &mdash; which are about GENETIC endpoints &mdash; apply only when
+a gene is actually involved. Requiring &ldquo;at least one endpoint annotated <code>control: no</code>&rdquo;
+on a chemical&ndash;disease edge would drop every one of them, since neither endpoint can carry that flag.</p>
 
 <h3>Inputs</h3>
-<p class='meta'>Identical to the G_D_C script (section&nbsp;3): the same two <span class='pill req'>required</span>
-files and the same six <span class='pill opt'>optional</span> graph inputs, all under <code>--data-root</code>.
-Note <code>TRIPLES/triples.json</code> is still <span class='pill req'>required</span> here, but it is used
-<em>only</em> for the graph's per-sentence disease labels &mdash; not for filtering (rule&nbsp;5 is gone).</p>
+<p class='meta'>All under <code>--data-root</code>. <strong>Correcting an earlier version of this
+document:</strong> <code>TRIPLES/triples.json</code> is <em>not</em> read by this script at all &mdash;
+that was a G_D_C requirement (rule&nbsp;5's disease/chemical context lookup), and it went away with the
+rule. Only one file is required.</p>
+<table>
+<thead><tr><th>path</th><th></th><th>used for</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code></td>
+  <td><span class='pill req'>required</span></td>
+  <td>The scored, ID-normalized RE triples from step&nbsp;2 &mdash; everything the filter, the merge and
+      the graph are built from. Missing &rarr; the script exits with a pointer to the bundle.</td>
+</tr>
+<tr>
+  <td><code>DISEASE/disease.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td><strong>New.</strong> The <code>phenotype</code> yes/no flag <code>phenotypes.py</code> annotated
+      in place; joined on the surface text because that flag never reaches the RE triples. Used by
+      <code>--nodes all</code> to keep process/finding surfaces out of the disease nodes. Absent &rarr;
+      nothing is filtered on it.</td>
+</tr>
+<tr>
+  <td><code>CHEMICAL/chemical.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td><strong>New.</strong> The same for <code>non_chemical</code> (surfaces labelled CHEMICAL that are
+      really a gene or a process), from <code>nonchemical.py</code>.</td>
+</tr>
+<tr>
+  <td><code>CHEMICAL/chemical_to_target.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>Drug-target shading and the drug search/filter: corpus genes flagged
+      <code>in_corpus_GENETIC</code>, coloured by DGIdb/ChEBI class and scaled by their chemical count.
+      Gene nodes only.</td>
+</tr>
+<tr>
+  <td><code>databases/pmc_years.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>Per-PMID publication years, driving the year-range sliders and the year shown on each sentence.</td>
+</tr>
+<tr>
+  <td><code>experimental_ner/*.xml</code> or <code>sentences/*.json</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>Corpus size for the console line (&ldquo;N of M input XMLs produced triples&rdquo;); the
+      <code>sentences/</code> count is the fallback when the XML dir is an empty runtime symlink.</td>
+</tr>
+<tr>
+  <td><code>summaries/pubmed_query.html</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>The step-1 PubMed query, shown as the graph's title/legend line. Looked up under the data root
+      first, then next to the script.</td>
+</tr>
+</tbody>
+</table>
 
-<h3>Outputs <span class='dim'>(all <code>_G</code>-suffixed, distinct from the G_D_C script)</span></h3>
+<h3>Outputs <span class='dim'>(suffix follows <code>--nodes</code>: <code>_G</code> gene-only, <code>_M</code> multi-type)</span></h3>
 <table>
 <thead><tr><th>path</th><th>what it is</th></tr></thead>
 <tbody>
 <tr>
-  <td><code>&lt;data-root&gt;/TRIPLES/high_confidence_G.json</code></td>
-  <td>The qualifying triples at <code>--score</code> (default 0.8) that pass the four-rule <strong>G</strong> filter, as a JSON list. <strong>Always produced.</strong></td>
+  <td><code>&lt;data-root&gt;/TRIPLES/high_confidence_<strong>G</strong>.json</code><br>
+      <code>&lt;data-root&gt;/TRIPLES/high_confidence_<strong>M</strong>.json</code> <span class='dim'>(--nodes all)</span></td>
+  <td>The merged triples at <code>--score</code> (default 0.8) that pass the qualifying filter, as a JSON
+      list. After the merge each carries <code>models</code>, <code>corroborated</code> and
+      <code>score_by_model</code> alongside the usual fields. <strong>Always produced.</strong></td>
 </tr>
 <tr>
-  <td><code>&lt;data-root&gt;/summaries/high_confidence_G.html</code></td>
-  <td>The same self-contained interactive gene&ndash;gene graph as the G_D_C variant (same panel filters and &ge;0.8&thinsp;/&thinsp;&ge;0.95&thinsp;/&thinsp;&ge;0.99 toggle), but built from the larger gene-only universe. <strong>Skipped with <code>--no-graph</code>.</strong></td>
+  <td><code>&lt;data-root&gt;/summaries/high_confidence_<strong>G</strong>.html</code><br>
+      <code>&lt;data-root&gt;/summaries/high_confidence_<strong>M</strong>.html</code> <span class='dim'>(--nodes all)</span></td>
+  <td>The self-contained interactive graph (vis-network inlined when it can be fetched, else CDN).
+      Edges are coloured by <strong>relation type</strong> with live per-type counts and dashed negation;
+      the <code>_M</code> variant adds typed nodes, a Node-type filter and opens at &ge;0.8 instead of
+      &ge;0.99. <strong>Skipped with <code>--no-graph</code>.</strong></td>
 </tr>
 <tr>
-  <td><code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD_G.html</code></td>
-  <td>A copy of that graph in the script's own directory, named after that directory plus today's date, with a <code>_G</code> suffix (e.g. <code>lung_large_2026_07_19_G.html</code>). Always written alongside the graph; the <code>_G</code> keeps it distinct from the G_D_C script's <code>&lt;current_dir&gt;_YYYY_MM_DD.html</code> copy.</td>
+  <td><code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD_<strong>G</strong>.html</code><br>
+      <code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD_<strong>M</strong>.html</code> <span class='dim'>(--nodes all)</span></td>
+  <td>A copy of that graph in the script's own directory, named after the directory plus today's date
+      (e.g. <code>lung_large_2026_08_01_M.html</code>). Written whenever the graph is. The suffix keeps
+      the two views &mdash; and the deprecated script's unsuffixed
+      <code>&lt;current_dir&gt;_YYYY_MM_DD.html</code> &mdash; distinct.</td>
 </tr>
 <tr>
   <td><span class='dim'>console (stdout)</span></td>
-  <td>Same summary as the G_D_C script, except the per-threshold stats row is labelled <strong>G</strong> (triples/sentences before vs. after the gene-only filter) rather than <strong>G_D_C</strong>.</td>
+  <td>The merge line (models found, pairs kept, how many were corroborated, how many took the typed
+      label), the export count, the graph's node/edge counts, the <strong>edge-relation breakdown with a
+      signed-edge count</strong>, and &mdash; under <code>--nodes all</code> &mdash; the node-filter report
+      (kept per type, <code>DISEASE_SURFACE</code> overrides, <code>DISEASE_MERGE</code> folds, endpoints
+      dropped with reasons, and the top un-normalized surfaces) plus edges by node-type pair. Finally the
+      per-threshold rows, labelled <strong>G</strong> (and <strong>M</strong> under <code>--nodes all</code>).</td>
 </tr>
 </tbody>
 </table>
-<p class='meta'>Options (<code>--data-root</code>, <code>--score</code>, <code>--thresholds</code>,
-<code>--no-graph</code>) and the run/ordering requirements are the same as sections&nbsp;5&ndash;6; run it
-after the GPU bundle, the same way as <code>high_confidence.py</code>:
-<code>python high_confidence_g.py</code>.</p>
+
+<h3>Options</h3>
+<table>
+<thead><tr><th>flag</th><th>default</th><th>what it does</th></tr></thead>
+<tbody>
+<tr><td><code>--data-root PATH</code></td><td><code>kaggle_working/</code></td><td>The pipeline output tree every input and output is resolved under.</td></tr>
+<tr><td><code>--score FLOAT</code></td><td><code>0.8</code></td><td>Threshold for the exported JSON. The graph universe is always built at <code>&ge;0.5</code> so the in-browser slider can go down to it.</td></tr>
+<tr><td><code>--thresholds LIST</code></td><td><code>0.8,0.95,0.99</code></td><td>Thresholds summarized in the console stats.</td></tr>
+<tr><td><code>--no-graph</code></td><td>off</td><td>Export the JSON only; skip the HTML and its root copy.</td></tr>
+<tr><td><code>--merge {union,gate,typed,none}</code></td><td><code>union</code></td><td>How to combine several RE checkpoints scoring the same pair (table above). No-op with a single checkpoint in the file.</td></tr>
+<tr><td><code>--typed-model NAME</code> / <code>--gate-model NAME</code></td><td>auto</td><td>Override which checkpoint supplies the typed labels and which acts as the existence gate. By default the typed one is recognized by &ldquo;biored&rdquo; in its name, matching <code>compare_re.py</code>.</td></tr>
+<tr><td><code>--nodes {gene,all}</code></td><td><code>gene</code></td><td><code>all</code> adds DISEASE and CHEMICAL nodes and switches the outputs to the <code>_M</code> names.</td></tr>
+</tbody>
+</table>
+<p class='meta'>Ordering is the same as section&nbsp;6: run it after the GPU bundle, against an unzipped
+<code>kaggle_working.zip</code> &mdash; <code>python high_confidence_g.py</code>, or
+<code>python high_confidence_g.py --nodes all</code> for the multi-type view. Both can be run against
+the same data root; their outputs do not overlap.</p>
 
 </body>
 </html>

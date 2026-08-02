@@ -151,6 +151,11 @@ CURATED = {
     "GB":   "MONDO:0018177",   # glioblastoma (cf. GBM)
     "LGG":  "MONDO:0021637",   # low grade glioma
     "TNBC": "MONDO:0005494",   # triple-negative breast carcinoma
+    # large cell neuroendocrine LUNG carcinoma: MONDO carries the lung-specific term
+    # as 'pulmonary large cell neuroendocrine carcinoma' and none of its synonyms is
+    # this contraction, so the surface goes unmatched (16 mentions in the reference run)
+    "LCNELC":  "MONDO:0003960",
+    "LCNELCs": "MONDO:0003960",
 }
 
 
@@ -234,6 +239,21 @@ def best_field(slot):
     return min((f for f in slot.values()), key=lambda f: FIELD_RANK[f])
 
 
+def resolve(slot, mode):
+    """slot = {mondo_id: field}. Label-preference guard (the same one chemical.py
+    applies to ChEBI): a surface that hits >=2 terms but matches exactly ONE via that
+    term's *label* -- the rest only via a broad/related synonym -- resolves to that
+    term instead of being written off as ambiguous. This is what separates
+    'lung cancer' (the label of MONDO:0008903) from 'lung carcinoma', which merely
+    carries it as a broad synonym; likewise 'breast cancer' and 'lymphoma', whose
+    other candidates are the pediatric/adult variants."""
+    if len(slot) > 1:
+        lab = [m for m, f in slot.items() if f == "label"]
+        if len(lab) == 1:
+            return {lab[0]}, "label", mode
+    return set(slot), best_field(slot), mode
+
+
 # ============================================================ (1) cascade
 def match_cascade(value, IX):
     def hit(key, index):
@@ -247,16 +267,16 @@ def match_cascade(value, IX):
         else:                                     # a label/synonym string
             slot = IX["ci"].get(cur.casefold())
             if slot:
-                return set(slot), best_field(slot), "curated synonym"
+                return resolve(slot, "curated synonym")
     slot = hit(value, IX["idx"])
     if slot:
-        return set(slot), best_field(slot), "case-sensitive"
+        return resolve(slot, "case-sensitive")
     slot = hit(value.casefold(), IX["ci"])
     if slot:
-        return set(slot), best_field(slot), "case-insensitive"
+        return resolve(slot, "case-insensitive")
     slot = hit(hsfold(value), IX["hs"])
     if slot:
-        return set(slot), best_field(slot), "hyphen/whitespace"
+        return resolve(slot, "hyphen/whitespace")
     # normalized: British->American + plural-strip, matched case-insensitively
     base = britishize(value.casefold())
     cands = [base] + singular_candidates(base)
@@ -267,10 +287,10 @@ def match_cascade(value, IX):
     for c in cands:
         slot = hit(c, IX["ci"])
         if slot:
-            return set(slot), best_field(slot), "normalized"
+            return resolve(slot, "normalized")
     slot = hit(delsep(value), IX["del"])
     if slot:
-        return set(slot), best_field(slot), "separator-deletion"
+        return resolve(slot, "separator-deletion")
     return set(), None, None
 
 

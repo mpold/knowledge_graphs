@@ -25,12 +25,25 @@ is equivalent to
 
 Note: --val-frac defaults to 0.1 because train_re.py requires a dev split (the bare
 conversion command produces only train/test, which makes training stop with an error).
+Corpora that ship their own dev split (biored) default to 0 instead.
 
 USAGE
     python run_re_pipeline.py                         # ppi / bioinfer, all defaults
     python run_re_pipeline.py --task gad --dataset bigbio/gad
+    python run_re_pipeline.py --task biored           # typed+signed edges (see below)
     python run_re_pipeline.py --skip-convert          # reuse existing TSVs
     python run_re_pipeline.py --skip-convert --skip-train   # (re)calibrate only
+
+TASK DEFAULTS
+    --task biored flips three defaults, because BioRED is not BioInfer:
+      --dataset bigbio/biored, --data biored_data, --model biored-biobert-re
+      --val-frac 0     BioRED ships its own train/dev/test split; carving another
+                       dev set out of train would be wrong (BioInfer has no dev
+                       split, hence the 0.1 default there).
+      --calibration platt   BioRED's dev split is 100 abstracts. Isotonic regression
+                       is nonparametric and overfits a calibration set that small;
+                       Platt has two parameters and degrades gracefully.
+    Any of them can still be set explicitly. Everything else is task-agnostic.
 
 GPU / KAGGLE
     The training and calibration steps use HuggingFace Trainer, which moves the
@@ -242,6 +255,10 @@ def convert(args):
         cmd += ["--test-frac", str(args.test_frac)]
     if args.neg_ratio is not None:
         cmd += ["--neg-ratio", str(args.neg_ratio)]
+    if args.require_cue:
+        cmd += ["--require-cue"]
+    if args.biored_all_types:
+        cmd += ["--biored-all-types"]
     run_step("1/3 CONVERT", cmd)
 
 
@@ -444,13 +461,14 @@ def calibrate(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--task", default="ppi", choices=["ppi", "chemprot", "gad", "ddi"])
-    ap.add_argument("--dataset", default="bigbio/bioinfer", help="BigBIO HF dataset")
+    ap.add_argument("--task", default="ppi", choices=["ppi", "chemprot", "gad", "ddi", "biored"])
+    ap.add_argument("--dataset", default=None, help="BigBIO HF dataset (default per task)")
     ap.add_argument("--config", help="BigBIO config (default <name>_bigbio_kb)")
-    ap.add_argument("--data", default="ppi_data", help="TSV dir (convert output / train input)")
-    ap.add_argument("--model", default="ppi-biobert-re", help="checkpoint output dir")
-    ap.add_argument("--val-frac", type=float, default=0.1,
-                    help="dev fraction carved from train (REQUIRED by training; default 0.1)")
+    ap.add_argument("--data", default=None, help="TSV dir (convert output / train input)")
+    ap.add_argument("--model", default=None, help="checkpoint output dir")
+    ap.add_argument("--val-frac", type=float, default=None,
+                    help="dev fraction carved from train (REQUIRED by training unless the corpus "
+                         "ships a dev split; default 0.1, or 0 for biored)")
     ap.add_argument("--test-frac", type=float, default=0.0, help="carve a test split if none exists")
     ap.add_argument("--neg-ratio", type=float, default=None, help="cap negatives to N x positives")
     ap.add_argument("--epochs", type=float, default=3.0)
@@ -465,7 +483,14 @@ def main():
     ap.add_argument("--seed", type=int, default=42, help="training seed (reproducibility)")
     ap.add_argument("--convert-seed", type=int, default=0, help="conversion seed (sampling/shuffle)")
     ap.add_argument("--calibration", choices=["isotonic", "platt", "none"],
-                    default="isotonic", help="dev calibrator fit on dev positives")
+                    default=None, help="dev calibrator fit on dev positives "
+                                       "(default isotonic, or platt for biored)")
+    ap.add_argument("--require-cue", action="store_true",
+                    help="biored: pass --require-cue to the converter -- demote a document-level "
+                         "positive whose connecting text carries no relational stem")
+    ap.add_argument("--biored-all-types", action="store_true",
+                    help="biored: keep all 8 relation types instead of collapsing the 4 rare "
+                         "chemical-chemical ones into Association")
     ap.add_argument("--tune-threshold", action=argparse.BooleanOptionalAction, default=True,
                     help="tune the positive-decision threshold on dev to maximize micro-F1, then "
                          "report test metrics at that operating point (default on; --no-tune-threshold "
@@ -477,6 +502,25 @@ def main():
                          "-- recommended on Kaggle's 2x T4), '0,1' (both), 'all' (inherit), "
                          "'cpu'/'' (force CPU)")
     args = ap.parse_args()
+
+    # per-task defaults: only fill in what the caller left unset (see TASK DEFAULTS above)
+    TASK_DEFAULTS = {
+        "ppi": dict(dataset="bigbio/bioinfer", data="ppi_data", model="ppi-biobert-re",
+                    val_frac=0.1, calibration="isotonic"),
+        "biored": dict(dataset="bigbio/biored", data="biored_data", model="biored-biobert-re",
+                       val_frac=0.0, calibration="platt"),
+    }
+    d = TASK_DEFAULTS.get(args.task, dict(dataset=f"bigbio/{args.task}", data=f"{args.task}_data",
+                                          model=f"{args.task}-biobert-re", val_frac=0.1,
+                                          calibration="isotonic"))
+    applied = []
+    for k in ("dataset", "data", "model", "val_frac", "calibration"):
+        if getattr(args, k) is None:
+            setattr(args, k, d[k])
+            applied.append(f"--{k.replace('_', '-')} {d[k]}")
+    print(f"[task] {args.task}: dataset={args.dataset} data={args.data}/ model={args.model}/ "
+          f"val-frac={args.val_frac} calibration={args.calibration}"
+          + (f"\n[task] defaults applied: {', '.join(applied)}" if applied else ""))
 
     setup_device(args.gpus)
 

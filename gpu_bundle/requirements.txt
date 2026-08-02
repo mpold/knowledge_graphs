@@ -3,8 +3,13 @@
 #
 # datasets is PINNED to <4 because BigBIO ships as dataset loading scripts, which
 # were dropped in datasets 4.0 (step 1 of gpu.py downloads BigBIO bioinfer).
+#
+# bioc is a dependency of the BigBIO *loading script* for BioRED (step 2 of gpu.py):
+# BioRED is distributed as BioC XML, so `bigbio/biored` fails with
+# "ModuleNotFoundError: No module named 'bioc'" without it. Not needed for bioinfer.
 torch
 transformers
 datasets<4
+bioc
 numpy
 lxml

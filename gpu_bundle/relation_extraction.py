@@ -59,16 +59,39 @@ TYPE_MARKER, which is correct for both ChemProt and GAD):
     {GENETIC, DISEASE}   ->  $RE_MODEL_GAD        (associated + false)     @GENE$/@DISEASE$
     {GENETIC, GENETIC}   ->  $RE_MODEL_PPI        (interacts + false)      @GENE$/@GENE$
     {CHEMICAL, CHEMICAL} ->  $RE_MODEL_DDI        (mechanism/effect/...)   @DRUG$/@DRUG$
+    all five of the above->  $RE_MODEL_BIORED     (typed + SIGNED, see below)
     any pair             ->  $RE_MODEL            (global fallback, if set)
 
 Each route blinds with the markers its checkpoint was TRAINED on (ROUTE_MARKERS):
 DDI uses @DRUG$ for both CHEMICAL entities, while the ChemProt route uses @CHEMICAL$
 for the same NER type -- so blinding is deferred until after routing.
 
+BIORED IS A MULTI-PAIR ROUTE (Luo et al. 2022; see BioRED_task_mapping.md)
+-------------------------------------------------------------------------
+One BioRED checkpoint covers EVERY entity-type pair this corpus produces --
+gene-gene, gene-disease, chemical-gene, chemical-chemical, chemical-disease -- and
+predicts a SIGNED label (upregulator/activator, downregulator/inhibitor, binds,
+associated) instead of a bare "interacts". Its markers are the default @GENE$ /
+@DISEASE$ / @CHEMICAL$, so it needs no ROUTE_MARKERS override. How it combines with
+the single-pair checkpoints is set by RE_ROUTE_MODE / --route-mode:
+
+    exclusive (default)  one model per pair: the pair-specific checkpoint wins where
+                         it is set, BioRED covers the rest, $RE_MODEL last.
+    additive             EVERY applicable checkpoint scores the pair, so one entity
+                         pair can yield two triples (each tagged predicate.model).
+                         This is what "run BioRED alongside the PPI model" means, and
+                         it is what compare_re.py reads to answer whether BioRED's
+                         extra edge types are RIGHT -- not merely higher-F1. Beware
+                         downstream double-counting: filter by predicate.model (or
+                         re-run exclusive) before building a graph from it.
+
+Every triple carries `pair_id` -- a stable (pmid, sentence, offsets) key -- so the
+two models' verdicts on the same pair can be joined.
+
 A pair with no applicable model is skipped and counted. Set at least one of the
 env vars to a fine-tuned checkpoint -- a base LM like dmis-lab/biobert-base-cased-v1.1
 has a RANDOM head and is useless here. Train them with train_re.py
-(--task chemprot / --task gad / --task ppi).
+(--task chemprot / --task gad / --task ppi / --task biored).
 
 DEPENDENCY-PATH OVERLAY (triples_strategy.html section 5.2 step 4)
 -----------------------------------------------------------------
@@ -83,6 +106,7 @@ many pairs were pruned.
     $env:RE_MODEL_CHEMPROT = (Resolve-Path .\\chemprot-biobert-re)
     $env:RE_MODEL_GAD      = (Resolve-Path .\\gad-biobert-re)
     $env:RE_MODEL_PPI      = (Resolve-Path .\\ppi-biobert-re)
+    $env:RE_MODEL_BIORED   = (Resolve-Path .\\biored-biobert-re)
 
 Input  : sentences/*.json                         (BioBERT NER spans)
 Output : TRIPLES/triples_re.json                  scored triples; predicate carries
@@ -97,10 +121,12 @@ Optionally also writes the GENETIC/DISEASE/CHEMICAL-normalized variant when
 
 Run::  python relation_extraction.py            (set the RE_MODEL_* env vars first)
        python relation_extraction.py --normalize --limit 200
+       python relation_extraction.py --normalize --route-mode additive   (PPI + BioRED)
 """
 
 import argparse
 import glob
+import hashlib as _hashlib
 import html
 import json
 import os
@@ -264,6 +290,20 @@ ROUTE_ENV = {
 }
 FALLBACK_ENV = "RE_MODEL"
 
+# BioRED is one checkpoint spanning several type pairs (all of the ones this corpus
+# can produce), so it is not a ROUTE_ENV entry -- it applies to any pair in this set.
+BIORED_ENV = "RE_MODEL_BIORED"
+BIORED_PAIRS = {
+    frozenset({"GENETIC"}),                        # gene-gene   (signed + binds)
+    frozenset({"GENETIC", "DISEASE"}),             # gene-disease
+    frozenset({"GENETIC", "CHEMICAL"}),            # chemical-gene
+    frozenset({"CHEMICAL"}),                       # chemical-chemical
+    frozenset({"CHEMICAL", "DISEASE"}),            # chemical-disease
+}
+# exclusive: one model per pair (specific route > BioRED > global fallback)
+# additive : every applicable checkpoint scores the pair (one pair -> several triples)
+ROUTE_MODE = os.environ.get("RE_ROUTE_MODE", "exclusive").strip().lower()
+
 # per-route marker overrides (merged onto TYPE_MARKER). A route's checkpoint must
 # be blinded with the markers it was TRAINED on -- DDI uses @DRUG$ for both drugs,
 # so on the CHEMICAL-CHEMICAL route a CHEMICAL entity is blinded as @DRUG$ (not the
@@ -275,6 +315,25 @@ ROUTE_MARKERS = {
 
 def route_markers(key):
     return ROUTE_MARKERS.get(key, TYPE_MARKER)
+
+
+def markers_for(key, name, biored=None):
+    """Markers for scoring a pair of type `key` with checkpoint `name`. BioRED was
+    trained on the plain @GENE$/@DISEASE$/@CHEMICAL$/@VARIANT$ scheme for every pair
+    it covers, so it never takes a per-route override (the DDI @DRUG$ one would be
+    wrong for it)."""
+    if biored and name == biored:
+        return TYPE_MARKER
+    return route_markers(key)
+
+
+def pair_id(meta):
+    """Stable key for one entity pair in one sentence, so the verdicts of two models
+    on the SAME pair can be joined (compare_re.py). Offsets are sentence-local, hence
+    the sentence digest."""
+    sig = _hashlib.md5(meta["sentence"].encode("utf-8", "replace")).hexdigest()[:8]
+    return (f'{meta["pmid"]}:{sig}:{meta["_a"]["start"]}-{meta["_a"]["end"]}'
+            f':{meta["_b"]["start"]}-{meta["_b"]["end"]}')
 
 _MODEL_CACHE = {}   # model_name -> (tok, model, device, id2label, neg_ids)
 _CALIBRATORS = {}   # model_name -> calibration spec (or None)
@@ -402,11 +461,36 @@ def resolve_routes():
         if v:
             routes[key] = v
     fallback = os.environ.get(FALLBACK_ENV, "").strip() or None
-    if not routes and not fallback:
+    biored = os.environ.get(BIORED_ENV, "").strip() or None
+    if not routes and not fallback and not biored:
         sys.exit("No RE checkpoint configured. Set RE_MODEL_CHEMPROT and/or RE_MODEL_GAD "
-                 "(or RE_MODEL as a global fallback) to a FINE-TUNED checkpoint -- train "
-                 "with train_re.py. See the module docstring.")
-    return routes, fallback
+                 "(or RE_MODEL_BIORED, which covers every pair type, or RE_MODEL as a global "
+                 "fallback) to a FINE-TUNED checkpoint -- train with train_re.py. "
+                 "See the module docstring.")
+    return routes, fallback, biored
+
+
+def models_for(key, routes, fallback, biored, mode=None):
+    """Checkpoint(s) that should score a pair of this entity-type key.
+
+    exclusive: the first applicable one only (pair-specific > BioRED > global fallback).
+    additive : every applicable one, so the same pair is scored by each -- how the
+               BioRED checkpoint is compared against the single-pair models."""
+    mode = (mode or ROUTE_MODE)
+    applicable = []
+    if key in routes:
+        applicable.append(routes[key])
+    if biored and key in BIORED_PAIRS:
+        applicable.append(biored)
+    if fallback:
+        applicable.append(fallback)
+    # de-dupe (the same dir may be pointed at by two env vars) but keep precedence
+    seen, out = set(), []
+    for n in applicable:
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out if mode == "additive" else out[:1]
 
 
 def get_model(name):
@@ -481,8 +565,9 @@ def composite_score(p_rel, meta, label, self_pair):
     return round(min(1.0, p_rel * ner * cue_f * margin_f * sec_f * self_f), 4), comps
 
 
-def run(limit=None):
-    routes, fallback = resolve_routes()
+def run(limit=None, route_mode=None):
+    routes, fallback, biored = resolve_routes()
+    mode = (route_mode or ROUTE_MODE)
     # collect candidate pairs, bucketed by the checkpoint that should score them
     buckets = defaultdict(list)       # model_name -> [(marked, meta), ...]
     n_files = n_sent = n_cand = skipped = 0
@@ -500,20 +585,26 @@ def run(limit=None):
         for meta in candidate_pairs(sents, pmid):
             n_cand += 1
             key = frozenset({meta["subject"]["type"], meta["object"]["type"]})
-            name = routes.get(key, fallback)
-            if not name:
+            names = models_for(key, routes, fallback, biored, mode)
+            if not names:
                 skipped += 1
                 skip_pairs[tuple(sorted((meta["subject"]["type"], meta["object"]["type"])))] += 1
                 continue
-            # blind NOW, with the markers the routed checkpoint was trained on
-            marked = blind(meta["sentence"], meta["_a"], meta["_b"], route_markers(key))
-            buckets[name].append((marked, meta))
+            meta["pair_id"] = pair_id(meta)
+            for name in names:
+                # blind NOW, with the markers THIS checkpoint was trained on: the DDI
+                # route wants @DRUG$ for a CHEMICAL, BioRED wants @CHEMICAL$ for the
+                # same pair, so the markers depend on the model, not just the pair.
+                marked = blind(meta["sentence"], meta["_a"], meta["_b"],
+                               markers_for(key, name, biored))
+                buckets[name].append((marked, meta))
             if limit and (n_cand - skipped) >= limit:
                 break
         if limit and (n_cand - skipped) >= limit:
             break
 
-    print(f"routes: " + ", ".join(f"{'/'.join(sorted(k))}->{v}" for k, v in routes.items())
+    print(f"routes ({mode}): " + ", ".join(f"{'/'.join(sorted(k))}->{v}" for k, v in routes.items())
+          + (f"  biored={biored} ({len(BIORED_PAIRS)} pair types)" if biored else "")
           + (f"  fallback={fallback}" if fallback else ""))
     print(f"candidate pairs: {n_cand:,} from {n_sent:,} sentences / {n_files:,} files; "
           f"routed to {len(buckets)} model(s), skipped {skipped:,} "
@@ -568,6 +659,7 @@ def run(limit=None):
                     "polarity": meta["polarity"], "modality": meta["modality"],
                     "assertion_cues": meta["assertion_cues"],
                     "cues": meta.get("cues"), "result_margin": meta.get("result_margin"),
+                    "pair_id": meta.get("pair_id"),
                     "pmid": meta["pmid"], "section": meta["section"], "sentence": meta["sentence"],
                 })
             scored_n += len(chunk)
@@ -626,6 +718,14 @@ def render_html(triples):
         lo = int(t["score"] * 10) * 10
         buckets[f"{lo}-{lo + 10}%"] += 1
     samp = sorted(triples, key=lambda t: t["score"], reverse=True)[:60]
+    # additive routing: the same entity pair can be scored by two checkpoints, so the
+    # triple count is NOT the pair count -- say so rather than let it be miscounted.
+    n_pairs = len({t.get("pair_id") for t in triples if t.get("pair_id")})
+    dup_note = (f" over <strong>{n_pairs:,}</strong> distinct entity pairs &mdash; additive routing "
+                f"scored some pairs with more than one checkpoint (see "
+                f"<code>summaries/compare_re.html</code>); filter by "
+                f"<code>predicate.model</code> before building a graph"
+                if n_pairs and n_pairs < len(triples) else "")
 
     def tbl(rows):
         return "".join(f'<tr><td>{esc(str(a))}</td><td class="num">{b:,}</td></tr>' for a, b in rows)
@@ -663,7 +763,7 @@ BioBERT checkpoint and classified under the entity-marker scheme; each kept trip
 softmax <code>score</code>. Data: <code>TRIPLES/triples_re.json</code>. Produced by
 <code>relation_extraction.py</code>.</p>
 <div class="headline"><span class="big">{len(triples):,}</span> scored triples
-(score &ge; {MIN_SCORE}) across {len(models)} model(s)</div>
+(score &ge; {MIN_SCORE}) across {len(models)} model(s){dup_note}</div>
 <h2>By model</h2><table><tr><th>checkpoint</th><th class="num">triples</th></tr>{mdl_rows}</table>
 <h2>Predicted relation labels</h2><table><tr><th>label</th><th class="num">triples</th></tr>{lab_rows}</table>
 <h2>By entity-type pair</h2><table><tr><th>subj-&gt;obj</th><th class="num">triples</th></tr>{pair_rows}</table>
@@ -683,8 +783,13 @@ def main():
     ap.add_argument("--normalize", action="store_true",
                     help="also write the HGNC/MONDO/ChEBI-normalized variant")
     ap.add_argument("--limit", type=int, default=None, help="cap candidate pairs (smoke test)")
+    ap.add_argument("--route-mode", choices=["exclusive", "additive"], default=None,
+                    help="exclusive (default): one checkpoint per pair (pair-specific > BioRED > "
+                         "RE_MODEL). additive: every applicable checkpoint scores the pair, so "
+                         "PPI and BioRED can be compared on identical pairs (compare_re.py). "
+                         "Also env RE_ROUTE_MODE.")
     args = ap.parse_args()
-    triples = run(limit=args.limit)
+    triples = run(limit=args.limit, route_mode=args.route_mode)
     if args.normalize:
         normalize(triples)
     render_html(triples)

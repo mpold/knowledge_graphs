@@ -152,20 +152,34 @@ def build_disease_map():
     return dmap
 
 
+def _lib_lookup(txt, lib_map):
+    """(value, via) for a surface in a normalization library, or (None, None).
+
+    disease.py / chemical.py aggregate their library KEYS through dash_normalize (dash
+    glyphs unified, whitespace around '-' stripped), but the NER surface on a triple is
+    verbatim -- so 'large - cell lung cancer' and 'CIGB - 300' never matched their own
+    library entry ('large-cell lung cancer', 'CIGB-300'). Try the raw surface first, then
+    the dash-normalized one, so the join uses the same key shape the library was built on."""
+    if txt in lib_map:
+        return lib_map[txt], "key"
+    dn = dash_normalize(txt)
+    if dn != txt and dn in lib_map:
+        return lib_map[dn], "key (dash-normalized)"
+    return None, None
+
+
 def normalize_disease(triple, disease_map):
     """Return a copy of `triple` whose DISEASE subject/object carry a mondo_label:
-    text == a disease*.json key (case-sensitive) -> that key's mondo_label, else
-    null. mondo_via records the match. GENETIC/CHEMICAL elements pass through."""
+    text == a disease*.json key (case-sensitive, or its dash-normalized form) -> that
+    key's mondo_label, else null. mondo_via records the match. GENETIC/CHEMICAL pass through."""
     out = {**triple, "subject": dict(triple["subject"]), "object": dict(triple["object"])}
     for role in ("subject", "object"):
         el = out[role]
         if el["type"] != "DISEASE":
             continue
-        txt = el["text"]
-        if txt in disease_map:
-            el["mondo_label"], el["mondo_via"] = disease_map[txt], "disease key"
-        else:
-            el["mondo_label"], el["mondo_via"] = None, None
+        val, via = _lib_lookup(el["text"], disease_map)
+        el["mondo_label"] = val
+        el["mondo_via"] = f"disease {via}" if via else None
     return out
 
 
@@ -182,18 +196,16 @@ def build_chemical_map():
 
 def normalize_chemical(triple, chemical_map):
     """Return a copy of `triple` whose CHEMICAL subject/object carry a chebi_label:
-    text == a chemical*.json key (case-sensitive) -> that key's chebi_label, else
-    null. chebi_via records the match. GENETIC/DISEASE elements pass through."""
+    text == a chemical*.json key (case-sensitive, or its dash-normalized form) -> that
+    key's chebi_label, else null. chebi_via records the match. GENETIC/DISEASE pass through."""
     out = {**triple, "subject": dict(triple["subject"]), "object": dict(triple["object"])}
     for role in ("subject", "object"):
         el = out[role]
         if el["type"] != "CHEMICAL":
             continue
-        txt = el["text"]
-        if txt in chemical_map:
-            el["chebi_label"], el["chebi_via"] = chemical_map[txt], "chemical key"
-        else:
-            el["chebi_label"], el["chebi_via"] = None, None
+        val, via = _lib_lookup(el["text"], chemical_map)
+        el["chebi_label"] = val
+        el["chebi_via"] = f"chemical {via}" if via else None
     return out
 
 

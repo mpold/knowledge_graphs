@@ -4,6 +4,27 @@ high_confidence.py -- extract the high-confidence Gene / Disease-or-Chemical-con
 relation triples from the scored RE output, summarize the threshold statistics, and
 draw the brain-cancer gene-gene relationship graph.
 
+*** DEPRECATED -- use high_confidence_g.py instead. ***
+
+    This script still runs and its outputs are unchanged, but it is no longer developed
+    and it now UNDERSTATES what the pipeline produces:
+
+      * It categorizes graph edges by POLARITY and ignores predicate.text, so the typed,
+        signed labels from the BioRED checkpoint (upregulator/activator vs
+        downregulator/inhibitor vs binds) all collapse into one indistinguishable edge --
+        the entire point of adding that model is lost at graph-build time.
+      * It has no multi-model merge. With relation_extraction.py --route-mode additive the
+        input holds up to two triples per entity pair (PPI + BioRED); this script keeps
+        both, so its triple counts double-count, and per (pair, sentence) the higher score
+        silently wins -- an implicit "union" policy nobody chose.
+
+    high_confidence_g.py does both properly (--merge gate|union|typed|none and
+    relation-typed edges). The one behavioural difference remains the qualifying filter:
+    this script additionally required the sentence to carry a DISEASE or CHEMICAL entity
+    (G_D_C rule 5); the "G" step does not, so its universe is strictly larger. If you need
+    that context restriction, filter the "G" output on the disease/chemical sentence set
+    rather than reviving this file.
+
 A triple QUALIFIES (the "G_D_C" filter) when ALL of these hold:
   1. score >= SCORE                                   (export default 0.8)
   2. annotated control:no   -- >=1 GENETIC endpoint has control == "no"
@@ -33,6 +54,7 @@ import html
 import json
 import re
 import shutil
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -519,6 +541,12 @@ def main():
     ap.add_argument("--thresholds", default="0.8,0.95,0.99", help="thresholds summarized in the console stats")
     ap.add_argument("--no-graph", action="store_true", help="skip the brain-cancer graph HTML")
     args = ap.parse_args()
+
+    print("[DEPRECATED] high_confidence.py is no longer maintained -- use high_confidence_g.py.\n"
+          "             This script ignores predicate.text (typed/signed BioRED labels collapse\n"
+          "             into one edge category) and has no multi-model merge, so with two RE\n"
+          "             checkpoints its triple counts double-count. It still runs unchanged.",
+          file=sys.stderr)
 
     set_data_root(args.data_root)
     if not RE_FILE.exists():

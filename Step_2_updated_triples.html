@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<title>Step 2 (updated) &mdash; triples pipeline with the BioRED relation model</title>
+<style>
+ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 2rem auto; max-width: 1100px; color: #222; line-height: 1.45; padding: 0 1rem; }
+ h1 { margin-bottom: .25rem; } h2 { margin-top: 2.25rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+ h3 { margin: 1.2rem 0 .3rem; }
+ .meta { color: #555; margin-bottom: 1rem; }
+ .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; margin: 1rem 0 1.5rem; }
+ .stat { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .7rem 1rem; }
+ .stat .v { font-size: 1.35rem; font-weight: 600; } .stat .k { color: #555; font-size: .82rem; }
+ table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; font-size: .9rem; }
+ th, td { border: 1px solid #e1e4e8; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+ th { background: #f6f8fa; }
+ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+ tr.changed td { background: #f4fbf6; }
+ code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; font-size: .88em; }
+ pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .9rem 1rem; overflow-x: auto; font-size: .85rem; line-height: 1.4; white-space: pre-wrap; }
+ .dim { color: #888; font-size: .85em; }
+ .key  { background: #ddf4ff; border-left: 4px solid #0969da; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .warn { background: #fff8c5; border-left: 4px solid #d4a72c; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .ok   { background: #e9f7ef; border-left: 4px solid #1a7f37; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ ol.steps > li { margin: .55rem 0; }
+ .flow { display: flex; flex-direction: column; gap: .35rem; margin: 1rem 0 1.5rem; }
+ .flow .node { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .55rem .9rem; }
+ .flow .node.new { background: #f4fbf6; border-color: #b7dfc4; }
+ .flow .node .s { font-weight: 600; }
+ .flow .node .io { color: #555; font-size: .85rem; }
+ .flow .arrow { color: #888; text-align: center; font-size: .9rem; line-height: 1; }
+ .pill { display: inline-block; background: #eef2f6; border: 1px solid #d6dde4; border-radius: 999px;
+         padding: 0 .5rem; font-size: .8rem; color: #444; margin-left: .35rem; }
+ .pill.gpu { background: #e6f4ea; border-color: #b7dfc4; color: #1a7f37; }
+ .pill.net { background: #fdeef0; border-color: #f0c4cb; color: #b3243b; }
+ .pill.opt { background: #f2eef9; border-color: #d9c9f0; color: #6b3fa0; }
+ .pill.new { background: #fff4e5; border-color: #f5cf9a; color: #9a5b00; font-weight: 600; }
+ .step-no { display:inline-block; min-width:1.5rem; height:1.5rem; line-height:1.5rem; text-align:center;
+            background:#0969da; color:#fff; border-radius:50%; font-size:.82rem; font-weight:600; margin-right:.4rem; }
+ .grp { background:#f0f3f6; border:1px solid #dde2e8; border-radius:6px; padding:.35rem .7rem; margin:.6rem 0 .2rem;
+        font-weight:600; font-size:.9rem; color:#333; }
+ .status-done { color:#1a7f37; font-weight:600; } .status-pending { color:#9a5b00; font-weight:600; }
+</style>
+</head>
+<body>
+<h1>Step 2 (updated) &mdash; triples pipeline <span class='dim'>(gpu_bundle)</span></h1>
+<p class='meta'>The step&nbsp;2 pipeline rewritten to follow <strong>&sect;8 &ldquo;Suggested order of work&rdquo;</strong>
+of <code>gpu_bundle/BioRED_task_mapping.md</code>: a second relation-extraction model, trained on
+<strong>BioRED</strong> (Luo et al. 2022, <a href='https://doi.org/10.1093/bib/bbac282'>10.1093/bib/bbac282</a>),
+now runs <em>alongside</em> the BioInfer/PPI model, so the learned RE step can emit <strong>typed and
+signed</strong> edges (<code>upregulator/activator</code>, <code>downregulator/inhibitor</code>,
+<code>binds</code>, <code>associated</code>) instead of a single undirected <code>interacts</code> &mdash;
+and a comparison step produces the evidence for deciding whether that upgrade is real.
+The chain grows from <strong>16 to 18 steps</strong>; everything the old pipeline did, it still does,
+byte-for-byte, when BioRED is skipped.</p>
+
+<div class='stat-grid'>
+  <div class='stat'><div class='v'>18</div><div class='k'>steps in the chain <span class='dim'>(was 16)</span></div></div>
+  <div class='stat'><div class='v'>2</div><div class='k'>RE models trained (PPI + BioRED)</div></div>
+  <div class='stat'><div class='v'>4</div><div class='k'>GPU steps (1, 2, 3, 16)</div></div>
+  <div class='stat'><div class='v'>4</div><div class='k'>optional steps (2, 14, 15, 17)</div></div>
+  <div class='stat'><div class='v'>5&rarr;5</div><div class='k'>entity-type pairs routed <span class='dim'>(BioRED covers all)</span></div></div>
+  <div class='stat'><div class='v'>compare_re.py</div><div class='k'>new script</div></div>
+</div>
+
+<div class='key'>Still <strong>one command &mdash; <code>python gpu.py</code></strong>. The two additions are
+step&nbsp;2 (<code>run_re_pipeline.py --task biored</code>, which trains
+<code>biored-biobert-re/</code>) and step&nbsp;17 (<code>compare_re.py</code>, which puts the two
+checkpoints side by side on identical entity pairs). Step&nbsp;16 now runs with
+<code>--route-mode additive</code>, so every applicable checkpoint scores each pair and each triple
+carries <code>predicate.model</code> plus a shared <code>pair_id</code>. Step&nbsp;2 is
+<strong>optional</strong>: if the BioRED download or training fails, the orchestrator warns, does not
+export <code>RE_MODEL_BIORED</code>, and the run continues exactly as before with the PPI model
+alone.</div>
+
+<h2>1. What &sect;8 asked for, and what is done</h2>
+<table>
+<thead><tr><th class='num'>&sect;8</th><th>step of work</th><th>status</th><th>what was actually done</th></tr></thead>
+<tbody>
+<tr>
+  <td class='num'>1</td><td><code>--print-types</code> against <code>bigbio/biored</code>; correct the type strings</td>
+  <td class='status-pending'>MUST RUN FIRST<br><span class='dim'>on the GPU/Kaggle box</span></td>
+  <td>Not run here &mdash; this machine has neither <code>datasets</code> nor the network access the
+      BigBIO loading script needs. The expected strings from the BioRED schema are wired in, and
+      <code>marker_for()</code> matches them by <em>substring</em>
+      (<code>variant</code>&rarr;VARIANT, <code>chem|drug</code>&rarr;CHEMICAL,
+      <code>dis|phenotyp</code>&rarr;DISEASE, <code>cell</code>&rarr;CELLLINE,
+      <code>taxon|organism|species</code>&rarr;SPECIES, else GENE), so ordinary naming variants in the
+      loader do not break it. <strong>Run the command in &sect;5 below before converting anyway</strong> &mdash;
+      it writes no files and prints exactly how each type maps.</td>
+</tr>
+<tr>
+  <td class='num'>2</td><td>apply the <code>bigbio_to_re.py</code> edits; convert with <code>--val-frac 0</code></td>
+  <td class='status-done'>DONE<br><span class='dim'>verified offline</span></td>
+  <td>Task <code>biored</code> added: <code>BIORED_TYPES</code>, <code>BIORED_PAIRS</code>,
+      <code>marker_for()</code>, <code>valid_pair()</code>, <code>label_for()</code>, the
+      <code>--task</code> choice and the docstring. <code>--val-frac 0</code> is now the
+      <em>default</em> for this task (see &sect;3). Verified end-to-end against a synthetic
+      BioRED-shaped BigBIO-KB document through <code>--input-json</code> (the script's own offline
+      test route): entity&rarr;marker mapping, pair filtering, label mapping, the class collapse and
+      the cue filter all behave as specified. The real corpus conversion still has to run on the box.</td>
+</tr>
+<tr>
+  <td class='num'>3</td><td>hand-read ~50 positives; decide whether the cue filter is needed</td>
+  <td class='status-pending'>TOOLING SHIPPED<br><span class='dim'>the read is yours</span></td>
+  <td>This is a judgement call on real data, so it is shipped as two flags rather than pre-decided:
+      <code>--sample-positives N</code> prints N random positive rows (blinded sentence + the
+      connecting text) and exits without writing files, and <code>--require-cue</code> implements
+      mitigation&nbsp;5.2 &mdash; a document-level positive whose connecting text carries no relational
+      stem is demoted to negative. The cue list mirrors <code>triples.py</code>'s
+      <code>RELCUE</code>, so the training filter and the rule-based extractor agree on what counts
+      as a relation. Off by default: it trades recall for precision, and the fixture shows it
+      demoting a legitimate <code>Association</code> whose phrasing ("was observed in patients
+      with") carries no stem.</td>
+</tr>
+<tr>
+  <td class='num'>4</td><td>apply the <code>train_re.py</code> registry entry; train and calibrate</td>
+  <td class='status-done'>DONE<br><span class='dim'>training needs the GPU box</span></td>
+  <td>Registry entry added (all eight raw labels mapped, negative&rarr;<code>NEG</code>), plus a
+      <code>--smoke</code> template for the task and <code>RE_MODEL_BIORED</code> in the
+      &ldquo;use it&rdquo; hint. Label-space construction verified on the fixture TSVs:
+      <code>['associated', 'downregulator/inhibitor', 'upregulator/activator', 'false']</code>.
+      Calibration defaults to <strong>Platt</strong> for this task in both
+      <code>train_re.py</code> and <code>run_re_pipeline.py</code> (&sect;6 of the mapping doc:
+      isotonic overfits a 100-abstract dev split).</td>
+</tr>
+<tr>
+  <td class='num'>5</td><td>compare against the current PPI checkpoint on the same documents</td>
+  <td class='status-done'>DONE<br><span class='dim'>new machinery</span></td>
+  <td>Three additions make the comparison possible at all: <code>--route-mode additive</code> in
+      <code>relation_extraction.py</code> (every applicable checkpoint scores each pair), a stable
+      <code>pair_id</code> on every triple, and the new <code>compare_re.py</code>, which joins the
+      two verdicts and writes <code>summaries/compare_re.html</code>: coverage, the label cross-tab,
+      how many edges gained a sign, score deltas and samples to hand-read. Corpus F1 cannot answer
+      &sect;8's question &mdash; the two models are scored on different corpora with different label
+      sets &mdash; so the comparison happens on <em>our</em> sentences.</td>
+</tr>
+<tr>
+  <td class='num'>6</td><td>only then decide whether BioRED replaces the PPI model or runs alongside it</td>
+  <td class='status-done'>DEFERRED BY DESIGN<br><span class='dim'>defaults to alongside</span></td>
+  <td>The pipeline ships in the &ldquo;alongside&rdquo; configuration the mapping doc recommends:
+      BioInfer keeps supplying sentence-scoped binary interactions, BioRED adds sign and type.
+      Replacing is a one-line change (drop <code>RE_MODEL_PPI</code>, or run
+      <code>--steps</code> without <code>re_pipeline</code>); running one model per pair again is
+      <code>--route-mode exclusive</code>. Nothing about the decision is baked in.</td>
+</tr>
+</tbody>
+</table>
+
+<h2>2. Order of execution (updated data flow)</h2>
+<div class='flow'>
+  <div class='grp'>A. Train the relation model(s) &nbsp;<span class='dim'>(most upstream; each is its own 3-script sub-pipeline)</span></div>
+  <div class='node'><span class='s'>1. run_re_pipeline.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span>
+    <div class='io'>in: BigBIO <code>bioinfer</code> &nbsp;&rarr;&nbsp; out: <code>ppi-biobert-re/</code> + <code>summaries/calibration.html</code>
+      <span class='dim'>&mdash; bigbio_to_re.py &rarr; train_re.py &rarr; calibration.py; binary <code>interacts</code></span></div></div>
+  <div class='node new'><span class='s'>2. run_re_pipeline.py --task biored</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span> <span class='pill opt'>optional</span> <span class='pill new'>NEW</span>
+    <div class='io'>in: BigBIO <code>biored</code> &nbsp;&rarr;&nbsp; out: <code>biored-biobert-re/</code> + <code>biored_data/{train,dev,test}.tsv</code>
+      <span class='dim'>&mdash; same three scripts, task defaults: <code>--val-frac 0</code>, <code>--calibration platt</code>; typed + signed labels</span></div></div>
+  <div class='arrow'>&darr;&nbsp; ppi-biobert-re/ (RE_MODEL_PPI) + biored-biobert-re/ (RE_MODEL_BIORED) &rarr; step 16</div>
+
+  <div class='grp'>B. NER: corpus &rarr; result-sentence entities <span class='dim'>(unchanged)</span></div>
+  <div class='node'><span class='s'>3. sentences.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span>
+    <div class='io'>in: <code>experimental_ner/PMC*.xml</code> &nbsp;&rarr;&nbsp; out: <code>sentences/PMC*.json</code> + <code>summaries/sentences.html</code></div></div>
+  <div class='arrow'>&darr;&nbsp; sentences/*.json  (every later step reads this)</div>
+
+  <div class='grp'>C. Build the GENETIC / DISEASE / CHEMICAL normalization libraries <span class='dim'>(unchanged)</span></div>
+  <div class='node'><span class='s'>4. roman.py</span> &nbsp;<span class='s'>5. greek.py</span> &nbsp;<span class='s'>6. keys_values.py</span> &nbsp;<span class='s'>7. controls.py</span>
+    <div class='io'>GENETIC surfaces &rarr; HGNC &nbsp;(<code>GENETIC/</code>)</div></div>
+  <div class='node'><span class='s'>8. disease.py</span> &nbsp;<span class='s'>9. phenotypes.py</span>
+    <div class='io'>DISEASE surfaces &rarr; MONDO + phenotype flag &nbsp;(<code>DISEASE/</code>)</div></div>
+  <div class='node'><span class='s'>10. chemical.py</span> &nbsp;<span class='s'>11. nonchemical.py</span> &nbsp;<span class='s'>12. target_pharm.py</span>
+    <div class='io'>CHEMICAL surfaces &rarr; ChEBI + non-chemical flag + chemical&harr;gene cross-links &nbsp;(<code>CHEMICAL/</code>)</div></div>
+  <div class='arrow'>&darr;&nbsp; GENETIC/ + DISEASE/ + CHEMICAL/ lookup libraries</div>
+
+  <div class='grp'>D. Triples: extract, normalize, score</div>
+  <div class='node'><span class='s'>13. triples.py</span>
+    <div class='io'>in: <code>sentences/*.json</code> + the libraries &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples.json</code> + normalized variants + <code>triples.html</code></div></div>
+  <div class='node'><span class='s'>14. relationships.py</span> <span class='pill opt'>optional</span>
+    <div class='io'>&rarr; <code>TRIPLES/genetic_genetic.json</code></div></div>
+  <div class='node'><span class='s'>15. pub_years.py</span> <span class='pill opt'>optional</span> <span class='pill net'>internet</span>
+    <div class='io'>adds <code>year</code> to each gene-gene triple; caches <code>databases/pmc_years.json</code></div></div>
+  <div class='node new'><span class='s'>16. relation_extraction.py --normalize --route-mode additive</span> <span class='pill gpu'>GPU</span> <span class='pill new'>CHANGED</span>
+    <div class='io'>in: <code>sentences/*.json</code> + <strong>both</strong> checkpoints &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples_re.json</code> (+ normalized)
+      <span class='dim'>&mdash; each triple carries <code>predicate.model</code> and <code>pair_id</code>; a pair covered by both models yields two triples</span></div></div>
+  <div class='node new'><span class='s'>17. compare_re.py</span> <span class='pill opt'>optional</span> <span class='pill new'>NEW</span>
+    <div class='io'>in: <code>TRIPLES/triples_re.json</code> &nbsp;&rarr;&nbsp; out: <code>summaries/compare_re.html</code>
+      <span class='dim'>&mdash; PPI vs BioRED on identical pairs: coverage, label agreement, signed-edge count, samples</span></div></div>
+
+  <div class='grp'>E. Bundle the run for download <span class='dim'>(unchanged)</span></div>
+  <div class='node'><span class='s'>18. zip_work.py</span>
+    <div class='io'>the whole working dir &nbsp;&rarr;&nbsp; <code>kaggle_working.zip</code></div></div>
+</div>
+<p class='dim'>The dependency structure is unchanged apart from the two insertions: step&nbsp;2 is a sibling
+of step&nbsp;1 (both produce a checkpoint step&nbsp;16 loads, neither reads the other's output), and
+step&nbsp;17 reads only step&nbsp;16's <code>triples_re.json</code>. Steps 4&ndash;12 still all read
+<code>sentences/*.json</code>; <code>triples.py</code> (13) still reads the three finished libraries;
+the learned RE step (16) still depends only on the trained model(s) and <code>sentences/</code>, so it
+remains independent of the 14&ndash;15 branch.</p>
+
+<h2>3. The changed &amp; new scripts</h2>
+<table>
+<thead><tr><th class='num'>#</th><th>script</th><th>input</th><th>output</th><th>what changed</th></tr></thead>
+<tbody>
+<tr class='changed'>
+  <td class='num'>1</td>
+  <td><code>run_re_pipeline.py</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span></td>
+  <td>BigBIO <code>bigbio/bioinfer</code></td>
+  <td><code>ppi-biobert-re/</code>, <code>ppi_data/*.tsv</code>, <code>summaries/calibration.html</code></td>
+  <td>Behaviour identical &mdash; but the defaults now come from a per-task table instead of being
+      hard-coded, and the resolved values are printed as a <code>[task]</code> line. For
+      <code>--task ppi</code> that table reproduces the previous defaults exactly
+      (<code>bigbio/bioinfer</code>, <code>ppi_data</code>, <code>ppi-biobert-re</code>,
+      <code>--val-frac 0.1</code>, isotonic).</td>
+</tr>
+<tr class='changed'>
+  <td class='num'>2</td>
+  <td><code>run_re_pipeline.py --task biored</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span> <span class='pill opt'>optional</span> <span class='pill new'>NEW STEP</span></td>
+  <td>BigBIO <code>bigbio/biored</code> <span class='dim'>(600 PubMed abstracts, 400/100/100 split)</span></td>
+  <td><code>biored-biobert-re/</code> (weights + label map + <code>calibration.json</code>)<br><code>biored_data/{train,dev,test}.tsv</code><br><code>summaries/calibration.html</code></td>
+  <td>The same three-script sub-pipeline with three task-aware defaults:
+      <code>--val-frac 0</code> (BioRED ships its own dev split &mdash; carving another out of train
+      would be wrong; BioInfer has none, hence 0.1 there), <code>--calibration platt</code>
+      (a 100-abstract dev split is too small for isotonic), and the
+      <code>biored-*</code> output names. Pass-throughs: <code>--require-cue</code>,
+      <code>--biored-all-types</code>.</td>
+</tr>
+<tr class='changed'>
+  <td class='num'>&mdash;</td>
+  <td><code>bigbio_to_re.py</code> <span class='dim'>(support module, run by steps 1&ndash;2)</span></td>
+  <td>a BigBIO-KB corpus, or <code>--input-json</code> docs (offline)</td>
+  <td><code>train.tsv</code> / <code>dev.tsv</code> / <code>test.tsv</code></td>
+  <td>New <code>biored</code> task (mapping tables in &sect;4 below); the four rare chemical-chemical
+      relation types fold into <code>Association</code> unless <code>--biored-all-types</code>;
+      <code>--require-cue</code> and <code>--sample-positives N</code> added for the &sect;8 step&nbsp;3
+      hand-read. The other four tasks are untouched.
+      <br><br><strong>Entity placement hardened</strong> (a bug the &sect;9 hand-read exposed):
+      <code>_local_span()</code> now requires <strong>word-boundary alignment</strong> on both routes
+      &mdash; the annotated-offset one and the text-search fallback. The fallback previously took
+      <code>ptext.find(txt)</code>'s first hit, which matches a short mention <em>inside</em> a longer
+      word and emits a corrupt row (<code>@CHEMICAL$amethasone-induced</code>, from <code>dex</code>
+      matched within <code>dexamethasone</code>); it now walks all occurrences for a clean one, an
+      annotated span that cuts a word retries as a text search, and a mention that cannot be placed
+      cleanly is skipped rather than blinded half-way. Only the mention's own word-character edges are
+      checked, so <code>-catenin</code> / <code>(RELN)</code> / <code>CD4+</code> are unaffected. Both
+      outcomes are counted and printed as a <code>[spans]</code> line at the end of the conversion, so
+      a drop is never silent. Applies to every task, not just <code>biored</code>.</td>
+</tr>
+<tr class='changed'>
+  <td class='num'>&mdash;</td>
+  <td><code>train_re.py</code> <span class='dim'>(support module)</span></td>
+  <td><code>biored_data/*.tsv</code></td>
+  <td><code>biored-biobert-re/</code></td>
+  <td>New registry entry (raw label &rarr; readable predicate, <code>false</code>&rarr;NEG), a
+      <code>--smoke</code> template, <code>RE_MODEL_BIORED</code> in the closing hint, and a
+      task-aware <code>--calibration</code> default. The multi-class path itself needed no change:
+      the label space is built from whatever <code>train.tsv</code> contains, exactly as for
+      ChemProt and DDI.</td>
+</tr>
+<tr class='changed'>
+  <td class='num'>16</td>
+  <td><code>relation_extraction.py --normalize --route-mode additive</code> <span class='pill gpu'>GPU</span> <span class='pill new'>CHANGED</span></td>
+  <td><code>sentences/*.json</code><br><code>RE_MODEL_PPI</code> and/or <code>RE_MODEL_BIORED</code> (+ the pre-existing CHEMPROT/GAD/DDI routes)</td>
+  <td><code>TRIPLES/triples_re.json</code> + normalized variant<br><code>TRIPLES/relation_extraction.html</code></td>
+  <td>BioRED is a <em>multi-pair</em> route: one checkpoint covering all five entity-type pairs this
+      corpus produces, so it is matched against a pair set rather than a single
+      <code>ROUTE_ENV</code> key. <code>--route-mode</code> selects <code>exclusive</code> (one model
+      per pair: pair-specific &gt; BioRED &gt; global fallback) or <code>additive</code> (every
+      applicable model scores the pair). Markers are now chosen per <em>(pair, model)</em>, not per
+      pair &mdash; the DDI route blinds a chemical as <code>@DRUG$</code> while BioRED needs
+      <code>@CHEMICAL$</code> for the very same pair. Every triple gained
+      <code>pair_id</code>.</td>
+</tr>
+<tr class='changed'>
+  <td class='num'>17</td>
+  <td><code>compare_re.py</code> <span class='pill opt'>optional</span> <span class='pill new'>NEW</span></td>
+  <td><code>TRIPLES/triples_re.json</code> <span class='dim'>(written in additive mode)</span></td>
+  <td><code>summaries/compare_re.html</code> + a stdout summary</td>
+  <td>Joins the two checkpoints' verdicts on <code>pair_id</code> and reports: pairs kept by both /
+      by only one, the label cross-tab on shared pairs (what the typed model calls the edges the
+      binary one calls <code>interacts</code>), how many edges carry a <em>signed</em> label, mean
+      composite score per model, and sample tables of disagreements and single-model edges. Exits
+      cleanly with a note when only one checkpoint is present.</td>
+</tr>
+<tr class='changed'>
+  <td class='num'>&mdash;</td>
+  <td><code>gpu.py</code> <span class='dim'>(orchestrator)</span></td>
+  <td>&mdash;</td>
+  <td>&mdash;</td>
+  <td>Two steps inserted; a step now declares a <em>list</em> of checkpoints it reads, and each
+      <code>RE_MODEL_*</code> is exported <strong>only if that model dir actually exists</strong> at
+      run time &mdash; so a skipped or failed BioRED step can never point the critical RE step at
+      nothing. Preflight accordingly requires <em>at least one</em> of the RE step's models rather
+      than all of them. New pass-through: <code>--biored-args "..."</code>.</td>
+</tr>
+</tbody>
+</table>
+<p class='dim'>Unchanged and not repeated here: <code>sentences.py</code> (3), the nine normalization
+scripts (4&ndash;12), <code>triples.py</code> (13), <code>relationships.py</code> (14),
+<code>pub_years.py</code> (15) and <code>zip_work.py</code> (18) &mdash; see
+<code>step_2_triples.html</code> for their inputs and outputs.</p>
+
+<h3>Calibration: per task now, not one global default</h3>
+<p>The probability calibrator is no longer a single default applied to whatever is being trained &mdash;
+it is resolved from the task, so the right one is picked without anyone having to remember it at the
+call site.</p>
+<table>
+<thead><tr><th>entry point</th><th>task</th><th>calibrator</th></tr></thead>
+<tbody>
+<tr><td><code>run_re_pipeline.py</code> <span class='dim'>(step 1)</span></td>
+    <td><code>ppi</code> <span class='dim'>(also chemprot / gad / ddi)</span></td>
+    <td><strong>isotonic</strong> <span class='dim'>&mdash; unchanged</span></td></tr>
+<tr class='changed'><td><code>run_re_pipeline.py --task biored</code> <span class='dim'>(step 2)</span></td>
+    <td><code>biored</code></td>
+    <td><strong>platt</strong></td></tr>
+</tbody>
+</table>
+<p>In both <code>run_re_pipeline.py</code> and <code>train_re.py</code> the <code>--calibration</code>
+default is <code>None</code> and resolved after parsing: <code>platt</code> for
+<code>--task biored</code>, <code>isotonic</code> otherwise. An explicit
+<code>--calibration isotonic|platt|none</code> still wins, and the resolved value is printed in the
+startup <code>[task]</code> line. <em>Where</em> the fit happens is unchanged: the orchestrated path
+always invokes <code>train_re.py --calibration none</code> and fits the calibrator in
+<code>run_re_pipeline.py</code>'s own step&nbsp;3, so the trainer's default only applies when
+<code>train_re.py</code> is run directly &mdash; both follow the same rule either way.
+<code>calibration.py</code> itself is untouched: Platt was already a supported choice, only the
+default selection is new.</p>
+<p class='dim'>Why: isotonic regression is nonparametric and overfits small calibration sets &mdash;
+fine against BioInfer's ~780-row dev split, but BioRED's dev split is 100 abstracts, where it would
+fit a step function to a few hundred points and feed confidently wrong <code>p_rel</code> into the
+composite score. Platt scaling has two parameters and degrades gracefully.</p>
+
+<h2>4. The BioRED mapping, as implemented</h2>
+<h3>Entity type &rarr; marker</h3>
+<table>
+<thead><tr><th>BioRED entity type</th><th>marker</th><th>matched by</th><th>a relation endpoint?</th></tr></thead>
+<tbody>
+<tr><td><code>GeneOrGeneProduct</code></td><td><code>@GENE$</code></td><td>fallback</td><td>yes</td></tr>
+<tr><td><code>DiseaseOrPhenotypicFeature</code></td><td><code>@DISEASE$</code></td><td><code>dis</code> / <code>phenotyp</code></td><td>yes</td></tr>
+<tr><td><code>ChemicalEntity</code></td><td><code>@CHEMICAL$</code></td><td><code>chem</code> / <code>drug</code></td><td>yes</td></tr>
+<tr><td><code>SequenceVariant</code></td><td><code>@VARIANT$</code></td><td><code>variant</code> <span class='dim'>(tested first)</span></td><td>yes <span class='dim'>&mdash; but our NER emits no VARIANT type, so these rows only ever appear in training</span></td></tr>
+<tr><td><code>OrganismTaxon</code></td><td><code>@SPECIES$</code></td><td><code>taxon</code>/<code>organism</code>/<code>species</code></td><td>no <span class='dim'>&mdash; blinded correctly if it appears, never paired</span></td></tr>
+<tr><td><code>CellLine</code></td><td><code>@CELLLINE$</code></td><td><code>cell</code></td><td>no</td></tr>
+</tbody>
+</table>
+
+<h3>Relation type &rarr; label</h3>
+<table>
+<thead><tr><th>BioRED relation</th><th>TSV label</th><th>predicate in the graph</th><th>KG meaning</th></tr></thead>
+<tbody>
+<tr><td><code>Positive_Correlation</code></td><td><code>Positive_Correlation</code></td><td><code>upregulator/activator</code></td><td><strong>signed, positive</strong></td></tr>
+<tr><td><code>Negative_Correlation</code></td><td><code>Negative_Correlation</code></td><td><code>downregulator/inhibitor</code></td><td><strong>signed, negative</strong></td></tr>
+<tr><td><code>Bind</code></td><td><code>Bind</code></td><td><code>binds</code></td><td>physical interaction</td></tr>
+<tr><td><code>Association</code></td><td><code>Association</code></td><td><code>associated</code></td><td>unsigned, generic</td></tr>
+<tr><td><code>Cotreatment</code> / <code>Comparison</code> / <code>Drug_Interaction</code> / <code>Conversion</code></td>
+    <td><code>Association</code> <span class='dim'>(collapsed)</span></td><td><code>associated</code></td>
+    <td>coverage without sign &mdash; kept as their own classes only with <code>--biored-all-types</code></td></tr>
+<tr><td><em>(no annotated relation)</em></td><td><code>false</code></td><td>&mdash; dropped</td><td>negative</td></tr>
+</tbody>
+</table>
+<p><strong>Why collapse.</strong> Eight types over roughly 6,500 annotated relations is not 810 per
+class: <code>Association</code>, <code>Positive_Correlation</code> and <code>Negative_Correlation</code>
+dominate, while the four chemical-chemical bookkeeping types plausibly have tens of instances each.
+Split three ways, a class with ~30 instances has a handful in test, which makes its F1 noise and its
+learned boundary close to arbitrary. Those are exactly the classes that never become a graph edge with
+a sign, so folding them into <code>Association</code> raises per-class support and stops the metric
+being dominated by classes we do not use. The three that <em>do</em> upgrade the graph are the
+well-populated ones. The registry in <code>train_re.py</code> still maps all eight raw labels, so
+<code>--biored-all-types</code> trains the full label set without further edits.</p>
+<p><strong>Negative label.</strong> <code>false</code>, matching the ChemProt/DDI convention rather than
+the PPI <code>0</code>. That matters downstream: <code>relation_extraction.py</code> auto-detects the
+negative class from a default set that already contains <code>false</code>, so
+<code>RE_NEG_LABELS</code> never has to be set.</p>
+
+<div class='warn'><strong>The one real risk: BioRED relations are document-level.</strong>
+<code>iter_instances()</code> forms pairs strictly within a sentence, so a pair with a document-level
+relation produces a <em>positive</em> row in <em>every</em> sentence where both endpoints co-occur &mdash;
+including sentences that merely mention them. Recall loss is harmless (no row is emitted); the
+precision loss is the problem, and noisy labels hurt a small corpus more than a large one because
+there is no volume to average them out. Three defences, in the order the mapping doc recommends:
+<strong>(1)</strong> measure it &mdash; <code>--sample-positives 50</code> and count how many rows
+actually assert the relation; that number is the ceiling on label quality. <strong>(2)</strong>
+<code>--require-cue</code>, which demotes cue-free positives. <strong>(3)</strong> the composite score
+in <code>relation_extraction.py</code> still multiplies <code>p_rel</code> by <code>cue_factor</code>,
+<code>margin_factor</code> and <code>section_factor</code>, so a confidently wrong <code>p_rel</code>
+is damped at scoring time regardless.</div>
+
+<h3>What <code>--require-cue</code> actually does</h3>
+<p>The flag reaches <code>convert_split()</code> and is passed straight through to
+<code>iter_instances()</code>, where it does exactly one thing:</p>
+<pre>label = label_for(task, rel, chemprot_eval_only, biored_collapse)
+if require_cue and rel is not None and not RELCUE.search(connecting):
+    label = label_for(task, None, chemprot_eval_only, biored_collapse)   # -&gt; "false"</pre>
+<ul>
+  <li><strong>It only ever demotes.</strong> The guard is <code>rel is not None</code>, so it touches
+      rows that <em>have</em> an annotated relation. A pair with no annotation is already negative and
+      is never promoted.</li>
+  <li><strong><code>connecting</code> is the text strictly between the two entity spans</strong>
+      (<code>s_text[ae0:bs0]</code>) &mdash; the same slice <code>triples.py</code> uses as its
+      candidate predicate. A cue <em>before</em> the subject or <em>after</em> the object does not
+      count. <code>RELCUE</code> is a copy of <code>triples.py</code>'s stem list, so the training
+      filter and the rule-based extractor agree on what a relation looks like.</li>
+  <li><strong>The row count is unchanged; the label flips.</strong> In <code>convert_split()</code>
+      that row moves from the <code>pos</code> list to <code>neg</code> &mdash; which also matters
+      with <code>--neg-ratio</code>, whose cap is <code>neg_ratio &times; len(pos)</code>: demoting
+      positives shrinks the negative budget too, so the split gets smaller overall.</li>
+  <li><strong>It is not gated by task.</strong> The CLI help says &ldquo;biored:&rdquo; because that is
+      what it is <em>for</em> (document-level annotation), but with <code>--task ppi</code> the same
+      filter would apply and emit <code>0</code> rather than <code>false</code> as the demoted
+      label.</li>
+</ul>
+<p><strong>What it costs</strong>, measured on the fixture &mdash; each split goes from
+<code>{Negative_Correlation 3, Positive_Correlation 1, Association 1, false 1}</code> to
+<code>{Negative_Correlation 2, Positive_Correlation 1, false 3}</code>, i.e. two demotions:</p>
+<table>
+<thead><tr><th>row</th><th>label &rarr; label</th><th>verdict</th></tr></thead>
+<tbody>
+<tr><td><code>@GENE$ and @GENE$ were both quantified by qPCR.</code></td>
+    <td><code>Negative_Correlation</code> &rarr; <code>false</code></td>
+    <td class='status-done'>correct &mdash; the document-level artefact caught</td></tr>
+<tr><td><code>The @VARIANT$ variant was observed in patients with @DISEASE$.</code></td>
+    <td><code>Association</code> &rarr; <code>false</code></td>
+    <td class='status-pending'>wrong &mdash; a real association whose phrasing ("was observed in
+        patients with") carries no stem</td></tr>
+</tbody>
+</table>
+<p>That ratio is the entire decision, and it is why the default is <strong>off</strong>: a cue list
+cannot tell a genuinely cue-free assertion from a bare co-occurrence. Run
+<code>--sample-positives 50</code> on the real corpus to see which error dominates before committing
+to it.</p>
+
+<h2>5. How to run</h2>
+<ol class='steps'>
+  <li><span class='step-no'>1</span><strong>Verify the type strings first &mdash; writes no files.</strong>
+      <pre>pip install -q 'datasets&lt;4' bioc
+python bigbio_to_re.py --task biored --dataset bigbio/biored --print-types</pre>
+      <div class='warn'><strong><code>bioc</code> is not optional for this corpus.</strong> BioRED is
+      distributed as <em>BioC XML</em>, so BigBIO's loading script imports the <code>bioc</code>
+      package &mdash; which the Kaggle GPU image does not carry. Without it the load fails with
+      <code>ModuleNotFoundError: No module named 'bioc'</code>, named after a package you never
+      asked for. BioInfer (step&nbsp;1) does not need it, which is why it only shows up now.
+      <code>bigbio_to_re.py</code> now detects this case and prints the <code>pip install</code>
+      line, and <code>bioc</code> is in <code>gpu_bundle/requirements.txt</code>.</div>
+      <span class='dim'>Check the printed entity/relation types against the tables in &sect;4. If a mapping
+      looks wrong, fix <code>marker_for()</code> / <code>BIORED_TYPES</code> before converting.
+      The config resolves to <code>biored_bigbio_kb</code> by the script's usual convention.</span></li>
+  <li><span class='step-no'>2</span><strong>Convert and read 50 positives</strong> (the &sect;8 step-3 decision).
+      <pre>python bigbio_to_re.py --task biored --dataset bigbio/biored --out biored_data --val-frac 0
+python bigbio_to_re.py --task biored --dataset bigbio/biored --sample-positives 50</pre>
+      <span class='dim'>Read each sampled row and ask: <em>could someone conclude the labelled
+      relation from this sentence alone?</em> A row that only co-mentions the two entities
+      (&ldquo;<code>@GENE$</code> and <code>@GENE$</code> were both quantified by qPCR&rdquo;) asserts
+      nothing &mdash; it is a wrong <em>training example</em>, even though BioRED is right that the
+      paper reports the relation somewhere. The share of such rows is the ceiling on label quality.
+      If it is large, re-run <strong>both commands above</strong> with <code>--require-cue</code>
+      &mdash; the conversion, then the sample again, to see what the filter demoted &mdash; or pass
+      <code>--biored-args "--require-cue"</code> to <code>gpu.py</code>.</span></li>
+  <li><span class='step-no'>3</span><strong>Run the whole thing.</strong>
+      <pre>python gpu.py --list      # preview the 18 steps
+python gpu.py             # end-to-end</pre>
+      <span class='dim'>On Kaggle: GPU accelerator + internet on, and
+      <code>!pip install -q 'datasets&lt;4' bioc</code> first (step 1 needs the pin, step 2 needs
+      both).</span></li>
+  <li><span class='step-no'>4</span><strong>Or just the BioRED half</strong>, reusing an existing PPI checkpoint and <code>sentences/</code>:
+      <pre>python gpu.py --steps re_pipeline_biored,relation_extraction,compare_re</pre></li>
+  <li><span class='step-no'>5</span><strong>By hand</strong>, outside the orchestrator:
+      <pre>python run_re_pipeline.py --task biored
+$env:RE_MODEL_PPI    = (Resolve-Path .\ppi-biobert-re)
+$env:RE_MODEL_BIORED = (Resolve-Path .\biored-biobert-re)
+python relation_extraction.py --normalize --route-mode additive
+python compare_re.py</pre></li>
+</ol>
+
+<h3>Kaggle: the full run, cell by cell</h3>
+<p>Notebook settings first: <strong>Accelerator &rarr; GPU</strong> and <strong>Internet &rarr; On</strong>
+(steps 1, 2, 3 and 16 use CUDA; steps 1&ndash;2 download the BigBIO corpora, step 3 the BioBERT NER
+models, step 15 the publication years). Then five cells.</p>
+
+<p><strong>Cell 1 &mdash; dependencies.</strong> <code>datasets&lt;4</code> because BigBIO ships as
+loading scripts; <code>bioc</code> because BioRED is BioC XML. torch / transformers / lxml are already
+on the GPU image.</p>
+<pre>!pip install -q "datasets&lt;4" bioc</pre>
+
+<p><strong>Cell 2 &mdash; locate the bundle</strong> rather than hardcoding the path, and check the
+inputs that preflight will demand:</p>
+<pre>import glob, os
+hits = glob.glob("/kaggle/input/**/gpu.py", recursive=True)
+assert hits, "gpu.py not found under /kaggle/input -- is the dataset attached?"
+INPUT_ROOT = os.path.dirname(hits[0])
+print("INPUT_ROOT =", INPUT_ROOT)
+for need in ("roman.py", "experimental_ner", "databases/hgnc_complete_set_2026-05-01.json",
+             "databases/mondo-clingen.json", "databases/chebi.json"):
+    print(("  OK   " if os.path.exists(f"{INPUT_ROOT}/{need}") else "  MISSING "), need)</pre>
+<div class='warn'><strong>Why <code>--input-root</code> is passed explicitly below.</strong>
+<code>gpu.py</code> auto-discovers a root only one or two levels under <code>/kaggle/input</code>
+(<code>/kaggle/input/*</code> and <code>/kaggle/input/*/*</code>). A dataset that mounts deeper &mdash;
+e.g. <code>/kaggle/input/datasets/&lt;user&gt;/&lt;slug&gt;/gpu_bundle</code> &mdash; will <em>not</em> be
+found on its own, and the run aborts with &ldquo;could not locate an input root&rdquo;. Cell&nbsp;2
+computes the path; every later cell hands it over.</div>
+
+<p><strong>Cell 3 &mdash; preview the plan and confirm the GPU is live.</strong> Preflight runs here
+too, so a missing ontology DB or corpus fails now instead of an hour in. The
+<code>accelerator:</code> line must name a GPU, not &ldquo;no CUDA&rdquo;.</p>
+<pre>!nvidia-smi -L
+!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} --list</pre>
+
+<p><strong>Cell 4 &mdash; &sect;8 step 1: verify the BioRED type strings</strong> (writes no files; check
+the output against the tables in &sect;4 before committing to a full run):</p>
+<pre>!python {INPUT_ROOT}/bigbio_to_re.py --task biored --dataset bigbio/biored --print-types</pre>
+
+<p><strong>Cell 5 &mdash; the whole pipeline.</strong> Work root defaults to <code>/kaggle/working</code>;
+scripts are copied there, <code>experimental_ner/</code> symlinked, <code>databases/</code> copied
+writable, and <code>RE_MODEL_PPI</code> / <code>RE_MODEL_BIORED</code> exported for step&nbsp;16.
+Expect a long run &mdash; two BioBERT fine-tunes plus NER over the whole XML corpus.</p>
+<pre>!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT}</pre>
+
+<p><strong>Cell 6 &mdash; collect the output.</strong> <code>zip_work.py</code> builds its own
+<code>FileLink</code>, but it runs in a subprocess so the link does not render in the notebook:</p>
+<pre>from IPython.display import FileLink
+!ls -la /kaggle/working/kaggle_working.zip
+FileLink("kaggle_working.zip")</pre>
+
+<p><strong>If the session time limit bites</strong>, split cell 5 &mdash; every step hands off by files,
+so it resumes naturally. Save <code>/kaggle/working/{ppi,biored}-biobert-re</code> as a dataset after
+session&nbsp;A and attach it for session&nbsp;B; preflight then finds the checkpoints under the input
+root and the training steps can be left out. The RE step needs <em>at least one</em> of the two
+models, not both.</p>
+<pre># session A -- the two models (the expensive part)
+!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} --steps re_pipeline,re_pipeline_biored
+
+# session B -- everything downstream, reusing the uploaded checkpoints
+!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} \
+    --steps sentences,roman,greek,keys_values,controls,disease,phenotypes,chemical,\
+nonchemical,target_pharm,triples,relationships,pub_years,relation_extraction,compare_re,zip</pre>
+<p class='dim'>Converter/trainer flags do not belong on <code>gpu.py</code> &mdash;
+<code>gpu.py --task biored --print-types</code> fails with &ldquo;unrecognized arguments&rdquo;, because
+<code>--print-types</code> is a <code>bigbio_to_re.py</code> diagnostic (cell&nbsp;4) and the
+orchestrator only takes <code>--list</code>, <code>--steps</code>, <code>--re-args</code>,
+<code>--biored-args</code>, <code>--input-root</code>, <code>--work-root</code>. Run-time options reach
+step&nbsp;2 through the pass-through, e.g.
+<code>--biored-args "--require-cue"</code> (which &sect;9 concludes you do not want).</p>
+
+<h3>Setup errors you may hit on the way in</h3>
+<table>
+<thead><tr><th>what you see</th><th>what it means</th><th>fix</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>could not load bigbio/biored (config biored_bigbio_kb):<br>ModuleNotFoundError: No module named 'bioc'</code></td>
+  <td>BioRED is distributed as <strong>BioC XML</strong>, so BigBIO's loading script imports the
+      <code>bioc</code> package &mdash; which the Kaggle GPU image does not carry. Nothing is wrong
+      with the config name or the type mapping. BioInfer (step&nbsp;1) does not use it, which is why
+      this only appears at step&nbsp;2.</td>
+  <td><code>!pip install -q bioc</code><br><span class='dim'>Now also listed in
+      <code>gpu_bundle/requirements.txt</code>, and <code>bigbio_to_re.py</code> prints this
+      <code>pip install</code> line itself when a loader raises
+      <code>ModuleNotFoundError</code>.</span></td>
+</tr>
+<tr>
+  <td><code>Using the latest cached version of the module from<br>/root/.cache/huggingface/modules/&hellip; since it couldn't be<br>found locally &hellip; or remotely on the Hugging Face Hub</code></td>
+  <td><strong>Benign.</strong> Normal <code>datasets&lt;4</code> behaviour when it reuses the cached
+      BigBIO loading script. It is a notice, not the failure &mdash; read the line after it.</td>
+  <td>nothing</td>
+</tr>
+<tr>
+  <td><code>`datasets` 4.x no longer runs dataset loading scripts</code></td>
+  <td>BigBIO ships as loading scripts, dropped in <code>datasets</code> 4.0; the newer preinstalled
+      version cannot fetch <code>*_bigbio_kb</code> configs at all.</td>
+  <td><code>!pip install -q 'datasets&lt;4'</code></td>
+</tr>
+</tbody>
+</table>
+<p class='dim'>One setup cell covers both corpora:
+<code>!pip install -q 'datasets&lt;4' bioc</code></p>
+
+<h2>6. Routing: what scores which pair</h2>
+<table>
+<thead><tr><th>entity-type pair</th><th>pair-specific route</th><th>BioRED covers it?</th><th><code>exclusive</code> (default)</th><th><code>additive</code> (what gpu.py runs)</th></tr></thead>
+<tbody>
+<tr><td>GENETIC&ndash;GENETIC</td><td><code>RE_MODEL_PPI</code></td><td>yes</td><td>PPI</td><td>PPI <em>and</em> BioRED</td></tr>
+<tr><td>GENETIC&ndash;DISEASE</td><td><code>RE_MODEL_GAD</code></td><td>yes</td><td>GAD if set, else BioRED</td><td>both, if both set</td></tr>
+<tr><td>GENETIC&ndash;CHEMICAL</td><td><code>RE_MODEL_CHEMPROT</code></td><td>yes</td><td>ChemProt if set, else BioRED</td><td>both, if both set</td></tr>
+<tr><td>CHEMICAL&ndash;CHEMICAL</td><td><code>RE_MODEL_DDI</code></td><td>yes</td><td>DDI if set, else BioRED</td><td>both, if both set</td></tr>
+<tr><td>CHEMICAL&ndash;DISEASE</td><td><em>none</em></td><td>yes</td><td>BioRED <span class='dim'>(previously skipped entirely)</span></td><td>BioRED</td></tr>
+</tbody>
+</table>
+<p>Precedence in <code>exclusive</code> mode is pair-specific &gt; BioRED &gt; <code>RE_MODEL</code>
+(global fallback). One consequence worth naming: with BioRED alone, <em>no</em> candidate pair is
+skipped for want of a model &mdash; including CHEMICAL&ndash;DISEASE, which the old routing table had no
+checkpoint for at all.</p>
+<div class='warn'><strong>Additive mode double-counts if you let it.</strong> A pair scored by two
+checkpoints yields two triples in <code>triples_re.json</code>, distinguishable by
+<code>predicate.model</code> and joinable by <code>pair_id</code>. That is what makes step&nbsp;17
+possible, but it means the file is no longer one-triple-per-pair: <strong>filter by
+<code>predicate.model</code> (or re-run the step with <code>--route-mode exclusive</code>) before
+building a graph from it</strong> &mdash; unless the consumer merges them, which stage&nbsp;3 now does;
+see below. The step&nbsp;16 HTML summary says so explicitly, printing the distinct-pair count next to
+the triple count whenever the two differ.</div>
+
+<h3>What stage 3 does with it &mdash; <code>high_confidence_g.py</code></h3>
+<p>The two verdicts only become a better <em>graph</em> if the graph builder reads them, and until now
+it did not: it categorized edges by polarity and never touched <code>predicate.text</code>, so every
+BioRED label collapsed into one indistinguishable edge, and with two checkpoints in the file its
+counts double-counted. Both are fixed in <code>high_confidence_g.py</code>, which is now the
+maintained step-3 entry point &mdash; <code>high_confidence.py</code> (the &ldquo;G_D_C&rdquo; variant)
+is <strong>deprecated</strong>: it still runs unchanged, and prints a notice saying exactly what it
+gets wrong.</p>
+<p><strong>1. The merge.</strong> <code>--merge</code> collapses the per-pair duplicates (joined on
+<code>pair_id</code>) into one triple:</p>
+<table>
+<thead><tr><th><code>--merge</code></th><th>keeps</th><th>label</th></tr></thead>
+<tbody>
+<tr class='changed'><td><code>union</code> <span class='dim'>(default)</span></td>
+    <td>every pair <strong>either</strong> model kept &mdash; BioRED-only edges included</td>
+    <td>the typed one wherever BioRED fired; score = the higher of the two</td></tr>
+<tr><td><code>gate</code></td><td>only pairs the <strong>binary</strong> model also kept</td>
+    <td>typed where BioRED also fired &mdash; the stricter option for when BioRED-only edges
+        (the ones with no second opinion) prove noisy</td></tr>
+<tr><td><code>typed</code></td><td>only pairs BioRED kept</td><td>typed &mdash; BioRED replacing PPI outright</td></tr>
+<tr><td><code>none</code></td><td>everything</td><td>as written &mdash; pre-merge behaviour</td></tr>
+</tbody>
+</table>
+<p>Each merged triple carries <code>models</code>, <code>corroborated</code> and
+<code>score_by_model</code>, so &ldquo;both models agreed on this edge&rdquo; survives into the export
+rather than being averaged away. With a single checkpoint in the file every policy is a no-op.</p>
+<p><strong>2. Typed, signed edges.</strong> The graph now categorizes each edge by the relation the
+model predicted &mdash; <code>activates</code> / <code>inhibits</code> / <code>binds</code> /
+<code>interacts</code> / <code>associated</code>, prefixed <code>not&nbsp;</code> when negated &mdash;
+with colour encoding the relation, negated edges dashed, and each sentence's own label in the tooltip
+(an edge shows its best-supported relation, so a minority reading stays visible). This is where the
+sign finally lands: <code>A inhibits B</code> and <code>A activates B</code> stopped being the same
+edge.</p>
+<p><strong>3. <code>--nodes all</code> &mdash; the multi-type graph.</strong> The gene-only view draws
+an edge only when <em>both</em> endpoints carry a single HGNC symbol, so BioRED's other pair types
+were scored, written to <code>triples_re.json</code>, and then silently discarded at graph-build
+time: on the reference run <strong>649 of its 655 solo pairs</strong> (466 gene&ndash;disease, 117
+chemical&ndash;gene, 29 chemical&ndash;disease, 24 chemical&ndash;chemical). Coverage gained at
+step&nbsp;16 was not coverage gained in the graph. With <code>--nodes all</code>, DISEASE and
+CHEMICAL endpoints become nodes too, identified by their normalized id (<code>mondo_label</code> /
+<code>chebi_label</code>) so one entity is one node across documents:</p>
+<table>
+<thead><tr><th>view</th><th>nodes</th><th>edges</th><th>signed edges</th><th>edges by node-type pair</th></tr></thead>
+<tbody>
+<tr><td><code>--nodes gene</code> <span class='dim'>(default)</span></td><td>62 gene</td><td>55</td><td>1</td><td>gene&ndash;gene 55</td></tr>
+<tr class='changed'><td><code>--nodes all</code></td><td>151 &mdash; 105 gene, 27 chemical, 19 disease</td><td>205</td><td><strong>56</strong></td>
+    <td>disease&ndash;gene 59, gene&ndash;gene 55, chemical&ndash;gene 25, chemical&ndash;chemical 8, chemical&ndash;disease 4</td></tr>
+</tbody>
+</table>
+<p>Shape encodes type (gene &#9679; / disease &#9670; / chemical &#9632;), a <em>Node type</em> filter
+appears in the panel, and the score slider opens at &ge;0.8 rather than &ge;0.99 because most
+gene&ndash;disease edges sit between 0.5 and 0.8. Outputs take an <code>_M</code> suffix, so the two
+views coexist. The gene&ndash;gene count is identical in both, as it must be.</p>
+
+<h3>Node hygiene: what the wider graph filters out, and why it is stated out loud</h3>
+<p>Opening the graph to three entity types means the normalization gaps become visible, so the node
+filters are curated and <strong>reported</strong> rather than silent. Each run prints what it dropped:</p>
+<pre>nodes kept: gene 806, disease 278, chemical 204
+DISEASE_SURFACE overrides applied: 6 mention(s) (lcc)
+DISEASE_MERGE (one disease, one node): lung neoplasm -> lung cancer x4, breast carcinoma -> breast cancer x2
+endpoints dropped: gene: no HGNC symbol 361, disease: generic (DISEASE_IGNORE) 186,
+                   disease: no MONDO id 38, chemical: no ChEBI id 22, gene: control / MKI67 11
+top un-normalized surfaces (fix upstream, not here): CHEMICAL 'TBX3' x8, DISEASE 'tumoral' x3,
+  DISEASE 'VM' x3, DISEASE 'HLF' x3, DISEASE 'HGNEC' x2, DISEASE 'LLC' x2, ...</pre>
+<ul>
+  <li><strong>Reused pipeline annotations, not new rules:</strong> <code>control</code> (genes),
+      <code>phenotype</code> from <code>DISEASE/disease.json</code>, <code>non_chemical</code> from
+      <code>CHEMICAL/chemical.json</code> &mdash; joined on the surface text, since those in-place
+      flags never reach the RE triples.</li>
+  <li><strong><code>DISEASE_IGNORE</code></strong> = <code>neoplasm</code>, <code>cancer</code>,
+      <code>os</code>, matched against <em>both</em> surface and label. <code>neoplasm</code> is the
+      entry that does the work &mdash; &ldquo;tumor&rdquo;/&ldquo;tumors&rdquo;/&ldquo;tumour&rdquo;
+      all normalize onto it, 167 mentions, ~40% of all disease mentions &mdash; and deleting that one
+      entry is how you get them back. <code>os</code> is surface-only (&ldquo;overall survival&rdquo;,
+      an NER mislabel) and would never match a MONDO label, which is why the check reads both.</li>
+  <li><strong><code>DISEASE_SURFACE</code></strong> corrects mappings that are wrong for this corpus
+      instead of discarding the mention: <code>lcc</code> normalizes to <em>leukoencephalopathy with
+      calcifications and cysts</em>, which here is large cell carcinoma.</li>
+  <li><strong><code>DISEASE_MERGE</code></strong> folds MONDO terms that name the <em>same disease at
+      the same granularity</em> into one node: <em>lung carcinoma</em> and <em>lung neoplasm</em> (the
+      surfaces &ldquo;lung tumor&rdquo;/&ldquo;lung tumours&rdquo;) join <strong>lung cancer</strong>,
+      <em>breast carcinoma</em> joins <strong>breast cancer</strong>. Which term a mention lands on
+      depends only on the wording the author used, so splitting one disease across three nodes is an
+      artefact of ontology structure, not a finding. <strong>Subtypes are deliberately not
+      merged</strong> &mdash; non-small cell lung carcinoma, small cell lung carcinoma, lung
+      adenocarcinoma, lung large cell carcinoma and pulmonary LCNEC stay distinct, because in a lung
+      corpus that distinction is the point. On the reference run this took disease nodes 21&nbsp;&rarr;
+      &nbsp;19 and gave <code>lung cancer</code> 17 supporting sentences instead of 15.</li>
+</ul>
+<div class='ok'><strong>The report immediately paid for itself.</strong> Its first run showed 225
+endpoints dropped for having <em>no normalized id at all</em> &mdash; <code>SchB</code>,
+<code>AUY922</code>, <code>lung cancer</code>, <code>LCNELC</code>, <code>breast cancer</code>,
+<code>large - cell lung cancer</code> &mdash; which turned out to be <strong>three distinct bugs
+upstream</strong>, not one coverage gap:
+<ol>
+  <li><strong>A join bug in <code>triples.py</code>.</strong> <code>disease.py</code> and
+      <code>chemical.py</code> aggregate their library keys through <code>dash_normalize</code>
+      (dash glyphs unified, whitespace around <code>-</code> stripped), but the triple's surface is
+      the verbatim NER text, and the lookup was exact. So <code>'large - cell lung cancer'</code>
+      never matched its own library entry <code>'large-cell lung cancer'</code>. Both normalizers now
+      retry the dash-normalized key &mdash; 24 endpoints recovered.</li>
+  <li><strong>A missing tie-break in <code>disease.py</code>.</strong> <code>chemical.py</code> had a
+      label-preference guard (a surface hitting several terms but matching exactly one via that
+      term's <em>label</em> resolves to it); <code>disease.py</code> never got it, so
+      <code>'lung cancer'</code> was written off as ambiguous between MONDO's <em>lung cancer</em>
+      (label) and <em>lung carcinoma</em> (broad synonym). Porting the guard cut ambiguous surfaces
+      from 19 to 9 and moved <code>lung cancer</code>, <code>breast cancer</code> and
+      <code>lymphoma</code> into the single-match library.</li>
+  <li><strong>Genuinely absent abbreviations</strong> &mdash; curated: <code>SchB</code> &rarr;
+      ChEBI's <em>(+)-schisandrin B</em>, <code>AUY922</code> &rarr; <em>luminespib</em>,
+      <code>LCNELC</code> &rarr; MONDO's <em>pulmonary large cell neuroendocrine carcinoma</em>.</li>
+</ol>
+Result: un-normalized disease endpoints 109&nbsp;&rarr;&nbsp;38, chemical 116&nbsp;&rarr;&nbsp;22, and
+the multi-type graph grew from 128 nodes / 151 edges to <strong>151 nodes / 205 edges</strong> with
+<strong>56 signed edges</strong> instead of 26 &mdash; without touching the models. The gene-only view
+is unchanged at 62 / 55, as it should be.</div>
+
+<h2>7. What was verified, and what was not</h2>
+<div class='ok'><strong>Verified on this machine</strong> (no GPU, no <code>datasets</code>, no network):
+the mapping functions and both new flags, exercised end-to-end through
+<code>bigbio_to_re.py --input-json</code> against a synthetic BioRED-shaped BigBIO-KB document &mdash;
+six entity types mapping to the right markers, the pair filter admitting exactly the annotated pair
+types, <code>Conversion</code> collapsing into <code>Association</code>, and a deliberately
+cue-free co-occurrence sentence ("TP53 and MDM2 were both quantified by qPCR") receiving a positive
+label without <code>--require-cue</code> and <code>false</code> with it. Also verified:
+<code>train_re.py</code>'s label space on those TSVs, the <code>--smoke</code> template, the route and
+per-(pair, model) marker selection in <code>relation_extraction.py</code>,
+<code>compare_re.py</code> on synthetic scored triples, <code>gpu.py --list</code>, and that
+<code>run_re_pipeline.py</code> with no arguments still resolves to the exact previous PPI defaults.
+All six touched scripts byte-compile.
+<br><br>The <code>_local_span()</code> boundary fix (&sect;3, &sect;9) was checked case by case against
+the sentence that exposed it: <code>dex</code> is no longer matched inside
+<code>dexamethasone</code>; the full mention still matches; an annotated span that cuts a word
+realigns to the whole word; a correct span is untouched; and a mention ending on punctuation still
+places. The fixture conversion is <strong>byte-identical</strong> before and after the fix, so
+nothing regressed.</div>
+<div class='warn'><strong>Not verified &mdash; needs the GPU box with internet.</strong>
+<strong>(a)</strong> The BioRED type strings themselves: run <code>--print-types</code> first (&sect;5
+step&nbsp;1); this is &sect;8's first instruction and it is deliberately still yours to run.
+<strong>(b)</strong> The real conversion's row counts and class balance. <strong>(c)</strong> Training,
+calibration and every number that follows from them. <strong>(d)</strong> Whether the document-level
+artefact is severe enough to need <code>--require-cue</code> &mdash; the hand-read decides that, and the
+tool for it now exists. <strong>(e)</strong> BioRED's <em>novelty</em> annotation (&sect;7 of the mapping
+doc) is untouched: whether the BigBIO KB schema carries it through is still open, so nothing in the
+pipeline depends on it.</div>
+<p class='dim'>Model selection is also noisier here than on BioInfer: <code>load_best_model_at_end</code>
+picks an epoch on a 100-abstract dev split, so small dev-F1 differences should not be read as real.
+That is a reason to distrust the metric, not to avoid the corpus &mdash; which is precisely why
+step&nbsp;17 compares the two models on our own sentences rather than on their respective test sets.</p>
+
+<h2>8. Notes</h2>
+<ul>
+  <li><strong>Nothing was removed.</strong> The BioInfer/PPI path is unchanged in behaviour and still
+      the default; BioRED is additive in every sense &mdash; an optional step, an extra checkpoint, an
+      extra route, an extra summary. If step&nbsp;2 fails, the run degrades to the old 16-step
+      pipeline plus a warning.</li>
+  <li><strong>Two triple producers, now three verdicts.</strong> <code>triples.py</code> (13) stays
+      rule-based; step&nbsp;16 adds the learned scores &mdash; from the binary PPI model, the typed
+      BioRED model, or both. The rule-based cue list and the BioRED training filter share the same
+      <code>RELCUE</code> stems, so "what counts as a relation" is defined once.</li>
+  <li><strong>Sign is the point.</strong> <code>upregulator/activator</code> vs
+      <code>downregulator/inhibitor</code> is the difference between a graph that says two genes are
+      connected and one that says which way. <code>compare_re.py</code> reports the signed-edge count
+      as a headline figure for exactly that reason.</li>
+  <li><strong>If more data is the goal, BioRED is not the cheapest route.</strong> The label-compatible
+      corpora already supported &mdash; ChemProt/DrugProt for chemical-gene, GAD for gene-disease &mdash;
+      have far more instances and overlap BioRED's pair types. BioRED is worth it for the sign and the
+      type coverage, not for volume.</li>
+  <li><strong>Source.</strong> Luo L, Lai P-T, Wei C-H, Arighi CN, Lu Z. <em>BioRED: a rich biomedical
+      relation extraction dataset.</em> Briefings in Bioinformatics 23(5):bbac282, 2022.
+      <code>doi:10.1093/bib/bbac282</code>, PMID 35849818, data at
+      <code>github.com/ncbi/BioRED</code>. Full design notes and the residual open questions are in
+      <code>gpu_bundle/BioRED_task_mapping.md</code>.</li>
+</ul>
+
+<h2>9. Worked example &mdash; the 50-positive hand-read on the real corpus</h2>
+<p>The &sect;8 step-3 decision, carried out on Kaggle against <code>bigbio/biored</code> itself
+(2026&#8209;08&#8209;01), so the reasoning above is not left abstract:</p>
+<pre>python .../gpu_bundle/bigbio_to_re.py --task biored --dataset bigbio/biored --out biored_data --val-frac 0
+python .../gpu_bundle/bigbio_to_re.py --task biored --dataset bigbio/biored --sample-positives 50</pre>
+<p>A representative slice of what came back &mdash; blinded row, then its connecting text:</p>
+<pre>[  7] Negative_Correlation   (train)
+      H3 histamine receptor-mediated activation of @GENE$alpha inhibits the growth of @DISEASE$ in vitro and in vivo.
+      connecting: 'alpha inhibits the growth of'
+
+[ 40] Negative_Correlation   (train)
+      Regulation of lung endothelial permeability and @DISEASE$ responses by @CHEMICAL$: role of EP4 receptor.
+      connecting: 'responses by'
+
+[ 46] Association   (train)
+      The most common regimens were @CHEMICAL$ + d4T + nevirapine (NVP) (54.8%), zidovudine (AZT) + 3TC + NVP (14.5%),
+      3TC + d4T + @CHEMICAL$ (EFV) (20.1%), and AZT + 3TC + EFV (5.4%).
+      connecting: '+ d4T + nevirapine (NVP) (54.8%), zidovudine (AZT) + 3TC + NVP (14.5%), 3TC + d4T +'</pre>
+<p><strong>Result of the read: the document-level artefact is mild on this corpus, and
+<code>--require-cue</code> was NOT adopted.</strong> Two counts decided it, over the 49 fully
+printed rows:</p>
+<table>
+<thead><tr><th>measure</th><th class='num'>rows</th><th>what it says</th></tr></thead>
+<tbody>
+<tr><td>assert nothing <span class='dim'>(co-mention / enumeration / regimen list &mdash; rows 4, 5, 12, 42, 44, 46, 47)</span></td>
+    <td class='num'>~7 / 49</td>
+    <td>the label noise <code>--require-cue</code> exists to remove &mdash; about 14%</td></tr>
+<tr><td>demoted to <code>false</code> by <code>RELCUE</code> <span class='dim'>(measured, not estimated)</span></td>
+    <td class='num'>24 / 49</td>
+    <td><strong>49%</strong> of positives lost, and only about half of them are the bad rows</td></tr>
+</tbody>
+</table>
+<p>The reason the filter overshoots is the window limitation named in &sect;4: <code>RELCUE</code> reads
+only the text <em>between</em> the two entities, while biomedical <strong>titles</strong> &mdash; which
+dominate this sample, and which are nothing but assertions &mdash; routinely put the verb before the
+subject or after the object.</p>
+<table>
+<thead><tr><th class='num'>#</th><th>row the filter would have destroyed</th><th>why the cue is missed</th></tr></thead>
+<tbody>
+<tr><td class='num'>15</td><td><code>&hellip;inhibit @DISEASE$ growth in a @GENE$-dependent manner</code></td><td><code>depend</code> sits <em>after</em> the second entity</td></tr>
+<tr><td class='num'>37</td><td><code>Reversible @DISEASE$ in @CHEMICAL$-induced encephalopathy</code></td><td><code>induced</code> follows the pair; connecting text is just <code>"in"</code></td></tr>
+<tr><td class='num'>38</td><td><code>@GENE$-@GENE$ activation converts the LE&hellip;</code></td><td><code>activation</code> follows; connecting text is <code>"-"</code></td></tr>
+<tr><td class='num'>40</td><td><code>Regulation of &hellip; and @DISEASE$ responses by @CHEMICAL$</code></td><td><code>Regulation</code> <em>precedes</em> the pair</td></tr>
+<tr><td class='num'>45</td><td><code>Resequencing of @GENE$ reveals rare variants for @DISEASE$</code></td><td><code>variants</code> is not a RELCUE stem (<code>mutat</code> is)</td></tr>
+<tr><td class='num'>48</td><td><code>association between &hellip; @GENE$ (DRD4) gene and @DISEASE$</code></td><td><code>association</code> precedes the pair</td></tr>
+</tbody>
+</table>
+<div class='ok'><strong>Decision:</strong> convert <em>without</em> <code>--require-cue</code> and let the
+composite score do the damping &mdash; <code>cue_factor</code>, <code>margin_factor</code> and
+<code>section_factor</code> in <code>relation_extraction.py</code> still discount a confident but
+cue-free prediction at <em>scoring</em> time, which is the defence that costs no training data.
+Trading ~24 positives per 49 to remove ~4 bad ones is the wrong side of &sect;6's per-class-support
+worry on a corpus this size. <span class='dim'>Note this is a corpus-specific finding: the same read
+on a full-text corpus, where methods sentences survive, could easily go the other way &mdash; which is
+why the flag stays.</span></div>
+<p class='dim'>Two incidental findings from the same read. <strong>(a)</strong> Pair coverage looks
+right: the sample is dominated by CHEMICAL&ndash;DISEASE and GENE&ndash;DISEASE, including the
+CHEMICAL&ndash;DISEASE pairs the old routing table had no checkpoint for at all. <strong>(b)</strong> A
+blinding artefact, since <strong>fixed</strong>: row&nbsp;31 came out as
+<code>@CHEMICAL$amethasone-induced</code> &mdash; the marker replaced only <code>dex</code> of
+<code>dexamethasone</code>. That was <code>_local_span()</code>'s fallback in
+<code>bigbio_to_re.py</code>: when the annotated offsets do not line up it did
+<code>ptext.find(txt)</code>, which matches a short entity string <em>inside</em> a longer word and
+corrupts the training sentence. Both placement routes now require <strong>word-boundary
+alignment</strong> (checked only on the mention's own word-character edges, so
+<code>-catenin</code> or <code>(RELN)</code> are unaffected); an annotated span that cuts a word
+retries as a text search, and a mention that cannot be placed cleanly is skipped rather than blinded
+half-way, with both counts reported in a <code>[spans]</code> line at the end of the conversion.
+<span class='dim'>Row&nbsp;5's <code>@GENE$+IFN-g+</code> was <em>not</em> an instance of this &mdash;
+that is the correct blinding of <code>CD4</code> in &ldquo;Long-Lived CD4+IFN-g+ T Cells&rdquo;, with
+the <code>+IFN-g+</code> simply being the text that follows.</span></p>
+
+</body>
+</html>

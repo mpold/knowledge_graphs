@@ -18,6 +18,12 @@ TASKS
              Both endpoints blinded to @GENE$. Binary: interacts (1) + false (0).
   ddi      : drug-drug interaction (DDIExtraction 2013). Both endpoints -> @DRUG$.
              4 classes: mechanism / effect / advise / int (+ false).
+  biored   : BioRED (Luo et al. 2022). Typed, SIGNED relations over gene / disease /
+             chemical / variant entities; markers @GENE$ / @DISEASE$ / @CHEMICAL$ /
+             @VARIANT$. As converted by bigbio_to_re.py: upregulator/activator,
+             downregulator/inhibitor, binds, associated (+ false) -- the four rare
+             chemical-chemical types fold into `associated` unless the converter ran
+             with --biored-all-types, in which case all eight are trained.
 The official metric for all is micro-F1 over the POSITIVE classes (false
 excluded); that is what --data dev reports and what selects the best checkpoint.
 
@@ -92,6 +98,23 @@ TASKS = {
                       "mechanism", "effect", "advise", "int", "false", "true"},
         "markers": ["@DRUG$"],
     },
+    # BioRED (Luo et al. 2022): typed, signed relations over gene / disease /
+    # chemical / variant entities. Unlike ppi this is multi-class, so the graph
+    # gets a direction and a sign instead of a bare "interacts". The label space is
+    # built from whatever train.tsv actually contains, so the same entry serves the
+    # collapsed 4-class default and the full 8-class --biored-all-types conversion.
+    "biored": {
+        "label_names": {"Positive_Correlation": "upregulator/activator",
+                        "Negative_Correlation": "downregulator/inhibitor",
+                        "Bind": "binds", "Association": "associated",
+                        "Cotreatment": "cotreatment", "Comparison": "comparison",
+                        "Drug_Interaction": "drug-interaction",
+                        "Conversion": "conversion", "false": NEG},
+        "known_raw": {"Positive_Correlation", "Negative_Correlation", "Bind",
+                      "Association", "Cotreatment", "Comparison",
+                      "Drug_Interaction", "Conversion", "false", "true"},
+        "markers": ["@GENE$", "@DISEASE$", "@CHEMICAL$", "@VARIANT$"],
+    },
 }
 
 
@@ -148,6 +171,14 @@ def write_smoke(task, d):
                ("@GENE$ phosphorylates @GENE$ during signaling .", "1")]
         neg = [("@GENE$ and @GENE$ were both quantified by qPCR .", "0"),
                ("Expression of @GENE$ was normalized to @GENE$ .", "0")]
+    elif task == "biored":
+        pos = [("@GENE$ overexpression increased @GENE$ transcript levels .", "Positive_Correlation"),
+               ("@CHEMICAL$ treatment reduced @GENE$ expression .", "Negative_Correlation"),
+               ("@GENE$ physically binds @GENE$ in the nucleus .", "Bind"),
+               ("Variants in @GENE$ are associated with @DISEASE$ .", "Association"),
+               ("@CHEMICAL$ exposure is associated with @DISEASE$ risk .", "Association")]
+        neg = [("@GENE$ and @DISEASE$ were both described in the cohort .", "false"),
+               ("Levels of @CHEMICAL$ and @GENE$ were measured in plasma .", "false")]
     elif task == "ddi":
         pos = [("@DRUG$ increases the plasma concentration of @DRUG$ .", "mechanism"),
                ("@DRUG$ enhances the anticoagulant effect of @DRUG$ .", "effect"),
@@ -200,13 +231,17 @@ def main():
     ap.add_argument("--max-len", type=int, default=128)
     ap.add_argument("--add-marker-tokens", action="store_true",
                     help="add the task's @MARKER$ tokens as special tokens (default off, matches BioBERT)")
-    ap.add_argument("--calibration", choices=["isotonic", "platt", "none"], default="isotonic",
-                    help="fit a probability calibrator on the dev split (default isotonic)")
+    ap.add_argument("--calibration", choices=["isotonic", "platt", "none"], default=None,
+                    help="fit a probability calibrator on the dev split (default: platt for "
+                         "biored, whose dev split is only 100 abstracts -- isotonic is "
+                         "nonparametric and overfits small calibration sets; isotonic otherwise)")
     ap.add_argument("--seed", type=int, default=42,
                     help="random seed for reproducibility (data shuffling + classifier-head init)")
     args = ap.parse_args()
     cfg = TASKS[args.task]
     out = args.out or f"{args.task}-biobert-re"
+    if args.calibration is None:
+        args.calibration = "platt" if args.task == "biored" else "isotonic"
 
     if args.smoke:
         args.data = write_smoke(args.task, f"{args.task}_smoke")
@@ -352,7 +387,8 @@ def main():
             print(f"  ECE on {where} ({len(exs)} positives): raw {e_raw:.4f} -> calibrated {e_cal:.4f}")
 
     var = {"chemprot": "RE_MODEL_CHEMPROT", "gad": "RE_MODEL_GAD",
-           "ppi": "RE_MODEL_PPI", "ddi": "RE_MODEL_DDI"}.get(args.task, "RE_MODEL")
+           "ppi": "RE_MODEL_PPI", "ddi": "RE_MODEL_DDI",
+           "biored": "RE_MODEL_BIORED"}.get(args.task, "RE_MODEL")
     print(f"\nUse it:  $env:{var} = (Resolve-Path .\\{out})")
     print("then:    python relation_extraction.py --normalize")
 
