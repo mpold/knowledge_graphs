@@ -21,7 +21,7 @@ have?* -- and acts on the answer in three ways:
   3. it writes ``summaries/from_archive.html`` describing the match.
 
 Input  : pmids/pmid_pmc_ids.tsv                    (from pubmed_query.py)
-         <archive>/PMC*.xml, PMC*.grobid.tei.xml   (default: ../xmls)
+         <archive>/PMC*.xml, PMC*.grobid.tei.xml   (default: ../../xmls)
 Outputs: archive_xmls/PMC*.{xml,grobid.tei.xml}    durable copy of the hit set
          gpu_bundle/experimental_ner/PMC*.{...}    seeded into the NER corpus
          pmids/from_archive_pmcids.txt             download skip-list for stage 2
@@ -84,7 +84,7 @@ not leave stale papers behind.
 
 ENVIRONMENT
 -----------
-ARCHIVE_DIR   archive to read (default: ``../xmls`` relative to this script)
+ARCHIVE_DIR   archive to read (default: ``../../xmls`` relative to this script)
 MIN_IF        keep only archive hits with journal impact factor >= this value
 ORIGINAL_ONLY 1 = seed experimental_ner/ with original-results article types only
               (same RESULTS_CATEGORY mapping as named_entity_xml.py); default 0
@@ -107,8 +107,11 @@ from collections import Counter
 # --------------------------------------------------------------------------- #
 BASE         = os.path.dirname(os.path.abspath(__file__))
 IN_TSV       = os.path.join(BASE, "pmids", "pmid_pmc_ids.tsv")
+# Default archive is two levels up: this script lives in
+# <project>/relationship_graphs/lung_small/ and the shared archive is
+# <project>/xmls/, a sibling of relationship_graphs/.
 ARCHIVE_DIR  = os.path.abspath(os.environ.get(
-                   "ARCHIVE_DIR", os.path.join(BASE, os.pardir, "xmls")))
+                   "ARCHIVE_DIR", os.path.join(BASE, os.pardir, os.pardir, "xmls")))
 STAGE_DIR    = os.path.join(BASE, "archive_xmls")                        # durable copy
 EXPERIMENTAL_DIR = os.path.join(BASE, "gpu_bundle", "experimental_ner")  # seeded corpus
 SKIP_LIST    = os.path.join(BASE, "pmids", "from_archive_pmcids.txt")

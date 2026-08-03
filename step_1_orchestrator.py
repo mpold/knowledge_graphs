@@ -34,7 +34,7 @@ Options
     --start S     start from step S (1, 1b, 2 .. 6, 6b, 7) instead of step 1
     --stop  S     stop after step S
     --only  S     run only step S
-    --archive D   local XML archive for steps 1b/6b (default: ../xmls)
+    --archive D   local XML archive for steps 1b/6b (default: ../../xmls)
     --no-archive  skip steps 1b/6b and download the whole selection
     --list        print the pipeline order and exit
     --dry-run     print what would run without executing anything
@@ -104,7 +104,9 @@ STEP_INDEX = {key: i for i, (key, _script, _desc) in enumerate(PIPELINE)}
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Default archive for steps 1b/6b -- the same default from_archive.py itself uses.
-DEFAULT_ARCHIVE = os.path.join(BASE_DIR, os.pardir, "xmls")
+# Two levels up: this script lives in <project>/relationship_graphs/lung_small/ and
+# the shared archive is <project>/xmls/, a sibling of relationship_graphs/.
+DEFAULT_ARCHIVE = os.path.join(BASE_DIR, os.pardir, os.pardir, "xmls")
 
 
 def parse_step(value):
