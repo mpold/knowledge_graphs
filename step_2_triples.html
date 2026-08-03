@@ -32,6 +32,7 @@
  .pill.gpu { background: #e6f4ea; border-color: #b7dfc4; color: #1a7f37; }
  .pill.net { background: #fdeef0; border-color: #f0c4cb; color: #b3243b; }
  .pill.opt { background: #f2eef9; border-color: #d9c9f0; color: #6b3fa0; }
+ .pill.gate { background: #fff4e5; border-color: #f3d3a6; color: #8a5300; }
  .step-no { display:inline-block; min-width:1.5rem; height:1.5rem; line-height:1.5rem; text-align:center;
             background:#0969da; color:#fff; border-radius:50%; font-size:.82rem; font-weight:600; margin-right:.4rem; }
  .grp { background:#f0f3f6; border:1px solid #dde2e8; border-radius:6px; padding:.35rem .7rem; margin:.6rem 0 .2rem;
@@ -65,6 +66,9 @@ scripts you run by hand: <code>gpu.py</code> copies the scripts, symlinks the re
 output dirs (<code>GENETIC/ DISEASE/ CHEMICAL/ TRIPLES/</code>, plus <code>sentences/</code> and
 <code>summaries/</code>), and sets <code>RE_MODEL_PPI</code> and <code>RE_MODEL_BIORED</code> for the
 learned RE step. Steps&nbsp;1, 2, 3 and 16 use CUDA; steps&nbsp;1, 2, 3 and 15 reach the network.
+Steps&nbsp;1&ndash;2 are <strong>gated</strong>: they train only when the previous training output is
+not already in the bundle, so on every run after the first the chain effectively starts at
+step&nbsp;3 (see the box under section&nbsp;1A).
 Steps&nbsp;2, 14, 15 and 17 are optional &mdash; if they fail the orchestrator warns and continues to
 the critical RE step. The last step
 (<code>zip_work.py</code>) bundles the whole working directory into
@@ -73,14 +77,53 @@ the critical RE step. The last step
 
 <h2>1. Order of execution (data flow)</h2>
 <div class='flow'>
-  <div class='grp'>A. Train the relation models &nbsp;<span class='dim'>(most upstream; one script, two invocations, each its own 3-script sub-pipeline)</span></div>
-  <div class='node'><span class='s'>1. run_re_pipeline.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span>
-    <div class='io'>in: BigBIO <code>bioinfer</code> corpus (HF <code>datasets</code>) &nbsp;&rarr;&nbsp; out: <code>ppi-biobert-re/</code> checkpoint + <code>summaries/calibration.html</code>
+  <div class='grp'>A. Train the relation models &nbsp;<span class='dim'>(most upstream; one script, two invocations, each its own 3-script sub-pipeline &mdash; gated: run once, reused by every later corpus)</span></div>
+  <div class='node'><span class='s'>1. run_re_pipeline.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span> <span class='pill gate'>gated</span>
+    <div class='io'>in: BigBIO <code>bioinfer</code> corpus (HF <code>datasets</code>) &nbsp;&rarr;&nbsp; out: <code>ppi-biobert-re/</code> checkpoint + <code>ppi_data/*.tsv</code> + <code>summaries/calibration.html</code>
       <span class='dim'>&mdash; runs bigbio_to_re.py &rarr; train_re.py &rarr; calibration.py; binary &ldquo;interacts&rdquo;, 2 epochs, Platt calibrator</span></div></div>
-  <div class='node'><span class='s'>2. run_re_pipeline.py --task biored</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span> <span class='pill opt'>optional</span>
+  <div class='node'><span class='s'>2. run_re_pipeline.py --task biored</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span> <span class='pill opt'>optional</span> <span class='pill gate'>gated</span>
     <div class='io'>in: BigBIO <code>biored</code> corpus &nbsp;&rarr;&nbsp; out: <code>biored-biobert-re/</code> checkpoint + <code>biored_data/*.tsv</code>
       <span class='dim'>&mdash; same script, typed + SIGNED labels (upregulator/activator, downregulator/inhibitor, binds, associated), 3 epochs, Platt calibrator. Runs ALONGSIDE the PPI model, not instead of it; if it fails the run continues with PPI alone</span></div></div>
   <div class='arrow'>&darr;&nbsp; ppi-biobert-re/ + biored-biobert-re/ (loaded by step 16 via RE_MODEL_PPI / RE_MODEL_BIORED)</div>
+
+<div class='key'><strong>The training gate &mdash; why steps&nbsp;1&ndash;2 usually do not run.</strong>
+Neither step reads the corpus: both fine-tune BioBERT on a fixed public BigBIO dataset, so each
+checkpoint is a function of (dataset, seed, hyperparams) only and is <em>identical</em> for every
+corpus this pipeline is pointed at. Training them per run is wasted GPU time, so
+<code>gpu.py</code> runs them <strong>only when the full content of four directories is missing from
+<code>gpu_bundle/</code></strong>:
+<table>
+<thead><tr><th>directory</th><th>required content</th></tr></thead>
+<tbody>
+<tr><td><code>ppi-biobert-re/</code><br><code>biored-biobert-re/</code></td>
+    <td><code>config.json</code>, <code>tokenizer.json</code>, <code>tokenizer_config.json</code>,
+    <code>calibration.json</code> and the weights (<code>*.safetensors</code> or <code>*.bin</code>)</td></tr>
+<tr><td><code>ppi_data/</code><br><code>biored_data/</code></td>
+    <td><code>train.tsv</code>, <code>dev.tsv</code>, <code>test.tsv</code></td></tr>
+</tbody>
+</table>
+All four complete &rarr; steps&nbsp;1 <em>and</em> 2 are dropped from the plan and the checkpoints on
+disk are staged and exported to step&nbsp;16 as they are. Anything absent or empty &rarr; both steps
+run, and the startup header names the missing entries. Any file being empty counts as missing, so a
+half-copied bundle retrains rather than loading a truncated checkpoint.
+<p>It is <strong>all four or none</strong> by design: step&nbsp;16 routes between the two checkpoints
+and step&nbsp;17 compares them, so a run must never mix a reused PPI model with a freshly trained
+BioRED one (or the reverse) &mdash; the comparison would be measuring two generations against each
+other. The <code>*_data/</code> TSVs are gated alongside the checkpoints because they are what makes
+a reused bundle re-calibratable without going back to Hugging Face.</p>
+<p>Overrides, each of which forces training back on: <code>--retrain</code> (env
+<code>NORM_RETRAIN</code>), naming a training step in <code>--steps</code>, or passing
+<code>--re-args</code> / <code>--biored-args</code>. <code>--list</code> prints the verdict and its
+reason without running anything:</p>
+<pre>training   : SKIP (re_pipeline, re_pipeline_biored) -- complete in .../gpu_bundle:
+             ppi-biobert-re/, ppi_data/, biored-biobert-re/, biored_data/
+             both checkpoints are reused as-is (--retrain to train anyway)
+
+training   : RUN (re_pipeline, re_pipeline_biored) -- training output incomplete under .../gpu_bundle:
+             missing  ppi_data/dev.tsv</pre>
+All four directories are git-ignored: they are <em>inputs</em> as often as they are outputs. Keep
+them in <code>gpu_bundle/</code> (and upload them with the Kaggle dataset) rather than leaving them in
+the <code>kaggle_working/</code> run tree, which is rebuilt on every run.</div>
 
   <div class='grp'>B. NER: corpus &rarr; result-sentence entities</div>
   <div class='node'><span class='s'>3. sentences.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span>
@@ -141,14 +184,16 @@ have been produced, so it is skipped when step&nbsp;2 did not run.</p>
   <td>Fine-tunes BioBERT into the PPI relation model that step&nbsp;16 needs. Itself a 3-script
       sub-pipeline run as one subprocess: <code>bigbio_to_re.py</code> (corpus &rarr; entity-blinded TSVs)
       &rarr; <code>train_re.py</code> (fine-tune, <strong><code>--epochs 2</code></strong>) &rarr;
-      <code>calibration.py</code> (evaluate on test + fit a <strong>Platt</strong> calibrator). Skip it
-      with <code>--steps</code> if you upload a checkpoint. <span class='dim'>Both defaults are per-task
+      <code>calibration.py</code> (evaluate on test + fit a <strong>Platt</strong> calibrator).
+      <strong>Gated</strong> &mdash; skipped automatically when the trained artifacts are already in the
+      bundle (section&nbsp;1A); <code>--retrain</code> or <code>--steps re_pipeline</code> forces it.
+      <span class='dim'>Both defaults are per-task
       and were changed on 2026-08-02 &mdash; see sections&nbsp;5&ndash;6 for the measurements behind
       them.</span></td>
 </tr>
 <tr>
   <td class='num'>2</td>
-  <td><code>run_re_pipeline.py --task biored</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span> <span class='pill opt'>optional</span></td>
+  <td><code>run_re_pipeline.py --task biored</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span> <span class='pill opt'>optional</span> <span class='pill gate'>gated</span></td>
   <td>BigBIO <code>bigbio/biored</code> KB corpus <span class='dim'>(downloaded via HF <code>datasets&lt;4</code>)</span></td>
   <td><code>biored-biobert-re/</code> checkpoint (weights, config+label map, tokenizer, <code>calibration.json</code>)<br><code>biored_data/{train,dev,test}.tsv</code><br><code>summaries/calibration.html</code> <span class='dim'>(overwrites step&nbsp;1's)</span></td>
   <td>The same script with <code>--task biored</code>. BioRED (Luo et al. 2022) is a typed, <strong>signed</strong>
@@ -160,7 +205,9 @@ have been produced, so it is skipped when step&nbsp;2 did not run.</p>
       forced (<code>BioRED_task_mapping.md:324-331</code>) and that is now the default for every task, so
       the two checkpoints' scores share one scale. It runs <em>alongside</em> the PPI model, not instead of
       it: <strong>optional</strong>, so if the download or training fails the run continues with PPI alone
-      and nothing is lost.</td>
+      and nothing is lost. These two output dirs are half of what the <strong>training gate</strong>
+      tests for &mdash; once all four (with step&nbsp;1's) are complete in <code>gpu_bundle/</code>,
+      steps&nbsp;1&ndash;2 both stop running (section&nbsp;1A).</td>
 </tr>
 <tr>
   <td class='num'>3</td>
@@ -331,11 +378,17 @@ have been produced, so it is skipped when step&nbsp;2 did not run.</p>
 <h2>3. How to run</h2>
 <ol class='steps'>
   <li><span class='step-no'>1</span><code>python gpu.py --list</code>
-      <span class='dim'>&mdash; preview the plan (roots, input count, accelerator, the 18 steps).</span></li>
+      <span class='dim'>&mdash; preview the plan (roots, input count, accelerator, the training-gate verdict,
+      the steps that will actually run).</span></li>
   <li><span class='step-no'>2</span><code>python gpu.py</code>
-      <span class='dim'>&mdash; run all 18 steps end-to-end. On Kaggle: enable the GPU accelerator + internet, and
-      <code>!pip install -q 'datasets&lt;4'</code> first (for the BigBIO downloads in steps&nbsp;1&ndash;2).</span></li>
-  <li><span class='step-no'>3</span><code>python gpu.py --steps triples,relation_extraction</code>
+      <span class='dim'>&mdash; run the chain end-to-end: all 18 steps on a first run, 16 once the gate finds
+      the trained artifacts in place. On Kaggle: enable the GPU accelerator + internet, and
+      <code>!pip install -q 'datasets&lt;4' bioc</code> first (needed only for the BigBIO downloads in
+      steps&nbsp;1&ndash;2, i.e. only when the gate lets them run).</span></li>
+  <li><span class='step-no'>3</span><code>python gpu.py --retrain</code>
+      <span class='dim'>&mdash; train even though the artifacts are complete (new hyperparameters, a corpus
+      version bump, a checkpoint you no longer trust).</span></li>
+  <li><span class='step-no'>4</span><code>python gpu.py --steps triples,relation_extraction</code>
       <span class='dim'>&mdash; run a subset (e.g. re-derive triples from existing <code>sentences/</code> and libraries).</span></li>
 </ol>
 <p class='dim'>Individual scripts can still be run directly (<code>python triples.py</code>, etc.) &mdash; each
@@ -347,9 +400,12 @@ because it stages inputs, orders the steps, and wires up <code>RE_MODEL_PPI</cod
 <code>datasets&lt;4</code> to download BigBIO bioinfer and biored; step&nbsp;3 (<code>sentences.py</code>)
 pulls the BioBERT NER models from Hugging Face on first use; step&nbsp;15 (<code>pub_years.py</code>)
 calls NCBI. Steps&nbsp;1, 2, 3 and 16 run on CUDA (they fall back to CPU &mdash; slow &mdash; if no GPU is
-visible). Upload <code>ppi-biobert-re/</code> and/or <code>biored-biobert-re/</code> and skip
-steps&nbsp;1&ndash;2, or upload <code>sentences/</code> and skip step&nbsp;3, to reuse prior results.
-Skipping step&nbsp;2 without supplying its checkpoint also disables step&nbsp;17.</div>
+visible). Those two network dependencies apply only when the training gate lets steps&nbsp;1&ndash;2
+run: ship <code>ppi-biobert-re/</code> + <code>ppi_data/</code> + <code>biored-biobert-re/</code> +
+<code>biored_data/</code> with the bundle and the gate skips them by itself &mdash; no
+<code>--steps</code>, no <code>datasets&lt;4</code>/<code>bioc</code>, no internet for that phase.
+Upload <code>sentences/</code> and skip step&nbsp;3 the same way to reuse a prior NER pass.
+Skipping step&nbsp;2 <em>without</em> supplying its checkpoint also disables step&nbsp;17.</div>
 
 <h2>4. Notes</h2>
 <ul>

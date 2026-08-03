@@ -133,7 +133,9 @@ DISEASE/CHEMICAL normalization → rule triples → learned relation extraction 
 
 **On Kaggle (recommended):**
 1. Upload this bundle as a Kaggle Dataset (the `gpu_bundle/` scripts + `experimental_ner/`
-   from stage 1 + the ontology DBs below).
+   from stage 1 + the ontology DBs below + — if you already have them — the four training dirs
+   `ppi-biobert-re/`, `ppi_data/`, `biored-biobert-re/`, `biored_data/`, which make the gate
+   skip steps 1–2; see below).
 2. *Settings → Accelerator → GPU* and enable *Internet*.
 3. In a cell: `!pip install -q 'datasets<4' bioc` then `!python gpu.py` (from the dataset dir).
    (`bioc` is what the BigBIO loading script for **BioRED** needs — that corpus is BioC XML;
@@ -144,6 +146,104 @@ DISEASE/CHEMICAL normalization → rule triples → learned relation extraction 
 preview with `python gpu_bundle/gpu.py --list`.
 
 Output: `TRIPLES/` (incl. the scored + normalized triples) and `kaggle_working.zip`.
+
+**Train the two checkpoints once, reuse them for every corpus.** Steps 1 and 2 never read
+`experimental_ner/` or your PubMed query — they fine-tune BioBERT on fixed public BigBIO corpora
+(**bioinfer** → `ppi-biobert-re/`, **biored** → `biored-biobert-re/`). The checkpoint is a
+function of (dataset, seed, hyperparams) only, so a run on "<pubmed_query_1>" produces the same
+model as one on "<pubmed_query_2>"; retraining per corpus is wasted GPU time. The same
+holds for the normalization libraries (steps 4–12) — HGNC / ChEBI / MONDO are ontologies, not
+corpus-derived.
+
+**`gpu.py` therefore gates the two training steps** — they run **only** when the previous training
+output is not already in the bundle. The gate tests the full content of four directories under
+`gpu_bundle/`:
+
+| directory | required content |
+|---|---|
+| `ppi-biobert-re/`, `biored-biobert-re/` | `config.json`, `tokenizer.json`, `tokenizer_config.json`, `calibration.json`, weights (`*.safetensors` or `*.bin`) |
+| `ppi_data/`, `biored_data/` | `train.tsv`, `dev.tsv`, `test.tsv` |
+
+All four complete → steps 1 **and** 2 are dropped from the plan and the checkpoints on disk are
+used as-is. Anything absent or empty → both run, and the header names exactly which entries were
+missing. It is **all four or none** by design: step 16 routes between the two checkpoints and step
+17 compares them, so a run must never mix a reused PPI model with a freshly trained BioRED one. An
+empty file counts as missing, so a half-copied bundle retrains instead of loading a truncated
+checkpoint.
+
+```bash
+python gpu_bundle/gpu.py --list        # shows the verdict and its reason, runs nothing
+python gpu_bundle/gpu.py --retrain     # train anyway (also: --steps re_pipeline / --re-args)
+```
+
+#### What the four directories hold
+
+**The two checkpoints.** Both are BioBERT (`dmis-lab/biobert-v1.1`) fine-tuned as a
+`BertForSequenceClassification` — same architecture, same 28,996-token WordPiece vocabulary, same
+512-position limit. They differ only in the label head and the corpus behind it.
+
+| file | `ppi-biobert-re/` | `biored-biobert-re/` |
+|---|---|---|
+| `model.safetensors` | 413 MB — fine-tuned encoder + classifier head | same |
+| `config.json` | `id2label` = `interacts`, `false` (binary) | `associated`, `binds`, `downregulator/inhibitor`, `upregulator/activator`, `false` (5-way, signed) |
+| `tokenizer.json` + `tokenizer_config.json` | BioBERT's WordPiece vocab, unchanged | same |
+| `calibration.json` | `{"method": "platt", "a": 0.821, "b": -0.340, "clip": 0.001}` | `{"method": "platt", "a": 0.388, "b": -1.220, "clip": 0.001}` |
+| `training_args.bin` | HF `TrainingArguments` — provenance only | same |
+| `checkpoint-N/` | `checkpoint-878` (epoch 2) | `checkpoint-6357` (epoch 3) |
+
+The **first five** are what the gate requires and what `relation_extraction.py` loads:
+weights + label map + tokenizer, and `calibration.json` mapping the raw softmax to the calibrated
+`p_rel` (both Platt, so the two models' scores share one scale — see `step_2_triples.html` §6).
+
+`training_args.bin` and `checkpoint-N/` are **neither gated nor read at inference**. `train_re.py`
+runs with `load_best_model_at_end=True` and `save_total_limit=1`, then `trainer.save_model(out)`,
+so the best epoch's weights are already at the directory root and the one surviving trainer
+checkpoint is an audit/resume artifact. Deleting it takes each directory from **1.7 GB to ~414 MB**
+— worth doing before a Kaggle upload. Its `trainer_state.json` is the only thing worth keeping: it
+holds the per-epoch dev metrics that `EPOCH_DEFAULTS` in `train_re.py` was measured from (this
+bundle's run: PPI best at epoch 2, dev F1 0.843; BioRED at epoch 3, dev F1 0.624).
+
+**The two data dirs** are `bigbio_to_re.py`'s conversion output — the entity-blinded TSVs
+`train_re.py` trains on. Three columns (`index`, `sentence`, `label`), one **entity pair** per row,
+that pair's two mentions replaced by type markers:
+
+```
+0	The herpes simplex virus type 1 (HSV-1) @GENE$, an essential component of the viral DNA replication machinery, is a trimeric complex of the virus-coded UL5, UL8, and @GENE$ proteins.	1
+0	Chloroacetaldehyde (CAA) is a metabolite of the alkylating agent @CHEMICAL$ (IFO) and putatively responsible for renal damage following anti-@DISEASE$ therapy with IFO.	Negative_Correlation
+```
+
+| | `ppi_data/` (BioInfer) | `biored_data/` (BioRED) |
+|---|---|---|
+| rows: train / dev / test | 7,018 / 779 / 1,604 | 33,889 / 9,891 / 9,202 |
+| markers | `@GENE$` only | `@GENE$`, `@DISEASE$`, `@CHEMICAL$`, `@VARIANT$` |
+| train labels | `1` interacts 1,897 · `0` no relation 5,121 | `Association` 10,908 · `Positive_Correlation` 5,186 · `Negative_Correlation` 4,089 · `Bind` 458 · `false` 13,248 |
+| dev split | carved from train (`--val-frac 0.1` — BioInfer ships none) | BioRED's own 400/100/100 abstracts (`--val-frac 0`) |
+| on disk | 2.3 MB | 11 MB |
+
+BioRED's four rare chemical–chemical types (`Cotreatment`, `Comparison`, `Drug_Interaction`,
+`Conversion`) fold into `Association` by default — `--biored-all-types` keeps all eight. Its row
+count dwarfs "600 abstracts" because its relations are annotated at the **document** level: one
+annotated pair emits a row for every sentence where both endpoints co-occur (`BioRED_task_mapping.md`
+§5), which is also why its positives are noisier than BioInfer's sentence-scoped ones.
+
+Neither data dir is needed to *score* triples. They are gated because they are what makes a reused
+bundle re-calibratable in place: `run_re_pipeline.py --skip-convert --skip-train` re-runs the
+checkpoint over `dev.tsv` (fit) and `test.tsv` (metrics + ECE) and rewrites `calibration.json` and
+`summaries/calibration.html` — no BigBIO download, no retraining. `train.tsv` is read there only
+for the row count in the summary.
+
+All four dirs are git-ignored — they are inputs as often as they are outputs, so keep them in
+`gpu_bundle/` between runs (and upload them with the Kaggle dataset) rather than in the
+`kaggle_working/` run tree, which is regenerated each time.
+
+> **What *is* corpus-sensitive is transfer quality, not checkpoint validity.** Both training
+> corpora are abstracts, and `calibration.py` fits the calibrator on their own dev/test split — so
+> `p_rel` is calibrated to *those* sentence distributions, not to your GROBID full text. The knobs
+> worth re-tuning on a new corpus are therefore `RE_MIN_SCORE` and the stage-3 cutoffs, not the
+> models. A corpus that is clinical or epidemiological rather than molecular is further out of
+> domain, and BioRED's typed/signed labels degrade faster there than the PPI model's binary
+> `interacts`. Retrain only to change the label space or add a source dataset — `bigbio_to_re.py`
+> also supports `--task chemprot / gad / ddi`.
 
 ### Stage 3 — graph (local)
 `high_confidence_g.py` filters the scored triples to the high-confidence gene–gene set and
@@ -183,18 +283,26 @@ and a copy of the graph in the bundle root named after the current directory plu
 
 ## Data you must provide
 
-These are **git-ignored for size** (30 MB – 500 MB each) and are not in the bundle — place them
+These are **git-ignored for size** (12 MB – 500 MB each) and are not in the bundle — place them
 under `gpu_bundle/databases/` before running stage 2 (see
 `gpu_bundle/databases/PLACE_DATABASES_HERE.md`):
 
-- `hgnc_complete_set_2026-05-01.json` — HGNC gene symbols
-- `mondo-clingen.json` — MONDO disease ontology
-- `chebi.json` — ChEBI chemical ontology
+- `hgnc_complete_set_2026-05-01.json` — HGNC gene symbols. **Required** by `roman.py`,
+  `greek.py`, `controls.py`, `nonchemical.py`, `target_pharm.py`
+- `mondo-clingen.json` — MONDO disease ontology. **Required** by `disease.py`
+- `chebi.json` — ChEBI chemical ontology. **Required** by `chemical.py`, `target_pharm.py`
+- `interactions.tsv` — DGIdb open drug–gene interactions. *Optional*, read by `chemical.py` to
+  recover drugs the NER misses **and** ChEBI does not carry (e.g. bevacizumab). Absent, it
+  degrades silently to an empty drug set — no error, just fewer CHEMICAL surfaces
 
+`gpu.py --list` preflights the three required ones and names any that are missing; the DGIdb
+table is not preflighted, precisely because it is optional.
 `gpu_bundle/databases/pmc_years.json` is produced by stage 2 (or supply it to run the year
 filter offline). The `experimental_ner/` corpus is produced by **stage 1** (or drop in your
-own). Trained checkpoints (`ppi-biobert-re/`, `biored-biobert-re/`) and run outputs are generated,
-not committed.
+own). The trained checkpoints and their converted TSVs (`gpu_bundle/{ppi-biobert-re,ppi_data,
+biored-biobert-re,biored_data}/`) are generated by stage-2 steps 1–2 on the first run and are
+git-ignored — **keep them in `gpu_bundle/` afterwards**: their presence is what makes the training
+gate skip those two steps on every later corpus. Run outputs are likewise generated, not committed.
 
 **Optional — a local XML archive.** If you have a directory of previously fetched
 `PMC*.xml` / `PMC*.grobid.tei.xml` files, point `ARCHIVE_DIR` (or `--archive`) at it and stage 1's
@@ -206,7 +314,7 @@ it is modified. Without one, stage 1 simply downloads everything.
 ## Repository layout
 
 ```
-cancer_knowledge_graph/
+<parent_directory>/
 ├── step_1_orchestrator.py     # stage 1 entry point (chains its 9 steps)
 ├── requirements.txt           # local deps (stages 1 & 3): requests
 ├── pubmed_query.py … pre_ner_xml_structure.py   # stage 1: the 7 core publications scripts
@@ -218,8 +326,44 @@ cancer_knowledge_graph/
 │   ├── gpu.py                 #   orchestrator (18 steps)
 │   ├── requirements.txt       #   GPU deps: torch/transformers/datasets<4/numpy/lxml
 │   ├── *.py                   #   the step scripts
-│   └── databases/             #   ontology JSONs (provide these; git-ignored)
-│       └── PLACE_DATABASES_HERE.md
+│   ├── ppi-biobert-re/        #   PPI checkpoint (BioInfer) — git-ignored, KEEP between runs
+│   │   ├── model.safetensors  # ‡   413 MB: fine-tuned BioBERT encoder + classifier head
+│   │   ├── config.json        # ‡   architecture + id2label: interacts / false
+│   │   ├── tokenizer.json     # ‡   BioBERT WordPiece vocab
+│   │   ├── tokenizer_config.json  # ‡
+│   │   ├── calibration.json   # ‡   {method: platt, a, b, clip} — fit by calibration.py
+│   │   ├── training_args.bin  #     HF TrainingArguments — provenance only
+│   │   └── checkpoint-878/    #     best epoch (2); 1.3 GB, safe to delete before uploading
+│   │       ├── config.json, model.safetensors, tokenizer{,_config}.json, training_args.bin
+│   │       ├── optimizer.pt, scheduler.pt, rng_state.pth   #   resume state
+│   │       └── trainer_state.json                          #   per-epoch dev metrics
+│   ├── ppi_data/              #   bigbio_to_re.py output: index / sentence / label TSVs
+│   │   ├── train.tsv          # ‡   7,018 rows  (@GENE$-blinded pairs, labels 1 / 0)
+│   │   ├── dev.tsv            # ‡     779 rows  — the calibrator is fit here
+│   │   └── test.tsv           # ‡   1,604 rows  — test metrics + ECE
+│   ├── biored-biobert-re/     #   BioRED checkpoint — same seven entries, 5-way signed head
+│   │   ├── model.safetensors  # ‡   413 MB
+│   │   ├── config.json        # ‡   id2label: associated / binds / downregulator-inhibitor /
+│   │   │                      #       upregulator-activator / false
+│   │   ├── tokenizer.json     # ‡
+│   │   ├── tokenizer_config.json  # ‡
+│   │   ├── calibration.json   # ‡   its own Platt a/b (not interchangeable with the PPI one)
+│   │   ├── training_args.bin  #
+│   │   └── checkpoint-6357/   #     best epoch (3); same file set as checkpoint-878/
+│   ├── biored_data/           #   bigbio_to_re.py output, document-level → sentence-level
+│   │   ├── train.tsv          # ‡   33,889 rows (@GENE$/@DISEASE$/@CHEMICAL$/@VARIANT$)
+│   │   ├── dev.tsv            # ‡    9,891 rows — BioRED's own dev split, not carved
+│   │   └── test.tsv           # ‡    9,202 rows
+│   └── databases/             #   ontology + reference data (provide these; git-ignored)
+│       ├── PLACE_DATABASES_HERE.md   # the only tracked file here: what to put in this dir
+│       ├── hgnc_complete_set_2026-05-01.json  #  34 MB  HGNC gene symbols → roman.py,
+│       │                      #     greek.py, controls.py, nonchemical.py, target_pharm.py
+│       ├── mondo-clingen.json #  83 MB  MONDO disease ontology → disease.py
+│       ├── chebi.json         # 507 MB  ChEBI chemical ontology → chemical.py, target_pharm.py
+│       ├── interactions.tsv   #  12 MB  DGIdb drug–gene interactions (open) → chemical.py
+│                              #     OPTIONAL: absent = empty drug set, no error
+│       └── pmc_years.json     #   generated by pub_years.py (step 15), read by
+│                              #     relationships.py; supply it to run the year filter offline
 ├── step_1_publications.html   # rendered walk-throughs …
 ├── step_2_triples.html
 ├── Step_2_updated_triples.html #   stage 2 after the BioRED model was added
@@ -227,8 +371,15 @@ cancer_knowledge_graph/
 └── requirements.html
 ```
 
+**‡** = required by the stage-2 **training gate**. All five per checkpoint and all three TSVs per
+data dir must be present and non-empty in *all four* directories, or `gpu.py` retrains both models
+(see Stage 2). `training_args.bin` and `checkpoint-N/` are unmarked: nothing reads them at
+inference.
+
 Generated corpora, model checkpoints, run trees (`kaggle_working/`), and `*.zip` bundles are
-excluded via `.gitignore`.
+excluded via `.gitignore` — but the four training directories above are the exception worth
+remembering: git-ignored, yet they belong in `gpu_bundle/` permanently, because their presence is
+what stops every later run from retraining.
 
 ---
 

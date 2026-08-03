@@ -72,7 +72,13 @@ checkpoints side by side on identical entity pairs). Step&nbsp;16 now runs with
 carries <code>predicate.model</code> plus a shared <code>pair_id</code>. Step&nbsp;2 is
 <strong>optional</strong>: if the BioRED download or training fails, the orchestrator warns, does not
 export <code>RE_MODEL_BIORED</code>, and the run continues exactly as before with the PPI model
-alone.</div>
+alone. Step&nbsp;2's two output dirs are also half of what the <strong>training gate</strong> keys on:
+once all four &mdash; <code>ppi-biobert-re/</code>, <code>ppi_data/</code>,
+<code>biored-biobert-re/</code>, <code>biored_data/</code> &mdash; are complete in
+<code>gpu_bundle/</code>, steps&nbsp;1&ndash;2 stop running altogether and every later corpus reuses the
+checkpoints as they are (<code>--retrain</code> to override). All four or none, so a run never mixes a
+reused PPI model with a freshly trained BioRED one &mdash; see &sect;1A of
+<a href='step_2_triples.html'>step_2_triples.html</a>.</div>
 
 <h2>1. What &sect;8 asked for, and what is done</h2>
 <table>
@@ -521,22 +527,24 @@ Expect a long run &mdash; two BioBERT fine-tunes plus NER over the whole XML cor
 FileLink("kaggle_working.zip")</pre>
 
 <p><strong>If the session time limit bites</strong>, split cell 5 &mdash; every step hands off by files,
-so it resumes naturally. Save <code>/kaggle/working/{ppi,biored}-biobert-re</code> as a dataset after
-session&nbsp;A and attach it for session&nbsp;B; preflight then finds the checkpoints under the input
-root and the training steps can be left out. The RE step needs <em>at least one</em> of the two
-models, not both.</p>
+so it resumes naturally. Save <code>/kaggle/working/{ppi-biobert-re,ppi_data,biored-biobert-re,biored_data}</code>
+as a dataset after session&nbsp;A and attach it for session&nbsp;B: the <strong>training gate</strong> then
+finds all four dirs complete under the input root and drops both training steps on its own &mdash;
+session&nbsp;B is the plain command again, no <code>--steps</code> list to keep in sync. Save all four:
+the gate is all-or-nothing, so a missing <code>ppi_data/</code> makes session&nbsp;B retrain both models. The RE step needs <em>at least one</em> of the two models, not both.</p>
 <pre># session A -- the two models (the expensive part)
 !python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} --steps re_pipeline,re_pipeline_biored
 
-# session B -- everything downstream, reusing the uploaded checkpoints
-!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} \
-    --steps sentences,roman,greek,keys_values,controls,disease,phenotypes,chemical,\
-nonchemical,target_pharm,triples,relationships,pub_years,relation_extraction,compare_re,zip</pre>
+# session B -- everything downstream; the gate skips training because the four dirs are attached
+!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT}</pre>
+<p class='dim'>Same mechanism, and the reason it matters beyond a session split: the checkpoints do not
+depend on the corpus, so <em>every later run on a different PubMed query</em> reuses them the same way.
+<code>--retrain</code> forces training back on when you actually want a new checkpoint.</p>
 <p class='dim'>Converter/trainer flags do not belong on <code>gpu.py</code> &mdash;
 <code>gpu.py --task biored --print-types</code> fails with &ldquo;unrecognized arguments&rdquo;, because
 <code>--print-types</code> is a <code>bigbio_to_re.py</code> diagnostic (cell&nbsp;4) and the
-orchestrator only takes <code>--list</code>, <code>--steps</code>, <code>--re-args</code>,
-<code>--biored-args</code>, <code>--input-root</code>, <code>--work-root</code>. Run-time options reach
+orchestrator only takes <code>--list</code>, <code>--steps</code>, <code>--retrain</code>,
+<code>--re-args</code>, <code>--biored-args</code>, <code>--input-root</code>, <code>--work-root</code>. Run-time options reach
 step&nbsp;2 through the pass-through, e.g.
 <code>--biored-args "--require-cue"</code> (which &sect;9 concludes you do not want).</p>
 

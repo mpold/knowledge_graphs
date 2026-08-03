@@ -12,10 +12,14 @@ they are 30 MB – 500 MB each (ChEBI alone exceeds GitHub's 100 MB/file limit) 
 
 Optional:
 
-- `pmc_years.json` — produced by step 14 (`pub_years.py`); drop it in only to run the
+- `pmc_years.json` — produced by step 15 (`pub_years.py`); drop it in only to run the
   publication-year lookup with the internet off.
 
-- 'interactions.tsv' - DGIdb interactions TSV (open drug-gene targets; typed interactions)
+- `interactions.tsv` — DGIdb interactions TSV (open drug–gene targets; typed interactions),
+  read by `chemical.py` to recover drugs the NER misses **and** ChEBI does not carry
+  (e.g. bevacizumab). If it is absent the drug set is simply empty — no error.
 
 On Kaggle, upload these alongside the scripts as part of the dataset. See the repo README
 and `step_2_triples.html` for the full step-2 setup.
+
+

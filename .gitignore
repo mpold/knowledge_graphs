@@ -12,9 +12,13 @@ gpu_bundle/databases/*.json
 gpu_bundle/databases/*.tsv
 # NER corpus assembled by step 1 (thousands of XML, ~1 GB).
 gpu_bundle/experimental_ner/
-# Trained model checkpoints produced by step 2.
+# Trained model checkpoints + their converted TSVs produced by stage-2 steps 1-2.
+# Kept in gpu_bundle/ between runs: their presence is what makes gpu.py's training
+# gate skip steps 1-2, so these four are inputs as often as they are outputs.
 gpu_bundle/ppi-biobert-re/
 gpu_bundle/ppi_data/
+gpu_bundle/biored-biobert-re/
+gpu_bundle/biored_data/
 gpu_bundle/tmp_trainer/
 tmp_trainer/
 

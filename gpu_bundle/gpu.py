@@ -8,9 +8,9 @@ relation-extraction steps.
 Orchestrates eighteen steps in dependency order:
 
     1  run_re_pipeline.py train + calibrate the PPI relation model
-                          (BigBIO bioinfer -> ppi-biobert-re/)             GPU, internet
+                          (BigBIO bioinfer -> ppi-biobert-re/)   GPU, internet [gated]
     2  run_re_pipeline.py --task biored   train + calibrate the BioRED relation model
-                          (BigBIO biored -> biored-biobert-re/)   GPU, internet [optional]
+                          (BigBIO biored -> biored-biobert-re/)  GPU, internet [gated]
     3  sentences.py      BioBERT result-sentence selection + NER (experimental_ner/ -> sentences/)  GPU
     4  roman.py          GENETIC -> HGNC (roman key)                 CPU
     5  greek.py          GENETIC -> HGNC (greek key)                 CPU
@@ -29,6 +29,32 @@ Orchestrates eighteen steps in dependency order:
     17 compare_re.py     PPI vs BioRED on the same pairs             CPU  [optional]
     18 zip_work.py       bundle working dir -> kaggle_working.zip    CPU
 
+THE TRAINING GATE (steps 1-2 are not run unconditionally)
+  Neither training step reads the corpus: they fine-tune BioBERT on fixed public
+  BigBIO datasets, so the checkpoint is a function of (dataset, seed, hyperparams)
+  only and is IDENTICAL for every corpus this pipeline is pointed at. Training them
+  again per run is wasted GPU time, so steps 1 and 2 run ONLY when the training
+  output is not already sitting in the input root (normally gpu_bundle/):
+
+      ppi-biobert-re/      config.json, tokenizer.json, tokenizer_config.json,
+      biored-biobert-re/   calibration.json + weights (*.safetensors or *.bin)
+      ppi_data/            train.tsv, dev.tsv, test.tsv
+      biored_data/
+
+  All four complete    -> steps 1 AND 2 are dropped from the plan; the checkpoints
+                          already on disk are staged and exported to step 16 instead.
+  Anything missing/empty -> both training steps run, and the gate prints exactly which
+                          entries were absent.
+
+  It is all four or none, deliberately: step 16 routes between the two checkpoints and
+  step 17 compares them, so a run must not mix a reused PPI model with a freshly trained
+  BioRED one (or the reverse). An empty file counts as missing, so a half-copied bundle
+  retrains rather than loading a truncated checkpoint. The *_data/ TSVs are gated too --
+  they are what makes a reused bundle re-calibratable without a re-download.
+
+  Overrides, any of which forces training back on: --retrain (env NORM_RETRAIN),
+  naming a training step in --steps, or passing --re-args / --biored-args.
+
 Dependency / strategy notes:
   * run_re_pipeline.py (1, MOST UPSTREAM) trains the relation-extraction model the
     learned RE step (16) depends on. It is itself a three-script pipeline, run here
@@ -39,9 +65,10 @@ Dependency / strategy notes:
                          (-> ppi-biobert-re/calibration.json, summaries/calibration.html)
     GPU; needs internet + the `datasets` library to download BigBIO bioinfer on
     first use. Its output, ppi-biobert-re/, is exactly what step 16 loads via
-    RE_MODEL_PPI -- so the model dir no longer has to be uploaded. (Upload it and
-    skip step 1 via --steps to reuse an existing checkpoint, mirroring how the
-    'sentences' step can be skipped when sentences/ is supplied.)
+    RE_MODEL_PPI -- so the model dir no longer has to be uploaded. When it IS
+    uploaded (with the three dirs above), the gate skips this step by itself; --steps
+    still works as the manual equivalent, mirroring how the 'sentences' step can be
+    skipped when sentences/ is supplied.
   * re_pipeline_biored (2) is the SAME script with --task biored: BioRED (Luo et al.
     2022) is a typed, SIGNED corpus, so its checkpoint predicts upregulator/activator,
     downregulator/inhibitor, binds and associated instead of a bare "interacts", and
@@ -49,7 +76,8 @@ Dependency / strategy notes:
     ALONGSIDE the PPI model rather than replacing it (BioRED_task_mapping.md section
     6/8): step 16 scores each pair with both, step 17 compares them, and only then is
     the replace-or-not decision worth making. OPTIONAL -- if the download or training
-    fails, the run continues with the PPI model alone and nothing is lost.
+    fails, the run continues with the PPI model alone and nothing is lost. Its two
+    output dirs are half of what the training gate above tests for.
   * sentences.py (3) runs BioBERT over experimental_ner/ (XML) to select
     original-result sentences and tag DISEASE/GENE/CHEMICAL entities, writing
     sentences/*.json -- the input every later step reads. GPU; needs the HF BioBERT
@@ -87,9 +115,11 @@ KAGGLE USAGE
        databases/hgnc_complete_set_2026-05-01.json   (HGNC)
        databases/mondo-clingen.json                  (MONDO)
        databases/chebi.json                          (ChEBI)
-     ppi-biobert-re/ and biored-biobert-re/ are GENERATED by steps 1 and 2 -- no need
-     to upload them (or upload them and skip those steps via --steps if you already
-     have the trained models). sentences/ is likewise generated by step 3.
+     ppi-biobert-re/ + ppi_data/ and biored-biobert-re/ + biored_data/ are GENERATED
+     by steps 1 and 2 on a first run -- but once you have them, upload all four with
+     the dataset and the training gate drops both steps automatically (no --steps
+     needed), which is the normal case for every corpus after the first.
+     sentences/ is likewise generated by step 3.
      pmc_years.json is produced by step 15; upload it under databases/ only to run the
      year filter with internet OFF.
   2. Notebook Settings -> Accelerator -> GPU (steps 1, 2, 3 and 16 use CUDA); enable
@@ -100,8 +130,9 @@ KAGGLE USAGE
      Outputs go to /kaggle/working/{ppi-biobert-re,biored-biobert-re,sentences,summaries,GENETIC,DISEASE,CHEMICAL,TRIPLES}/.
 
   Read-only input is handled automatically: scripts/modules are copied,
-  experimental_ner/ is symlinked, databases/ is copied (writable), and the
-  generated dirs (the two model dirs from steps 1-2, sentences/ from step 3) plus the
+  experimental_ner/ is symlinked, databases/ is copied (writable), model + *_data dirs
+  the gate is reusing are symlinked/copied across, and the dirs a selected step
+  generates (the two model dirs from steps 1-2, sentences/ from step 3) plus the
   output dirs are created in /kaggle/working (the run root). RE_MODEL_PPI and
   RE_MODEL_BIORED are set automatically for step 16 -- each only if that model dir
   actually exists, so a skipped or failed training step never breaks the RE step.
@@ -121,11 +152,15 @@ LIBRARIES
                   GPU images. Step 3 also pulls BioBERT models from Hugging Face.
 
 OPTIONS / ENV
-  --list / --dry-run        show the plan (roots, inputs, accelerator, steps)
+  --list / --dry-run        show the plan (roots, inputs, accelerator, steps) --
+                            including the training gate's verdict and its reason
   --steps a,b,c             run only these step names (also env NORM_STEPS)
-  --re-args "..."           extra args for step 1 (also env RE_PIPELINE_ARGS)
+  --retrain                 train even when the gate finds the artifacts complete
+                            (also env NORM_RETRAIN=1)
+  --re-args "..."           extra args for step 1 (also env RE_PIPELINE_ARGS);
+                            implies --retrain for that step
   --biored-args "..."       extra args for step 2, e.g. "--require-cue"
-                            (also env BIORED_PIPELINE_ARGS)
+                            (also env BIORED_PIPELINE_ARGS); implies --retrain
   --input-root PATH         dataset root (also env NORM_INPUT_ROOT)
   --work-root PATH          writable run dir (also env NORM_WORK_ROOT)
 """
@@ -195,6 +230,26 @@ RAW_DIR = "experimental_ner"   # sentences.py input (XML); sentences/ is generat
 OUT_DIRS = ["GENETIC", "DISEASE", "CHEMICAL", "TRIPLES"]
 MODEL_ENV = {"ppi-biobert-re": "RE_MODEL_PPI",   # model dir -> env var the RE step reads
              "biored-biobert-re": "RE_MODEL_BIORED"}
+# converted-TSV dir each training step writes next to its checkpoint (run_re_pipeline
+# --data); staged alongside the models so a reused bundle can be re-calibrated in place
+MODEL_DATA = {"ppi-biobert-re": "ppi_data", "biored-biobert-re": "biored_data"}
+
+# ---- the training gate ----------------------------------------------------------
+TRAINING_STEPS = ("re_pipeline", "re_pipeline_biored")
+WEIGHTS = ("*.safetensors", "*.bin")   # either satisfies "the weights are here"
+CHECKPOINT_CONTENTS = ("config.json", "tokenizer.json", "tokenizer_config.json",
+                       "calibration.json", WEIGHTS)
+TSV_CONTENTS = ("train.tsv", "dev.tsv", "test.tsv")
+# What "the training output is already here" means: BOTH steps' checkpoints AND both
+# converted-TSV dirs, complete. Steps 1-2 run iff anything here is absent or empty --
+# all four or none, so the two checkpoints the RE step routes between always come from
+# the same generation (see THE TRAINING GATE above).
+TRAINED_CONTENTS = {
+    "ppi-biobert-re": CHECKPOINT_CONTENTS,
+    "ppi_data": TSV_CONTENTS,
+    "biored-biobert-re": CHECKPOINT_CONTENTS,
+    "biored_data": TSV_CONTENTS,
+}
 
 
 def on_kaggle():
@@ -285,6 +340,61 @@ def model_dir_ok(mdir: Path):
             and bool(list(mdir.glob("*.safetensors")) + list(mdir.glob("*.bin"))))
 
 
+def missing_contents(d: Path, required):
+    """Entries of `required` absent (or empty) under directory `d`; [] = full content.
+
+    A pattern containing '*' is satisfied by any non-empty matching file; a tuple of
+    patterns by any ONE of them (model weights are .safetensors OR .bin).
+    """
+    if not d.is_dir():
+        return [f"{d.name}/  (directory absent)"]
+
+    def present(pat):
+        if "*" in pat:
+            return any(f.is_file() and f.stat().st_size > 0 for f in d.glob(pat))
+        f = d / pat
+        return f.is_file() and f.stat().st_size > 0
+
+    out = []
+    for req in required:
+        alts = req if isinstance(req, tuple) else (req,)
+        if not any(present(p) for p in alts):
+            out.append(f"{d.name}/" + " or ".join(alts))
+    return out
+
+
+def missing_training_artifacts(input_root: Path):
+    """What TRAINED_CONTENTS is missing under `input_root` ([] = training can be skipped)."""
+    return [m for name, req in TRAINED_CONTENTS.items()
+            for m in missing_contents(input_root / name, req)]
+
+
+def apply_training_gate(steps, input_root: Path, forced_by: str):
+    """Drop steps 1-2 unless the already-trained artifacts are incomplete.
+
+    Returns (steps, report_lines). `forced_by` is a non-empty reason string when an
+    override (--retrain / --steps / --re-args / --biored-args) keeps training on.
+    """
+    planned = [st["name"] for st in steps if st["name"] in TRAINING_STEPS]
+    if not planned:
+        return steps, []
+    gated = ", ".join(n + "/" for n in TRAINED_CONTENTS)
+    if forced_by:
+        return steps, [f" training   : RUN ({', '.join(planned)}) -- forced by {forced_by}"]
+
+    gap = missing_training_artifacts(input_root)
+    if gap:
+        lines = [f" training   : RUN ({', '.join(planned)}) -- training output incomplete "
+                 f"under {input_root}:"]
+        lines += [f"              missing  {g}" for g in gap]
+        return steps, lines
+
+    kept = [st for st in steps if st["name"] not in TRAINING_STEPS]
+    return kept, [f" training   : SKIP ({', '.join(planned)}) -- complete in {input_root}:",
+                  f"              {gated}",
+                  "              both checkpoints are reused as-is (--retrain to train anyway)"]
+
+
 def preflight(input_root: Path, steps):
     missing = []
     produced = produced_models(steps)
@@ -340,11 +450,15 @@ def stage_work(input_root: Path, work_root: Path, steps):
         else:
             link_or_copy(input_root / "sentences", work_root / "sentences")
         # models: stage only those NOT generated this run (steps 1-2 produce theirs) and
-        # actually present -- an absent optional checkpoint is simply not exported.
+        # actually present -- an absent optional checkpoint is simply not exported. The
+        # matching *_data/ TSVs come along so a reused bundle stays re-calibratable.
         for st in steps:
             for m in st["models"]:
                 if m not in produced and model_dir_ok(input_root / m):
                     link_or_copy(input_root / m, work_root / m)
+                    data = input_root / MODEL_DATA.get(m, "")
+                    if MODEL_DATA.get(m) and data.is_dir():
+                        link_or_copy(data, work_root / data.name)
     outs = list(OUT_DIRS) + (["sentences", "summaries"] if any(st["name"] == "sentences" for st in steps) else [])
     for d in outs:
         (work_root / d).mkdir(parents=True, exist_ok=True)
@@ -356,6 +470,10 @@ def main():
                     help="show the plan and exit")
     ap.add_argument("--steps", default=os.environ.get("NORM_STEPS"),
                     help="comma-separated subset of step names")
+    ap.add_argument("--retrain", action="store_true", default=bool(os.environ.get("NORM_RETRAIN")),
+                    help="run the training steps even when the four training dirs "
+                         "({ppi,biored}-biobert-re/ + {ppi,biored}_data/) are already complete "
+                         "in the input root (also env NORM_RETRAIN)")
     ap.add_argument("--re-args", default=os.environ.get("RE_PIPELINE_ARGS"),
                     help="extra args passed through to step 1 (run_re_pipeline.py), e.g. "
                          "--re-args \"--neg-ratio 2 --add-marker-tokens\" "
@@ -372,6 +490,15 @@ def main():
     if not steps:
         sys.exit(f"ERROR: no matching steps in {args.steps!r}. Valid: {', '.join(s['name'] for s in STEPS)}")
 
+    # The training gate needs the input root, so resolve it before the plan is final.
+    input_root = find_input_root(args.input_root)
+    forced_by = ", ".join(r for r in (
+        "--retrain" if args.retrain else "",
+        "--steps" if only and (only & set(TRAINING_STEPS)) else "",
+        "--re-args" if args.re_args else "",
+        "--biored-args" if args.biored_args else "") if r)
+    steps, gate_report = apply_training_gate(steps, input_root, forced_by)
+
     for flag, value, target in (("--re-args", args.re_args, "re_pipeline"),
                                 ("--biored-args", args.biored_args, "re_pipeline_biored")):
         if not value:
@@ -382,7 +509,6 @@ def main():
                      f"(it is excluded by --steps).")
         st["args"] = list(st["args"]) + shlex.split(value)
 
-    input_root = find_input_root(args.input_root)
     preflight(input_root, steps)
     work_root = resolve_work_root(args.work_root, input_root)
     if any(st["name"] == "sentences" for st in steps):
@@ -399,6 +525,8 @@ def main():
     print(f" work_root  : {work_root}" + ("  (in place)" if work_root == input_root else "  (staged)"))
     print(src_line)
     print(f" accelerator: {report_accelerator()}")
+    for line in gate_report:
+        print(line)
     print(f" steps      : {', '.join(s['name'] for s in steps)}")
     if args.re_args:
         print(f" re_args    : {args.re_args}  (-> step 1 run_re_pipeline.py)")

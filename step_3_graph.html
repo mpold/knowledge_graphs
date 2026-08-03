@@ -134,7 +134,7 @@ absent, that facet is simply empty (no year slider, no drug-target colouring, et
 <tr>
   <td><code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code></td>
   <td><span class='pill req'>required</span></td>
-  <td>bundle step&nbsp;15 (learned RE, normalized)</td>
+  <td>bundle step&nbsp;16 (learned RE, normalized)</td>
   <td>The scored + ID-normalized relation triples &mdash; the main universe. Each triple's
       <code>score</code>, <code>subject</code>/<code>object</code> (<code>hgnc_symbol</code>,
       <code>control</code>, <code>type</code>, <code>text</code>), <code>sentence</code>,
@@ -144,7 +144,7 @@ absent, that facet is simply empty (no year slider, no drug-target colouring, et
 <tr>
   <td><code>TRIPLES/triples.json</code></td>
   <td><span class='pill req'>required</span></td>
-  <td>bundle step&nbsp;12 (base rule triples)</td>
+  <td>bundle step&nbsp;13 (base rule triples)</td>
   <td>Supplies the set of sentences that contain a DISEASE or CHEMICAL entity (filter rule&nbsp;5), and
       the per-sentence disease labels used by the graph's disease filter (DISEASE entity <code>text</code>,
       mapped to MONDO below).</td>
@@ -152,13 +152,13 @@ absent, that facet is simply empty (no year slider, no drug-target colouring, et
 <tr>
   <td><code>databases/pmc_years.json</code></td>
   <td><span class='pill opt'>optional</span></td>
-  <td>bundle step&nbsp;14 (PMC&rarr;year)</td>
+  <td>bundle step&nbsp;15 (PMC&rarr;year)</td>
   <td>Maps each PMID to a publication year for the graph's year slider and per-sentence year labels. Absent &rarr; no year facet.</td>
 </tr>
 <tr>
   <td><code>CHEMICAL/chemical_to_target.json</code></td>
   <td><span class='pill opt'>optional</span></td>
-  <td>bundle step&nbsp;11 (target_pharm)</td>
+  <td>bundle step&nbsp;12 (target_pharm)</td>
   <td>Gene&rarr;corpus-chemicals with roles and the <code>in_corpus_GENETIC</code> flag. Sizes and colours
       drug-target nodes (green = DGIdb approved anti-neoplastic, amber = DGIdb approved other, pink = ChEBI-only)
       and populates the drug filter/search.</td>
@@ -166,20 +166,20 @@ absent, that facet is simply empty (no year slider, no drug-target colouring, et
 <tr>
   <td><code>DISEASE/disease.json</code></td>
   <td><span class='pill opt'>optional</span></td>
-  <td>bundle step&nbsp;7 (disease)</td>
+  <td>bundle step&nbsp;8 (disease)</td>
   <td>Disease surface &rarr; single MONDO label; feeds the sentence&rarr;disease map behind the disease filter.</td>
 </tr>
 <tr>
   <td><code>DISEASE/disease_ambiguous.json</code></td>
   <td><span class='pill opt'>optional</span></td>
-  <td>bundle step&nbsp;7 (disease)</td>
+  <td>bundle step&nbsp;8 (disease)</td>
   <td>Disease surface &rarr; list of MONDO labels (ambiguous surfaces); merged into the same disease map.
       Surfaces with no MONDO match fall back to their own text so the sentence still carries a disease facet.</td>
 </tr>
 <tr>
   <td><code>experimental_ner/*.xml</code> &nbsp;<span class='dim'>then</span>&nbsp; <code>sentences/*.json</code></td>
   <td><span class='pill opt'>optional</span></td>
-  <td>step&nbsp;1 corpus / bundle step&nbsp;2</td>
+  <td>step&nbsp;1 corpus / bundle step&nbsp;3</td>
   <td>Corpus size (number of source documents) for the &ldquo;N&nbsp;of&nbsp;M documents produced gene&ndash;gene
       interactions&rdquo; line. Counts XMLs first; if that dir is empty (as in the bundle), falls back to the
       per-document <code>sentences/</code> JSON count.</td>
