@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Step 1 orchestrator -- runs the publications pipeline in order.
 
-Executes the seven scripts of the Step 1 publications pipeline in the exact
+Executes the eight scripts of the Step 1 publications pipeline in the exact
 order given by section "1. Order of execution (data flow)" of
 ``step_1_publications.html``. Each stage consumes the files the previous one
 wrote; the whole thing turns one PubMed query into a de-duplicated, full-text
-corpus ready for named-entity recognition.
+corpus ready for named-entity recognition, then deletes the intermediate
+directories that produced it (step 8).
 
 The scripts are *not* run automatically by the docs because several reach the
 network (NCBI E-utilities, OpenAlex, CrossRef) and step 5 needs Docker + a
@@ -29,9 +30,12 @@ Usage
     # re-seed the archive contribution after a manual step 6
     python step_1_orchestrator.py --only 6b
 
+    # keep the intermediate directories (stop before the clean-up step)
+    python step_1_orchestrator.py --stop 7 "your pubmed query"
+
 Options
 -------
-    --start S     start from step S (1, 1b, 2 .. 6, 6b, 7) instead of step 1
+    --start S     start from step S (1, 1b, 2 .. 6, 6b, 7, 8) instead of step 1
     --stop  S     stop after step S
     --only  S     run only step S
     --archive D   local XML archive for steps 1b/6b (default: ../../xmls)
@@ -67,9 +71,19 @@ restore it from ``archive_xmls/``.
 
 Both are skipped automatically -- with a printed notice -- when the archive
 directory does not exist, so a checkout with no local archive still runs the
-plain seven-stage pipeline. Naming an archive explicitly (``--archive`` or the
+plain eight-stage pipeline. Naming an archive explicitly (``--archive`` or the
 ``ARCHIVE_DIR`` env var) makes a missing directory a hard error instead, since
 that is a typo rather than an absence. ``--no-archive`` skips them outright.
+
+The clean-up step (8)
+---------------------
+``clean_up.py`` runs last and deletes the five intermediate directories --
+``archive_xmls/``, ``grobid_xmls/``, ``high_impact_xmls/``,
+``named_entity_xmls/``, ``ncbi_pdfs_grobid/`` -- once the corpus is assembled.
+It leaves ``gpu_bundle/experimental_ner/``, ``pmids/`` and ``summaries/`` alone.
+Stop before it with ``--stop 7`` when you want to keep the intermediates (to
+re-run a middle stage by hand, say); ``DRY_RUN=1`` makes step 8 report what it
+would delete without deleting anything.
 """
 
 import os
@@ -79,8 +93,8 @@ import subprocess
 # Scripts in execution order (matches step_1_publications.html section 1).
 #
 # Steps are keyed by LABEL, not by position: from_archive.py runs twice, as "1b"
-# and "6b", so keeping the seven core stages numbered 1-7 means --start 4 still
-# means what it always did and the labels match the documentation.
+# and "6b", so keeping the core stages numbered 1-8 means --start 4 still means
+# what it always did and the labels match the documentation.
 PIPELINE = [
     ("1",  "pubmed_query.py",          "PubMed query (STDIN) -> pmids/pmid_pmc_ids.tsv"),
     ("1b", "from_archive.py",          "query result vs local archive -> experimental_ner/ + skip-list"),
@@ -91,6 +105,7 @@ PIPELINE = [
     ("6",  "named_entity_xml.py",      "grobid+high_impact -> gpu_bundle/experimental_ner/ (REBUILD)"),
     ("6b", "from_archive.py",          "archive_xmls/ -> experimental_ner/ (re-seed after the rebuild)"),
     ("7",  "pre_ner_xml_structure.py", "experimental_ner/ -> summaries/pre_ner_xml_structure.html"),
+    ("8",  "clean_up.py",              "REMOVES the five intermediate XML/PDF dirs (runs last)"),
 ]
 
 # Steps served by from_archive.py -- skipped together when there is no archive.
@@ -129,6 +144,9 @@ def print_list():
         print("  %-3s %-26s %s" % (key + ".", script, desc))
     print("\n  1b/6b are the same script (from_archive.py): 1b serves the query result")
     print("  from a local XML archive, 6b restores it after step 6 rebuilds the corpus.")
+    print("  8 (clean_up.py) deletes archive_xmls/, grobid_xmls/, high_impact_xmls/,")
+    print("  named_entity_xmls/ and ncbi_pdfs_grobid/ -- the corpus in")
+    print("  gpu_bundle/experimental_ner/, pmids/ and summaries/ are kept. --stop 7 skips it.")
 
 
 def get_query(cli_query):
@@ -189,7 +207,7 @@ def resolve_archive(cli_archive, no_archive, wanted):
     and got the path wrong, and silently downloading ~3 req/s instead is a poor
     way to find that out. An absent *default* archive is not an error at all: a
     fresh checkout simply has no local corpus, so 1b/6b are skipped with a notice
-    and the plain seven-stage pipeline runs.
+    and the plain eight-stage pipeline runs.
     """
     if not wanted:
         return None, True

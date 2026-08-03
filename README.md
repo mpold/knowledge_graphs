@@ -5,7 +5,7 @@ A biomedical relation-extraction pipeline: from a single **PubMed query** to an 
 
 | Stage | What | Where it runs | Entry point |
 |------:|------|---------------|-------------|
-| **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (9 stages over 8 root scripts) |
+| **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (10 stages over 9 root scripts) |
 | **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (18-step chain) |
 | **3** | Triples → high-confidence gene–gene **graph** | local | `high_confidence_g.py` |
 
@@ -40,8 +40,9 @@ python high_confidence_g.py --data-root kaggle_working
 
 **There is no single all-stage runner** — each stage has its own entry point and they hand off
 by files, because stage 2 almost always runs on different hardware than 1 and 3.
-`step_1_orchestrator.py` chains stage 1's nine steps and aborts on the first non-zero exit;
-run a sub-range with `--start` / `--stop` / `--only`.
+`step_1_orchestrator.py` chains stage 1's ten steps and aborts on the first non-zero exit;
+run a sub-range with `--start` / `--stop` / `--only`. Its last step (`clean_up.py`) **deletes** the
+intermediate XML/PDF directories once the corpus is built — `--stop 7` keeps them.
 
 > **Realistically, stage 2 runs on Kaggle**, not your laptop — it needs a CUDA GPU and the
 > large ontology databases. The typical flow is: **stage 1 locally → stage 2 on Kaggle →
@@ -66,12 +67,13 @@ Full details per script are in the `step_*.html` docs and `requirements.html`.
 ## The three stages
 
 ### Stage 1 — publications (local)
-Eight scripts in the bundle root, run as nine steps by `step_1_orchestrator.py`:
+Nine scripts in the bundle root, run as ten steps by `step_1_orchestrator.py`:
 `pubmed_query.py` **(1)** → `from_archive.py` **(1b)** → `high_impact_xml.py` **(2)** →
 `xml_structure.py` **(3)** → `ncbi_pdf.py` **(4)** → `grobid_xml.py` **(5)** →
-`named_entity_xml.py` **(6)** → `from_archive.py` **(6b)** → `pre_ner_xml_structure.py` **(7)**.
+`named_entity_xml.py` **(6)** → `from_archive.py` **(6b)** → `pre_ner_xml_structure.py` **(7)** →
+`clean_up.py` **(8)**.
 
-Steps are addressed by **label**, not position, so the seven core stages keep the numbers they
+Steps are addressed by **label**, not position, so the core stages keep the numbers they
 always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` slots in as 1b/6b.
 
 - Input: a PubMed query (read from **STDIN** by `pubmed_query.py`; the orchestrator's first
@@ -99,7 +101,7 @@ always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` 
   > `archive_xmls/`. It is idempotent — run it a third time and nothing changes.
 
   Steps 1b/6b are **skipped automatically, with a printed notice, when the archive directory does
-  not exist**, so a checkout with no local corpus still runs the plain seven-stage pipeline.
+  not exist**, so a checkout with no local corpus still runs the plain eight-stage pipeline.
   Naming one explicitly (`--archive` / `ARCHIVE_DIR`) that is missing is a hard error instead —
   that is a typo, not an absence. `--no-archive` skips them outright.
 - **Impact percentile prompt:** when `step_1_orchestrator.py` runs step 2 it prompts
@@ -118,7 +120,22 @@ always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` 
   Desktop + the container). It is skippable when every article already has JATS full text.
 - Output: the NER corpus `gpu_bundle/experimental_ner/PMC*.xml` — the **union** of the downloaded
   and archive-served papers, de-duplicated by PMC id. This is the input to stage 2.
-- **Optional — `subtract.py`** (not one of the nine, not run by the orchestrator): reads two
+- **Clean-up — `clean_up.py` (step 8, the last one).** Once the corpus exists and step 7 has
+  reported on it, the working directories are just bulk on disk (hundreds of MB of JATS XML, PDFs
+  and TEI that no later stage reads), so step 8 **deletes them and their contents**:
+  `archive_xmls/`, `grobid_xmls/`, `high_impact_xmls/`, `named_entity_xmls/`, `ncbi_pdfs_grobid/`.
+  It **never touches** `gpu_bundle/experimental_ner/` (the corpus), `pmids/` (the query result and
+  its resumable caches), `summaries/` (the HTML reports) or any script, and everything it removes
+  is reproducible from `pmids/pmid_pmc_ids.tsv` by re-running steps 2–6. The removal list is a
+  fixed literal of five names — nothing comes from arguments or the environment — and each must be
+  a real directory directly inside the bundle root, so a symlink or an out-of-tree path is refused
+  rather than followed. Absent directories are fine, so it is idempotent. `DRY_RUN=1` (or
+  `--dry-run`) reports files and bytes per directory without deleting; `KEEP=archive_xmls` (comma
+  separated) spares one; `--stop 7` skips the step entirely. Writes `summaries/clean_up.html`.
+  > **Re-running after a clean-up** starts from step 2 — the inputs of steps 3–6b are gone. The
+  > exception is `--only 6b`: `from_archive.py` re-copies the hit set out of the real archive
+  > (`ARCHIVE_DIR`), so it still works, it just pays the file copy again.
+- **Optional — `subtract.py`** (not one of the ten, not run by the orchestrator): reads two
   directory paths from **STDIN** and moves entries of `directory_1` whose names also appear in
   `directory_2` into `gpu_bundle/removed/` (relocated, not deleted; name collisions get a
   `_1`/`_2` suffix), writing `summaries/subtract_optional.html`. Handy for de-duplicating this
@@ -315,10 +332,11 @@ it is modified. Without one, stage 1 simply downloads everything.
 
 ```
 <parent_directory>/
-├── step_1_orchestrator.py     # stage 1 entry point (chains its 9 steps)
+├── step_1_orchestrator.py     # stage 1 entry point (chains its 10 steps)
 ├── requirements.txt           # local deps (stages 1 & 3): requests
 ├── pubmed_query.py … pre_ner_xml_structure.py   # stage 1: the 7 core publications scripts
 ├── from_archive.py            # stage 1: steps 1b/6b — serve the query from a local XML archive
+├── clean_up.py                # stage 1: step 8 — deletes the intermediate XML/PDF dirs (last)
 ├── subtract.py                # stage 1: optional dir-subtract utility (-> gpu_bundle/removed)
 ├── high_confidence_g.py       # stage 3: the graph (typed edges + --merge)
 ├── high_confidence.py         # stage 3: DEPRECATED "G_D_C" variant

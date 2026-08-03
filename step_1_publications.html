@@ -38,13 +38,14 @@
 <h1>Step 1 &mdash; publications pipeline</h1>
 <p class='meta'>Order of execution, inputs and outputs of the Python scripts in the
 <code>lung/</code> directory (top level only &mdash; the <code>gpu_bundle/</code> Kaggle pipeline is
-covered separately). The seven scripts form a single linear pipeline that turns one PubMed query
-into a de-duplicated, full-text corpus ready for named-entity recognition.</p>
+covered separately). The eight scripts form a single linear pipeline that turns one PubMed query
+into a de-duplicated, full-text corpus ready for named-entity recognition, then deletes the
+intermediate directories that produced it.</p>
 
 <div class='stat-grid'>
-  <div class='stat'><div class='v'>8</div><div class='k'>scripts in the pipeline (7 + <code>from_archive.py</code>)</div></div>
+  <div class='stat'><div class='v'>9</div><div class='k'>scripts in the pipeline (8 + <code>from_archive.py</code>)</div></div>
   <div class='stat'><div class='v'>2</div><div class='k'>STDIN inputs (PubMed query, impact percentile)</div></div>
-  <div class='stat'><div class='v'>8</div><div class='k'>HTML summaries produced</div></div>
+  <div class='stat'><div class='v'>9</div><div class='k'>HTML summaries produced</div></div>
   <div class='stat'><div class='v'>linear</div><div class='k'>each step feeds the next</div></div>
 </div>
 
@@ -55,8 +56,11 @@ and output directories it needs</strong> if they are missing, and (except <code>
 <strong>empties its bulk output directory before writing</strong> so each run starts clean &mdash;
 Python scripts are never deleted. Several stages reach the network (NCBI E-utilities, OpenAlex,
 CrossRef) or need Docker (GROBID), so they are <em>not</em> run automatically &mdash; run each yourself,
-or drive all seven in order with <code>step_1_orchestrator.py</code> (see section&nbsp;3), which still
-needs the same network and Docker access.</div>
+or drive them all in order with <code>step_1_orchestrator.py</code> (see section&nbsp;3), which still
+needs the same network and Docker access. The last step (<code>clean_up.py</code>) <strong>deletes</strong>
+the five intermediate directories once the corpus is assembled &mdash; the corpus itself
+(<code>gpu_bundle/experimental_ner/</code>), <code>pmids/</code> and <code>summaries/</code> are kept;
+run with <code>--stop 7</code> to keep the intermediates too.</div>
 
 <h2>1. Order of execution (data flow)</h2>
 <div class='flow'>
@@ -86,6 +90,9 @@ needs the same network and Docker access.</div>
   <div class='arrow'>&darr;&nbsp; gpu_bundle/experimental_ner/ <span class='dim'>(downloaded &cup; archive)</span></div>
   <div class='node'><span class='s'>7. pre_ner_xml_structure.py</span>
     <div class='io'>in: <code>gpu_bundle/experimental_ner/</code> &nbsp;&rarr;&nbsp; out: <code>summaries/pre_ner_xml_structure.html</code></div></div>
+  <div class='arrow'>&darr;&nbsp; corpus complete <span class='dim'>(the intermediates are now dead weight)</span></div>
+  <div class='node'><span class='s'>8. clean_up.py</span> <span class='pill'>deletes</span>
+    <div class='io'>in: &mdash; &nbsp;&rarr;&nbsp; <strong>removes</strong> <code>archive_xmls/</code>, <code>grobid_xmls/</code>, <code>high_impact_xmls/</code>, <code>named_entity_xmls/</code>, <code>ncbi_pdfs_grobid/</code>; out: <code>summaries/clean_up.html</code> <span class='dim'>(keeps <code>gpu_bundle/experimental_ner/</code>, <code>pmids/</code>, <code>summaries/</code>)</span></div></div>
   <div class='arrow'>&middot;&middot;&middot;&nbsp; optional &middot; run by hand</div>
   <div class='node opt'><span class='s'>opt. subtract.py</span> <span class='pill'>optional</span>
     <div class='io'>in: two directories (STDIN) &nbsp;&rarr;&nbsp; out: <code>gpu_bundle/removed/</code>, <code>summaries/subtract_optional.html</code></div></div>
@@ -95,7 +102,10 @@ files but identifies the no-<code>&lt;body&gt;</code> subset of <code>high_impac
 targets, so it is placed before <code>ncbi_pdf.py</code>. (<code>ncbi_pdf.py</code> also re-detects that
 subset itself, so it does not strictly depend on step 3 having run.) Step 5 (<code>grobid_xml.py</code>)
 is the only stage that <strong>keeps resume</strong> (it skips PDFs that already have TEI) rather than
-wiping its output dir; it is also skipped entirely when every article already has JATS full text.</p>
+wiping its output dir; it is also skipped entirely when every article already has JATS full text.
+Step 8 (<code>clean_up.py</code>) is the only stage that <strong>deletes</strong> anything permanently:
+it removes the five intermediate directories &mdash; hundreds of MB of JATS XML, PDFs and TEI that no
+later stage reads &mdash; after the corpus that stage&nbsp;2 consumes has been assembled and reported on.</p>
 
 <h2>2. Per-script inputs &amp; outputs</h2>
 <table>
@@ -205,6 +215,25 @@ wiping its output dir; it is also skipped entirely when every article already ha
       <code>&lt;div type&gt;</code>) &mdash; across the whole corpus.</td>
 </tr>
 <tr>
+  <td class='num'>8</td>
+  <td><code>clean_up.py</code> <span class='pill'>deletes</span></td>
+  <td>&mdash; <span class='dim'>(no input files; env: <code>DRY_RUN</code>=1 to report without deleting,
+      <code>KEEP</code>=comma-separated directory names to spare, e.g. <code>KEEP=archive_xmls</code>;
+      <code>--dry-run</code> does the same as the env var)</span></td>
+  <td><strong>removes</strong> <code>archive_xmls/</code>, <code>grobid_xmls/</code>,
+      <code>high_impact_xmls/</code>, <code>named_entity_xmls/</code>,
+      <code>ncbi_pdfs_grobid/</code><br><code>summaries/clean_up.html</code></td>
+  <td>Deletes the five intermediate directories and their contents once the corpus is built &mdash;
+      by step&nbsp;7 the deliverable is <code>gpu_bundle/experimental_ner/</code> and the working
+      directories are only bulk on disk. <strong>Never touches</strong>
+      <code>gpu_bundle/experimental_ner/</code>, <code>pmids/</code>, <code>summaries/</code> or any
+      script. The removal list is a fixed literal of five names &mdash; nothing is taken from arguments
+      or the environment &mdash; and each must be a real directory <em>directly inside the bundle
+      root</em>, so a symlink or an out-of-tree path is refused rather than followed. An already-absent
+      directory is not an error, so the step is idempotent. Reports files and bytes freed per
+      directory.</td>
+</tr>
+<tr>
   <td class='num'>opt</td>
   <td><code>subtract.py</code> <span class='pill'>optional</span></td>
   <td>Two directory paths read from <strong>STDIN</strong>
@@ -225,7 +254,7 @@ wiping its output dir; it is also skipped entirely when every article already ha
 <h2>3. How to run</h2>
 
 <h3>One command &mdash; the orchestrator</h3>
-<p><code>step_1_orchestrator.py</code> runs all nine stages &mdash; the seven core scripts plus
+<p><code>step_1_orchestrator.py</code> runs all ten stages &mdash; the eight core scripts plus
 <code>from_archive.py</code> at <strong>1b</strong> and <strong>6b</strong> &mdash; in the order above,
 in one process. It collects two inputs on <code>STDIN</code> up front &mdash; the <strong>PubMed
 query</strong> for step&nbsp;1, then the <strong>publication impact percentile</strong> for
@@ -233,10 +262,10 @@ step&nbsp;2 &mdash; and feeds each to the stage that consumes it. It <strong>abo
 stage exits non-zero</strong> (so a failed stage never silently poisons the next). Every path is
 script-relative, so it can be launched from any working directory.</p>
 <p>Steps are addressed by <strong>label</strong>, not position &mdash; <code>1</code>, <code>1b</code>,
-<code>2</code>&hellip;<code>6</code>, <code>6b</code>, <code>7</code> &mdash; so the seven core stages
-keep the numbers they always had (<code>--start 4</code> still resumes at <code>ncbi_pdf.py</code>).
+<code>2</code>&hellip;<code>6</code>, <code>6b</code>, <code>7</code>, <code>8</code> &mdash; so the core
+stages keep the numbers they always had (<code>--start 4</code> still resumes at <code>ncbi_pdf.py</code>).
 Steps&nbsp;1b/6b are <strong>skipped automatically, with a printed notice, when the archive directory
-does not exist</strong>, so a checkout with no local corpus still runs the plain seven-stage pipeline;
+does not exist</strong>, so a checkout with no local corpus still runs the plain eight-stage pipeline;
 naming one explicitly (<code>--archive</code> or <code>ARCHIVE_DIR</code>) that is missing is a hard
 error instead, since that is a typo rather than an absence. <code>--no-archive</code> skips them
 outright and downloads the whole selection.</p>
@@ -256,7 +285,10 @@ python step_1_orchestrator.py --archive /path/to/xmls "your pubmed query"
 python step_1_orchestrator.py --no-archive "your pubmed query"
 
 # re-seed the archive contribution after re-running step 6 by hand
-python step_1_orchestrator.py --only 6b</pre>
+python step_1_orchestrator.py --only 6b
+
+# keep the intermediate directories (stop before the step 8 clean-up)
+python step_1_orchestrator.py --stop 7 "your pubmed query"</pre>
 <p class='dim'>The orchestrator prompts for the percentile on its own dedicated line <em>after</em> the
 query and hands it to <code>high_impact_xml.py</code> on that script's STDIN. Enter a decimal between
 0 and 1 (e.g. <code>0.90</code> = top 10% by article-weighted impact factor); a <strong>blank line</strong>
@@ -293,7 +325,19 @@ the network stages still reach out and step&nbsp;5 still needs Docker + GROBID.<
       <code>gpu_bundle/experimental_ner/</code>, so re-run this to restore the archive contribution
       from <code>archive_xmls/</code>. Cheap and idempotent.</span></li>
   <li><span class='step-no'>7</span><code>python pre_ner_xml_structure.py</code></li>
+  <li><span class='step-no'>8</span><code>python clean_up.py</code> <span class='pill'>deletes</span>
+      <span class='dim'>&mdash; removes <code>archive_xmls/</code>, <code>grobid_xmls/</code>,
+      <code>high_impact_xmls/</code>, <code>named_entity_xmls/</code> and
+      <code>ncbi_pdfs_grobid/</code> with their contents. <code>DRY_RUN=1</code> (or
+      <code>--dry-run</code>) reports what would go without deleting;
+      <code>KEEP=archive_xmls</code> spares one. Skip it to keep the intermediates.</span></li>
 </ol>
+<p class='dim'><strong>After the clean-up</strong> the inputs of steps&nbsp;3&ndash;6b are gone, so a later
+re-run resumes from step&nbsp;2 &mdash; with one exception: <code>--only 6b</code> still works, because
+<code>from_archive.py</code> re-copies the hit set out of the real archive
+(<code>ARCHIVE_DIR</code>) rather than out of the deleted <code>archive_xmls/</code> staging copy; it
+just pays the file copy again. <code>KEEP=archive_xmls</code> preserves the staging copy if you
+re-seed often.</p>
 <div class='key'><strong>Where <code>from_archive.py</code> pays off.</strong> It turns the expensive part
 of the pipeline &mdash; one eFetch per article at ~3&nbsp;req/s &mdash; into a local file copy for every
 publication already held in the archive, and the skip-list guarantees no paper is fetched twice. On the
@@ -301,7 +345,7 @@ lung large-cell run, 309 of the 331 PMC-bearing hits (93.4%) came from <code>../
 were downloaded. The corpus that reaches step&nbsp;7 is the <strong>union</strong> of the two sources,
 de-duplicated by PMC id.</div>
 <p class='dim'><strong>Optional &mdash; <code>subtract.py</code></strong> <span class='pill'>optional</span>: not one
-of the seven and <em>not</em> chained by the orchestrator. Run it by hand to remove from one directory the
+of the eight and <em>not</em> chained by the orchestrator. Run it by hand to remove from one directory the
 entries whose names also appear in another. It reads the two directory paths on <code>STDIN</code>
 (<code>directory_1</code> first, <code>directory_2</code> second), moves the overlap into
 <code>gpu_bundle/removed/</code>, and writes <code>summaries/subtract_optional.html</code>:</p>
@@ -315,31 +359,46 @@ python subtract.py</pre>
 services (NCBI E-utilities, OpenAlex, CrossRef) and step 5 needs a running GROBID container. Set
 <code>NCBI_API_KEY</code> to lift the 3&nbsp;req/s rate limit. Each run starts clean (the bulk output
 dir is emptied before writing) <em>except</em> <code>grobid_xml.py</code>, which resumes; bound the
-network stages with <code>TIME_BUDGET</code> if needed.</div>
+network stages with <code>TIME_BUDGET</code> if needed. <strong>Step&nbsp;8 deletes</strong> the five
+intermediate directories &mdash; everything re-downloadable, and the corpus, <code>pmids/</code> and
+<code>summaries/</code> are kept &mdash; so run <code>--stop 7</code> (or <code>DRY_RUN=1
+python clean_up.py</code>) if you want to inspect them first.</div>
 
 <h2>4. Notes</h2>
 <ul>
   <li><strong>Single linear pipeline.</strong> The output directory of each step is the input of the
       next: <code>pmids/</code> &rarr; <code>high_impact_xmls/</code> &rarr; <code>ncbi_pdfs_grobid/</code>
-      &rarr; <code>grobid_xmls/</code> &rarr; <code>named_entity_xmls/</code> &rarr; <code>gpu_bundle/experimental_ner/</code>.</li>
+      &rarr; <code>grobid_xmls/</code> &rarr; <code>named_entity_xmls/</code> &rarr; <code>gpu_bundle/experimental_ner/</code>
+      &mdash; after which step&nbsp;8 removes every link of that chain except the last.</li>
   <li><strong>All paths are script-relative.</strong> Each script resolves inputs/outputs from its own
       location, so it can be run from any working directory (and a copied tree runs in isolation).</li>
   <li><strong>Directories are auto-created.</strong> Every script creates the input and output
       directories it needs if they are missing; file-based inputs (e.g. <code>pmid_pmc_ids.tsv</code>)
       must still be produced by the previous stage.</li>
-  <li><strong>Seven self-contained HTML summaries</strong> land in <code>summaries/</code>, each named
+  <li><strong>Eight self-contained HTML summaries</strong> land in <code>summaries/</code>, each named
       after its script (<code>pubmed_query.html</code>, <code>high_impact_xml.html</code>,
       <code>xml_structure.html</code>, <code>ncbi_pdf.html</code>, <code>grobid_xml.html</code>,
-      <code>named_entity_xml.html</code>, <code>pre_ner_xml_structure.html</code>).</li>
+      <code>named_entity_xml.html</code>, <code>pre_ner_xml_structure.html</code>,
+      <code>clean_up.html</code>) &mdash; plus <code>from_archive.html</code> when steps&nbsp;1b/6b run.
+      <code>summaries/</code> survives the step&nbsp;8 clean-up.</li>
   <li><strong>Hand-off to step 2.</strong> The assembled NER corpus in <code>gpu_bundle/experimental_ner/</code>
       is the input to the GPU bundle (<code>gpu_bundle/gpu.py</code>); see step&nbsp;2.</li>
-  <li><strong>Orchestrator, not a stage.</strong> <code>step_1_orchestrator.py</code> only chains the seven
+  <li><strong>Clean-up is the last step, not a stage of the data flow.</strong> <code>clean_up.py</code>
+      (step&nbsp;8) produces no corpus: it deletes <code>archive_xmls/</code>, <code>grobid_xmls/</code>,
+      <code>high_impact_xmls/</code>, <code>named_entity_xmls/</code> and <code>ncbi_pdfs_grobid/</code>
+      once the corpus is assembled and reported on, and keeps
+      <code>gpu_bundle/experimental_ner/</code>, <code>pmids/</code>, <code>summaries/</code> and every
+      script. Everything it removes is reproducible from <code>pmids/pmid_pmc_ids.tsv</code> by re-running
+      steps&nbsp;2&ndash;6. It is idempotent (absent directories are fine), refuses anything that is not a
+      plain directory in the bundle root, and supports <code>DRY_RUN=1</code> / <code>--dry-run</code> and
+      <code>KEEP=<em>name[,name]</em></code>.</li>
+  <li><strong>Orchestrator, not a stage.</strong> <code>step_1_orchestrator.py</code> only chains the eight
       scripts in order (feeding the query to step&nbsp;1 and the impact percentile to step&nbsp;2 on
       <code>STDIN</code>, aborting on the first non-zero exit); it produces no corpus or summary of its
       own and can be run partially with
       <code>--start</code>/<code>--stop</code>/<code>--only</code>. It does not relax any per-stage
       requirement &mdash; the network stages and step&nbsp;5's GROBID container are still needed.</li>
-  <li><strong>Optional cleanup utility.</strong> <code>subtract.py</code> is <em>not</em> one of the seven
+  <li><strong>Optional cleanup utility.</strong> <code>subtract.py</code> is <em>not</em> one of the eight
       and is <em>not</em> run by the orchestrator: run it by hand when needed. It moves entries of
       <code>directory_1</code> whose name also appears in <code>directory_2</code> into
       <code>gpu_bundle/removed/</code> (relocated, not deleted) and writes an eighth, conditional summary
