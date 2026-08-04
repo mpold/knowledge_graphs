@@ -751,6 +751,10 @@ __LIBTAG__
  <div class="row legend"><span class="sw" style="background:#2e9e5b"></span>activates <span class="sw" style="background:#e0533d"></span>inhibits <span class="sw" style="background:#3b7dd8"></span>binds <span class="sw" style="background:#6b3fa0"></span>interacts <span class="sw" style="background:#8a8f98"></span>associated <span class="sw" style="background:#d59a2e"></span>negated</div>
  <div class="row mut">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction and relation; hover for the per-sentence labels.</div>
  <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
+ <div class="row">Min unique publications: <b id="mpv">1</b><br><input id="minpub" type="range" min="1" max="10" value="1">
+  <div class="mut">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
+ <div class="row">Font size: <b id="fsv">100%</b><br><input id="fscale" type="range" min="20" max="100" step="5" value="100" aria-label="Label font size">
+  <div class="mut">Shrinks every drawn label by the same factor, keeping the size ranking (busy genes stay the biggest). Relabels in place &mdash; the layout is not recomputed.</div></div>
  <div class="row">Min cluster size: <select id="mincluster"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
  <div class="row">Min connections: <select id="mindeg"><option selected>1</option><option>2</option><option>3</option><option>4</option></select><div class="mut">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe.</div></div>
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
@@ -762,7 +766,7 @@ __LIBTAG__
   <div class="mut">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence.</div></div>
 __KINDROW__
  <div class="row mut">Relation type <span class="mut">(as predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed)</span>:</div><div id="catfilters"></div>
- <div class="row mut">Counts read <em>total &middot; in view</em>: the total is every edge of that type in the file, &ldquo;in view&rdquo; is how many survive the current score, year, text, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
+ <div class="row mut">Counts read <em>total &middot; in view</em>: the total is every edge of that type in the file, &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
  <div class="row mut">Training set behind the edge:</div>
  <div class="row" id="srcbtns"></div>
  <div class="row mut" id="srchint">Which corpus the relation was learned from &mdash; <b>PPI-only</b> = found by the BioInfer/PPI model alone, <b>BioRED-only</b> = by the BioRED model alone (typed and often signed), <b>both</b> = the two agreed a relation is there. Edges here can carry several sentences from different models; an edge counts as &ldquo;both&rdquo; if any of its support is corroborated.</div>
@@ -804,7 +808,7 @@ function buildSrcButtons(){
    +'run step&nbsp;2 with both models (<code>--route-mode additive</code>) to split them.';
 }
 function activeKinds(){const b=[...document.querySelectorAll('.kindf')];return b.length?new Set(b.filter(c=>c.checked).map(c=>c.value)):null;}
-const net=document.getElementById('net'); let network=null;
+const net=document.getElementById('net'); let network=null, NODEDS=null;
 // Labels fade in as you zoom: small graphs always show every symbol; dense views reveal labels as the
 // zoom scale climbs from LABEL_LO to LABEL_HI. Opacity is driven through the shared node-font colour, so
 // one setOptions call recolours all labels (per-node font carries only size, inheriting this colour).
@@ -857,6 +861,13 @@ function relTag(s){return s.rc?' <span class=mut style="color:'+(CCOLOR[s.rc]||'
 function edgeTip(e,vis){const d=document.createElement('div');let h=edgeHead(e,vis);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span>'+relTag(s)+' '+hl(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
 function fontSize(c){return c<5?13:2*Math.max(13,Math.min(Math.round(c*2.2),48));}
+// Label size is a per-node property (a busy gene is drawn larger), so the slider is a single
+// multiplier on top of fontSize(): every label shrinks by the same factor and the size ranking
+// survives. The base size rides along on each node as _fs, which is what lets the slider relabel
+// the existing DataSet instead of rebuilding -- a rebuild would re-run the layout.
+let FSCALE=1;
+function activeFontScale(){const el=document.getElementById('fscale');const v=el?parseInt(el.value):100;return (isNaN(v)?100:v)/100;}
+function scaledFont(b){return Math.max(4,Math.round(b*FSCALE));}
 // Which node kinds have their NAME DRAWN on the canvas. Disease and chemical names are long,
 // repeat across many edges and out-shout the gene symbols simply by being wordy, so those
 // nodes are drawn unlabelled -- shape and colour say what they are, and the name is one hover
@@ -866,12 +877,13 @@ const LABEL_KINDS=new Set(['gene']);
 function nodeLabel(n){return LABEL_KINDS.has(n.kind||'gene')?n.label:'';}
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?2:v;}
 function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?1:v;}
+function activeMinPub(){const v=parseInt((document.getElementById('minpub')||{}).value);return isNaN(v)?1:v;}
 function build(thr){
- const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree();
+ const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
  const txt=activeText(), tm=textMatcher(txt); TM=tm;
  const kinds=activeKinds();
  let edges=[];
- DATA.edges.forEach(e=>{ if(!cats.has(e.cat))return; if(SRC_MODE!=='all'&&(e.src||'ppi')!==SRC_MODE)return; if(kinds&&!(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to])))return; const vis=visSents(e,conf,ylo,yhi,tm); if(vis.length>=thr) edges.push({e:e,vis:vis,w:vis.length}); });
+ DATA.edges.forEach(e=>{ if(!cats.has(e.cat))return; if(SRC_MODE!=='all'&&(e.src||'ppi')!==SRC_MODE)return; if(kinds&&!(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to])))return; const vis=visSents(e,conf,ylo,yhi,tm); if(vis.length<thr)return; if(mp>1&&new Set(vis.map(s=>s.pmid)).size<mp)return; edges.push({e:e,vis:vis,w:vis.length}); });
  const gf=(document.getElementById('genefilter').value||'').trim().toLowerCase();
  const chemSel=document.getElementById('chemfilter').value;
  let focusActive=false, focusLabel='';
@@ -906,12 +918,13 @@ function build(thr){
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  const nsz=id=>(nss[id]?nss[id].size:0);
  const allCatsSel=[...new Set(DATA.edges.map(e=>e.cat))].every(c=>cats.has(c));
- const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),font:{size:fontSize(nsz(n.id))}}));
+ const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),_fs:fontSize(nsz(n.id)),font:{size:scaledFont(fontSize(nsz(n.id)))}}));
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,value:o.w,width:Math.min(1+o.w*0.7,10),color:{color:o.e.color,opacity:0.6},dashes:!!o.e.neg,title:edgeTip(o.e,o.vis)}));
  const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
  document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size>1?'nodes':'genes')+', <b>'+eds.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'');
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
+ NODEDS=data.nodes;
  const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
  network=new vis.Network(net,data,options);
@@ -938,6 +951,11 @@ function updateCatCounts(edges,cats){const seen={};edges.forEach(o=>seen[o.e.cat
   el.textContent=cats.has(c)?('('+CATTOT[c]+' · '+(seen[c]||0)+' in view)'):('('+CATTOT[c]+' · off)');
   el.style.color=(cats.has(c)&&!seen[c])?'#b3243b':'';});}
 thr.addEventListener('input',()=>{document.getElementById('thv').textContent=thr.value;build(+thr.value);});
+const mpb=document.getElementById('minpub');
+mpb.addEventListener('input',()=>{document.getElementById('mpv').textContent=mpb.value;build(+thr.value);});
+const fsc=document.getElementById('fscale');
+fsc.addEventListener('input',()=>{FSCALE=activeFontScale();document.getElementById('fsv').textContent=Math.round(FSCALE*100)+'%';
+ if(NODEDS)NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:{size:scaledFont(n._fs||13)}})));});
 const mcl=document.getElementById('mincluster');
 mcl.addEventListener('change',()=>build(+thr.value));
 document.getElementById('mindeg').addEventListener('change',()=>build(+thr.value));
