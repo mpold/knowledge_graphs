@@ -34,14 +34,48 @@ name it but no model claimed a relation. Never coloured like a prediction.
 whether disease and drug names are drawn (gene symbols always are); *Shrink periphery* and
 *Expand center*, two radial reshapers that pull in outlying clusters or thin the crowded core
 without reordering anything; tissue stacking, which pools same-tissue disease nodes onto one
-overlapping spot; the co-mention picker; zoom/fit; and the details box, headed *Sentences of
-interest*, which lists an edge's sentences with linked PMIDs when you click it.
+overlapping spot; the co-mention picker; zoom/fit; *Significance in view*; and the details box,
+headed *Sentences of interest*, which lists an edge's sentences with linked PMIDs when you click
+it. Each section's explanation is behind a small round **i** beside its heading.
 
 **Right column — what is in the picture.** Support thresholds (min unique sentences, min unique
 publications); label font size; structural pruning (min cluster size, min connections); gene and
 drug search; focus-on-gene with 1 or 2 hops; drug filter; free-text sentence match (substring, or
 `/regex/` when wrapped in slashes); node-type, relation-type and training-set filters; the score
 slider — 0.5 to 0.95 in steps of 0.05, then 0.96 to 0.99 — and a live stats line.
+
+## Significance in view
+
+The graph shows which relations survive the filters; this ranks the **nodes** behind them, for
+genes or for drugs. It is computed from the drawn edge list and recomputed on every redraw, so it
+always describes the picture in front of you: open every filter and it reads as the corpus,
+narrow them and it answers the same question of a slice. Co-mention links are excluded, since
+this counts relations.
+
+Three measures, chosen from a dropdown:
+
+- **publications** — distinct papers behind the node's relations; the measure edge thickness
+  uses, and the one a single talkative paper cannot inflate
+- **partners** — distinct entities it is related to: breadth, not weight
+- **sentences** — unique sentences supporting those relations
+
+They disagree, which is the point of offering all three. Wide open, EGFR leads on publications
+(882) while MALAT1 sits seventh — but MALAT1 is second on partners (674) and leads on sentences
+(3253), and at score ≥0.99 it tops the publications list outright, because its evidence scores
+unusually high.
+
+Each row carries **z**: standard deviations above the mean on a log₁₀ scale, computed among the
+node's own kind, since a gene is only remarkable among genes. The percentile is available too
+(hover a row, or read the table) but it saturates — every member of a top six reads 99.9%, while
+z still separates them (EGFR +6.3, CDH1 +5.6).
+
+**Full table view** replaces the canvas with the whole ranking: every node of that kind, all
+three counts, percentile, z and a bar, sortable by any column, with its own year handles and
+kind/measure dropdowns that mirror the panel's. Click a row to centre that node in the graph; if
+the filters have removed it, the details box says so rather than moving the view. When drugs are
+selected, both views state that the list mixes clinically used drugs with lab chemicals used only
+in experiments — ChEBI recognises both, so LY294002 ranks among the leaders and has never been
+given to a patient.
 
 ## How filtering works
 

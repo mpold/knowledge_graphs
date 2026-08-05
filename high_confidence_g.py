@@ -65,7 +65,8 @@ two scripts can be run against the same data root without clobbering each other'
     (mondo_label / chebi_label), giving gene-disease / chemical-gene / chemical-disease /
     chemical-chemical edges. Node hygiene reuses the pipeline's own annotations: control
     (genes), phenotype (DISEASE/disease.json) and non_chemical (CHEMICAL/chemical.json),
-    plus DISEASE_IGNORE for labels too generic to be a useful node. Outputs take an "_M"
+    plus DISEASE_IGNORE for labels too generic to be a useful node and CHEMICAL_IGNORE for
+    chemicals that are not compounds under study. Outputs take an "_M"
     suffix so they never clobber the "_G" ones, node shape encodes the type (gene dot /
     disease diamond / chemical square), a "Node type" filter appears in the panel, and the
     score slider opens at >=0.8 (most gene-disease edges sit in 0.5-0.8, so the gene-only
@@ -160,6 +161,19 @@ NODE_STYLE = {                                   # kind -> vis shape + default c
 #   os        a SURFACE: "OS" is overall survival, a metric the NER mislabels as DISEASE.
 #             It never appears as a MONDO label, so a label-only check would never fire.
 DISEASE_IGNORE = {"neoplasm", "cancer", "os"}
+
+# Chemical surfaces/labels that ChEBI resolves correctly but that are not COMPOUNDS UNDER STUDY,
+# and so do not belong in a list the panel calls "drugs".
+#   tyrosine  an amino acid, and in this corpus never a treatment: its 43 edges come from
+#             "tyrosine phosphorylation", "phosphorylation at tyrosine 759", "tyrosine kinase"
+#             -- the residue being named, which the NER hands over as a CHEMICAL mention.
+#   glucose   87 edges of culture condition and metabolism: "under low glucose", "glucose
+#             starvation", "glucose-induced up-regulation", "gene sets of glucose metabolism".
+#             The cells' medium, not an agent anyone administered.
+# The match is exact on the surface or the ChEBI label, so the compounds that merely contain
+# these names survive: "tyrosine kinase inhibitor", "O(4)-phosphotyrosine", "2-deoxy-D-glucose"
+# (a real glycolysis inhibitor) all stay nodes.
+CHEMICAL_IGNORE = {"tyrosine", "glucose"}
 
 # Ambiguous disease surfaces whose normalization is wrong FOR THIS CORPUS: the mention is
 # real, only the mapping is off, so overriding beats ignoring. Keys lowercase surfaces; the
@@ -445,6 +459,8 @@ def node_of(e, flags):
         s = single(e.get("chebi_label"))
         if not s or flags["non_chemical"].get(txt) == "yes":
             return None
+        if txt in CHEMICAL_IGNORE or s.strip().lower() in CHEMICAL_IGNORE:
+            return None
         return ("chemical", s.strip())
     return None
 
@@ -484,9 +500,12 @@ def node_drop_report(triples, flags, top=8):
                 else:
                     drops["disease: phenotype flag"] += 1
             elif typ == "CHEMICAL":
-                if not single(e.get("chebi_label")):
+                clbl = single(e.get("chebi_label"))
+                if not clbl:
                     drops["chemical: no ChEBI id"] += 1
                     unnorm[f"CHEMICAL {txt}"] += 1
+                elif key in CHEMICAL_IGNORE or clbl.strip().lower() in CHEMICAL_IGNORE:
+                    drops["chemical: not a compound under study (CHEMICAL_IGNORE)"] += 1
                 else:
                     drops["chemical: non_chemical flag"] += 1
     out = [f"  nodes kept: {', '.join(f'{k} {c:,}' for k, c in kept.most_common())}"]
@@ -736,9 +755,42 @@ __LIBTAG__
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
  #catfilters .cnt{color:#5b6677;font-size:11px}
+ #siglist{margin-top:5px}
+ #siglist .sig{display:flex;align-items:center;gap:6px;padding:1px 2px;font-size:12px;cursor:pointer;border-radius:3px}
+ #siglist .sig:hover{background:#eef2f7}
+ #siglist .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ #siglist .vl{width:52px;text-align:right;color:#5b6677;font-variant-numeric:tabular-nums;font-size:11px}
+ #siglist .vl b{color:#1c2330}
+ #siglist .pc{width:40px;text-align:right;color:#2b6cb0;font-size:11px;font-variant-numeric:tabular-nums}
+ #sighdr{font-size:11px;color:#5b6677;text-align:right;margin-top:5px}
+ #sigtab{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:12px}
+ #sigtab:hover{background:#dde4ee}
+ /* the table is a NON-GRAPH view: it covers the canvas and both panels rather than floating
+    over them, so nothing competes with it while you read */
+ #sigtable{display:none;position:absolute;top:0;left:0;right:0;bottom:0;z-index:20;background:#fff;overflow:auto;padding:16px 20px}
+ #sigtable.open{display:block}
+ #sigtable h2{font-size:15px;margin:0 0 2px;color:#1c2330}
+ #sigtable table{border-collapse:collapse;font-size:13px;margin-top:10px;min-width:620px}
+ #sigtable th,#sigtable td{padding:3px 10px;border-bottom:1px solid #e9edf3;text-align:right;font-variant-numeric:tabular-nums}
+ #sigtable th{position:sticky;top:0;background:#fff;color:#2b6cb0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #cdd5e0}
+ #sigtable th.on{font-weight:700;text-decoration:underline}
+ #sigtable td.nm,#sigtable th.nm{text-align:left}
+ #sigtable tbody tr{cursor:pointer}
+ #sigtable tbody tr:hover{background:#eef2f7}
+ #sigyr{margin:10px 0 2px;font-size:13px}
+ /* the bars live here now: a table row has the width for them, a 320px panel row does not */
+ #sigtable td.bar{width:190px;padding-right:0}
+ #sigtable td.bar span{display:block;height:9px;background:#2b6cb0;border-radius:3px;min-width:1px}
+ #sigclose{margin-left:14px;background:#eef2f7;border:1px solid #cdd5e0;border-radius:6px;padding:3px 12px;cursor:pointer;font-size:13px}
+ #sigclose:hover{background:#dde4ee}
+ #sighelp2{max-width:640px}
  #zoom button,#srcbtns button,#labelbtns button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
  #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button{margin-bottom:4px}
+ /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
+    carry a trailing margin -- 6px of it would push Fit onto a second line */
+ #zoom button:last-child{margin-right:0}
+ #comention{width:100%}
  #srcbtns button.on,#labelbtns button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  #srcbtns button:disabled{opacity:.45;cursor:default}
  .vis-tooltip{max-width:480px!important;white-space:normal!important;background:#fff!important;color:#1a1a1a!important;border:1px solid #999!important;border-radius:8px!important;padding:8px 10px!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;font:12px/1.45 Segoe UI,Arial,sans-serif!important}
@@ -771,6 +823,14 @@ __LIBTAG__
  <div class="row" id="cmrow">Co-mention links: <button class="ihelp" aria-label="About co-mention links" aria-expanded="false">i</button><br><select id="comention"><option value="">(off)</option></select>
   <div class="mut help">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
+ <div class="row" id="sigrow">Significance in view <button class="ihelp" aria-label="About significance in view" aria-expanded="false">i</button><br>
+  <select id="sigkind"><option value="gene">genes</option><option value="chemical">drugs</option></select>
+  <select id="sigmeasure"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
+  <div class="mut" id="signote" style="display:none"></div>
+  <div id="sighdr">publications &nbsp;&nbsp;z</div>
+  <div id="siglist"></div>
+  <button id="sigtab">Full table view</button>
+  <div class="mut help" id="sighelp">The top six of whatever the graph is <em>currently drawing</em>: every control reshapes this too &mdash; score, year, text, node and relation type, training set, the support thresholds and the structural pruning &mdash; and it is recomputed on every redraw, so the ranking and the picture can never disagree. Widen the filters to read it as the corpus; narrow them to ask the same question of a slice. Co-mention links are excluded, since this counts relations. <b>Publications</b> counts the distinct papers behind a node's relations &mdash; the measure the edge thicknesses use; <b>partners</b> counts the distinct entities it is related to (breadth, not weight); <b>sentences</b> counts the unique sentences supporting them. The second column is <b>z</b>: standard deviations above the mean on a log&#8321;&#8320; scale, <em>among its own kind</em>, since a gene is only remarkable among genes. The percentile is there too (hover a row), but it saturates &mdash; every one of a top six reads 99.9%, while z still separates them. Click a row to select and centre that node; if the current filters have removed it, the details box says so rather than moving the view. <b>Full table view</b> opens the whole ranking &mdash; every node of that kind, all three counts, both statistics and a bar, sortable by any column, with its own year handles.</div></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
 <div id="panel">
@@ -800,6 +860,15 @@ __KINDROW__
  <div class="row mut" id="stats"></div>
 </div>
 <div id="net"></div>
+<div id="sigtable"><h2 id="sigttl"></h2><div class="mut" id="sigsub"></div>
+ <div class="mut" id="signote2" style="display:none"></div>
+ <div id="sigyr" class="row"><select id="sigkind2"><option value="gene">genes</option><option value="chemical">drugs</option></select>
+  <select id="sigmeasure2"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
+  &nbsp; Year: <b id="yrlab2"></b> <input id="yrlo2" type="range" style="width:120px"> <input id="yrhi2" type="range" style="width:120px">
+  <button id="sigclose">Close</button>
+  <button class="ihelp" data-help="sig" aria-label="About significance in view" aria-expanded="false">i</button>
+  <div class="mut help" data-help="sig" id="sighelp2"></div></div>
+ <div id="sigtbody"></div></div>
 <script>
 const DATA=__PAYLOAD__;
 const CCOLOR=__CCOLOR__;
@@ -1191,6 +1260,9 @@ function build(thr){
    network.fit({animation:false});LABEL_A=-1;updateLabels();network.redraw();});
  network.on('zoom',updateLabels);
  network.on('animationFinished',updateLabels);
+ // the ranking rides on the same edge list that was just drawn, so the two can never disagree
+ sigCompute(edges);sigRender();
+ if(SIGTAB_OPEN)sigTable();
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
@@ -1258,6 +1330,160 @@ document.getElementById('hops').addEventListener('change',()=>build(+thr.value))
 const txtEl=document.getElementById('textfilter');let txtTimer=null;   // debounce: each keystroke would otherwise rebuild the whole network
 txtEl.addEventListener('input',()=>{clearTimeout(txtTimer);txtTimer=setTimeout(()=>build(+thr.value),350);});
 txtEl.addEventListener('keydown',ev=>{if(ev.key==='Enter'){clearTimeout(txtTimer);build(+thr.value);}});
+// --- significance in view ----------------------------------------------------------------
+// The graph shows which relations survive your filters; this ranks the NODES behind them, so
+// you can ask "and who carries this view" without counting edges by eye. It is computed from
+// the drawn edge list on every redraw -- open every filter and it reads as the corpus, narrow
+// them and it answers the same question of a slice.
+//   publications = distinct papers behind the node's relations (what edge thickness uses)
+//   partners     = distinct entities it is related to -- breadth, not weight
+//   sentences    = unique sentences supporting those relations
+// Publications leads because it is the one that cannot be inflated by a single talkative paper.
+// Computed from the edges the graph is actually DRAWING, so the ranking is always an answer
+// about the picture in front of you: every control that shapes the graph -- score, year, text,
+// relation type, training set, node type, the support thresholds and the structural pruning --
+// reshapes this too, and build() recomputes it on every pass. Co-mention links are excluded:
+// they are co-occurrence, and this counts relations.
+let SIG=[];
+function sigCompute(drawn){
+ const acc={};
+ const touch=id=>acc[id]||(acc[id]={id:id,label:labelById[id]||id,kind:KIND[id]||'gene',
+                                    pubs:new Set(),partners:new Set(),sents:new Set()});
+ (drawn||[]).forEach(o=>{
+  const a=touch(o.e.from),b=touch(o.e.to);
+  a.partners.add(o.e.to);b.partners.add(o.e.from);
+  o.vis.forEach(s=>{a.pubs.add(s.pmid);b.pubs.add(s.pmid);a.sents.add(s.text);b.sents.add(s.text);});
+ });
+ SIG=Object.keys(acc).map(id=>{const n=acc[id];
+   return {id:id,label:n.label,kind:n.kind,pub:n.pubs.size,deg:n.partners.size,sent:n.sents.size};});
+ sigStats();
+}
+// Two statistics per node, per measure, computed within its own kind -- a gene is only
+// remarkable among genes. PERCENTILE is a mid-rank over the whole corpus (ties share their
+// rank), which needs no assumption about the distribution; this one is brutally heavy-tailed,
+// so a mean would be meaningless. Z is on log10 counts, where the tail is closer to symmetric,
+// and answers the other question: not "how many below you" but "how far out".
+function sigStats(){
+ ['gene','disease','chemical'].forEach(k=>{
+  const rows=SIG.filter(s=>s.kind===k), n=rows.length;
+  if(!n)return;
+  ['pub','deg','sent'].forEach(m=>{
+   const vals=rows.map(s=>s[m]).sort((a,b)=>a-b);
+   const lg=rows.map(s=>Math.log10(Math.max(1,s[m])));
+   const mu=lg.reduce((a,b)=>a+b,0)/n;
+   const sd=Math.sqrt(lg.reduce((a,b)=>a+(b-mu)*(b-mu),0)/n)||1;
+   const bound=(v,inc)=>{let lo=0,hi=n;while(lo<hi){const mid=(lo+hi)>>1;
+     if(inc?vals[mid]<=v:vals[mid]<v)lo=mid+1;else hi=mid;}return lo;};
+   rows.forEach(s=>{const b=bound(s[m],false),e=bound(s[m],true);
+    (s.pct=s.pct||{})[m]=100*(b+(e-b)/2)/n;
+    (s.z=s.z||{})[m]=(Math.log10(Math.max(1,s[m]))-mu)/sd;});
+  });
+ });
+}
+function pctStr(p){return (p>=99.95?'99.9':p.toFixed(1))+'%';}
+function zStr(z){return (z>=0?'+':'')+z.toFixed(1);}
+const SIG_TOP=6;                       // a teaser in the panel; the full ranking is the table
+const SIG_LAB={pub:'publications',deg:'partners',sent:'sentences'};
+// The chemical nodes are whatever ChEBI recognised in the text, which mixes therapeutics with
+// reagents -- LY294002 ranks high here and has never been in a patient. Say so wherever the
+// drug list is on screen, rather than leaving the reader to spot it.
+const SIG_DRUGNOTE='The list contains both (1) clinically used drugs and (2) lab chemicals used only in experiments.';
+function sigNote(id,kind){const el=document.getElementById(id);if(!el)return;
+ el.innerHTML=kind==='chemical'?SIG_DRUGNOTE:'';
+ el.style.display=kind==='chemical'?'':'none';}
+let SIG_ROWS=[];
+function sigRender(){
+ const kind=(document.getElementById('sigkind')||{}).value||'gene';
+ const meas=(document.getElementById('sigmeasure')||{}).value||'pub';
+ SIG_ROWS=SIG.filter(s=>s.kind===kind).sort((a,b)=>(b[meas]-a[meas])||a.label.localeCompare(b.label)).slice(0,SIG_TOP);
+ document.getElementById('siglist').innerHTML=SIG_ROWS.map((s,i)=>
+   '<div class="sig" data-i="'+i+'" title="'+esc(s.label)+' &mdash; '+s.pub+' publications &middot; '
+   +s.deg+' partners &middot; '+s.sent+' sentences (corpus-wide) &middot; percentile '+pctStr(s.pct[meas])
+   +' &middot; z '+zStr(s.z[meas])+' among '+s.kind+'s">'
+   +'<span class=nm>'+(i+1)+'. '+esc(s.label)+'</span>'
+   // one number, the ranked measure -- the other two are a column click away in the table
+   +'<span class=vl>'+s[meas]+'</span>'
+   // z, not the percentile: every one of a top-6 sits at 99.9%, while z still separates them
+   +'<span class=pc>'+zStr(s.z[meas])+'</span></div>').join('')
+   ||'<div class=mut>no '+esc(kind)+' nodes in this graph</div>';
+ const hdr=document.getElementById('sighdr');
+ if(hdr)hdr.innerHTML=SIG_LAB[meas]+' &nbsp;&nbsp;z';
+ sigNote('signote',kind);
+ document.querySelectorAll('#siglist .sig').forEach(el=>
+   el.addEventListener('click',()=>sigFocus(SIG_ROWS[parseInt(el.getAttribute('data-i'))])));
+}
+// select and centre the node; a node the current filters removed reports that instead of
+// silently doing nothing (or worse, moving the view to where it is not)
+function sigFocus(s){
+ if(!s)return;
+ const info=document.getElementById('info');
+ const head='<b>'+esc(s.label)+'</b> <span class=mut>(corpus-wide: '+s.pub+' publications &middot; '
+   +s.deg+' partners &middot; '+s.sent+' sentences)</span>';
+ try{network.selectNodes([s.id]);network.focus(s.id,{scale:1.3,animation:true});info.innerHTML=head;}
+ catch(err){info.innerHTML=head+'<div class=mut>Not in the current view &mdash; loosen the filters to see it.</div>';}
+}
+// Two pairs of selects, one range: the panel's are the source of truth and the table's mirror
+// them, so switching to drugs inside the table leaves the panel showing drugs when you close it.
+function sigSync(fromTable){
+ const k=document.getElementById('sigkind'), m=document.getElementById('sigmeasure');
+ const k2=document.getElementById('sigkind2'), m2=document.getElementById('sigmeasure2');
+ if(fromTable&&k2){k.value=k2.value;m.value=m2.value;}
+ else if(k2){k2.value=k.value;m2.value=m.value;}
+ SIGTAB_SORT=null;                      // the ranking changed; drop a column sort from before it
+ sigRender();
+ if(SIGTAB_OPEN)sigTable();
+}
+['sigkind','sigmeasure'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('change',()=>sigSync(false));});
+['sigkind2','sigmeasure2'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('change',()=>sigSync(true));});
+// NB: the first sigCompute() runs with the year sliders, below -- before they carry values
+// activeYears() is NaN and every sentence falls outside the window
+// --- table view -------------------------------------------------------------------------
+// The panel list is a top-15 teaser; this is the whole ranking, every node of the kind with
+// all three counts and both statistics, sortable by any column. It replaces the canvas rather
+// than floating over it -- reading a table and reading a graph are different jobs.
+let SIGTAB_OPEN=false, SIGTAB_SORT=null, SIGTAB_ROWS=[];
+const SIGCOLS=[['nm','node',s=>esc(s.label)],['pub','publications',s=>s.pub],['deg','partners',s=>s.deg],
+               ['sent','sentences',s=>s.sent],['pct','percentile',s=>pctStr(s.pct[sigMeas()])],
+               ['z','z (log₁₀)',s=>zStr(s.z[sigMeas()])],['bar','',null]];
+function sigKind(){return (document.getElementById('sigkind')||{}).value||'gene';}
+function sigMeas(){return (document.getElementById('sigmeasure')||{}).value||'pub';}
+function sigTable(){
+ const kind=sigKind(), meas=SIGTAB_SORT||sigMeas();
+ SIGTAB_ROWS=SIG.filter(s=>s.kind===kind).sort((a,b)=>
+   meas==='nm'?a.label.localeCompare(b.label):((b[meas]!==undefined?b[meas]:b.pct[sigMeas()])-(a[meas]!==undefined?a[meas]:a.pct[sigMeas()]))||a.label.localeCompare(b.label));
+ const KL={gene:'genes',chemical:'drugs',disease:'diseases'};
+ document.getElementById('sigttl').innerHTML='Significance in view &mdash; '+(KL[kind]||kind);
+ const yr=activeYears();
+ document.getElementById('sigsub').innerHTML=SIGTAB_ROWS.length+' '+(KL[kind]||kind)+' in the graph as currently drawn &mdash; <b>'
+  +yr[0]+'&ndash;'+yr[1]+'</b>, score &ge;'+activeConf()+', and every other filter in force. '
+  +'Percentile and z are computed among those '+(KL[kind]||kind)+' for <b>'+
+  ({pub:'publications',deg:'partners',sent:'sentences'}[sigMeas()])+'</b>; click a heading to sort, a row to centre that node in the graph.';
+ sigNote('signote2',kind);
+ // the bar column tracks whatever the table is sorted by, scaled to the leading row
+ const bmeas=(meas==='nm'||meas==='pct'||meas==='z')?sigMeas():meas;
+ const bmax=Math.max(1,...SIGTAB_ROWS.map(s=>s[bmeas]));
+ const head='<tr>'+SIGCOLS.map(([k,lab])=>'<th class="'+(k==='nm'?'nm':k)+(k===meas?' on':'')+'" data-k="'+k+'">'+lab+'</th>').join('')+'</tr>';
+ const body=SIGTAB_ROWS.map((s,i)=>'<tr data-i="'+i+'">'+SIGCOLS.map(([k,lab,f])=>
+   k==='bar'?'<td class=bar><span style="width:'+Math.max(1,Math.round(100*s[bmeas]/bmax))+'%"></span></td>'
+   :'<td class="'+(k==='nm'?'nm':'')+'">'+(k==='nm'?(i+1)+'. '+f(s):f(s))+'</td>').join('')+'</tr>').join('');
+ document.getElementById('sigtbody').innerHTML='<table><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
+ document.querySelectorAll('#sigtbody th').forEach(th=>th.addEventListener('click',()=>{
+   SIGTAB_SORT=th.getAttribute('data-k');sigTable();}));
+ document.querySelectorAll('#sigtbody tbody tr').forEach(tr=>tr.addEventListener('click',()=>{
+   sigClose();sigFocus(SIGTAB_ROWS[parseInt(tr.getAttribute('data-i'))]);}));
+}
+function sigOpen(){SIGTAB_OPEN=true;SIGTAB_SORT=null;
+ const k2=document.getElementById('sigkind2'),m2=document.getElementById('sigmeasure2');
+ if(k2){k2.value=sigKind();m2.value=sigMeas();}   // open showing what the panel was showing
+ sigTable();document.getElementById('sigtable').classList.add('open');}
+function sigClose(){SIGTAB_OPEN=false;document.getElementById('sigtable').classList.remove('open');}
+// one source for the explanation: the panel's copy is authored in the template, the table's is
+// filled from it at load, so the two can never drift apart
+(function(){const a=document.getElementById('sighelp'),b=document.getElementById('sighelp2');
+ if(a&&b)b.innerHTML=a.innerHTML;})();
+document.getElementById('sigtab').addEventListener('click',sigOpen);
+document.getElementById('sigclose').addEventListener('click',sigClose);
+document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&SIGTAB_OPEN)sigClose();});
 const searchBox=document.getElementById('search');
 function doSearch(q){q=(q||'').trim();const info=document.getElementById('info');if(!q)return;const hit=DATA.nodes.find(n=>n.label.toLowerCase()===q.toLowerCase())||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(q.toLowerCase())===0);if(!hit){info.innerHTML='No gene matching "'+q+'"';return;}try{network.selectNodes([hit.id]);network.focus(hit.id,{scale:1.3,animation:true});info.innerHTML='<b>'+hit.label+'</b>';}catch(e){info.innerHTML='<b>'+hit.label+'</b> not in current view';}}
 searchBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')doSearch(searchBox.value);});
@@ -1266,12 +1492,24 @@ function zoomBy(f){if(!network)return;const s=network.getScale();network.moveTo(
 document.getElementById('zin').addEventListener('click',()=>zoomBy(1.25));
 document.getElementById('zout').addEventListener('click',()=>zoomBy(0.8));
 document.getElementById('zfit').addEventListener('click',()=>{if(network)network.fit({animation:true});});
+// Two pairs of year handles -- one in the panel, one in the table view -- driving one range.
+// Whichever you drag, the other follows, the ranking is recomputed for the new window, and the
+// graph rebuilds; the table redraws only while it is open.
 const yl=document.getElementById('yrlo'),yh=document.getElementById('yrhi');
-[yl,yh].forEach(el=>{el.min=MINY;el.max=MAXY;});yl.value=MINY;yh.value=MAXY;
-function updYr(){const a=activeYears();document.getElementById('yrlab').textContent=a[0]+'–'+a[1];}
-updYr();
-yl.addEventListener('input',()=>{updYr();build(+thr.value);});
-yh.addEventListener('input',()=>{updYr();build(+thr.value);});
+const yl2=document.getElementById('yrlo2'),yh2=document.getElementById('yrhi2');
+[yl,yh,yl2,yh2].forEach(el=>{if(el){el.min=MINY;el.max=MAXY;}});
+yl.value=MINY;yh.value=MAXY;if(yl2){yl2.value=MINY;yh2.value=MAXY;}
+function updYr(){const a=activeYears(),t=a[0]+'–'+a[1];
+ ['yrlab','yrlab2'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=t;});}
+function yearChanged(fromTable){
+ if(fromTable){yl.value=yl2.value;yh.value=yh2.value;}
+ else if(yl2){yl2.value=yl.value;yh2.value=yh.value;}
+ updYr();
+ build(+thr.value);                 // build() recomputes the ranking and redraws the table
+}
+[yl,yh].forEach(el=>el.addEventListener('input',()=>yearChanged(false)));
+[yl2,yh2].forEach(el=>{if(el)el.addEventListener('input',()=>yearChanged(true));});
+updYr();   // the ranking follows from build(), which runs once at the end of this script
 const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
 // disease list for the co-mention picker; the gene-only graph has none, so the row hides itself
 (function(){const sel=document.getElementById('comention');const ds=DATA.nodes.filter(n=>(n.kind||'gene')==='disease').sort((a,b)=>a.label.localeCompare(b.label));
@@ -1288,7 +1526,23 @@ const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]
  ds.forEach(n=>{const o=document.createElement('option');o.value=n.id;o.textContent=n.label;sel.appendChild(o);});
  sel.addEventListener('change',()=>build(+thr.value));})();
 const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
-window.addEventListener('resize',()=>{if(network)network.redraw();});
+// The left panel is exactly as wide as its zoom row: measured at runtime rather than guessed in
+// CSS, because the buttons' width depends on the font that actually resolved. Fit's right edge
+// then lands on the content edge, so the gap to the border is the padding -- the same gap the
+// "genes" select has on the left. Skipped on narrow screens, where the media query takes over.
+function fitLeftPanel(){
+ const lp=document.getElementById('lpanel'), z=document.getElementById('zoom');
+ if(!lp||!z)return;
+ if(window.innerWidth<=700||lp.style.display==='none'){lp.style.width='';return;}
+ const b=z.getElementsByTagName?z.getElementsByTagName('button'):[];
+ if(!b.length||!b[0].getBoundingClientRect)return;   // nothing measurable: keep the CSS width
+ const w=Math.ceil(b[b.length-1].getBoundingClientRect().right-b[0].getBoundingClientRect().left);
+ if(w<=0)return;                       // not laid out yet (hidden panel): leave the CSS width
+ lp.style.maxWidth='none';
+ lp.style.width=w+'px';                // content-box: the padding stays outside this, as the gap
+}
+fitLeftPanel();
+window.addEventListener('resize',()=>{fitLeftPanel();if(network)network.redraw();});
 document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
 // gene-only runs hide every row the left column holds; an empty white box is worse than none
 (function(){const lp=document.getElementById('lpanel');
