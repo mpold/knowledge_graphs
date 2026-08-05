@@ -750,8 +750,8 @@ __LIBTAG__
  <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
  <div class="row">Min unique publications: <b id="mpv">1</b><br><input id="minpub" type="range" min="1" max="10" value="1">
   <div class="mut">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
- <div class="row">Font size: <b id="fsv">100%</b><br><input id="fscale" type="range" min="20" max="100" step="5" value="100" aria-label="Label font size">
-  <div class="mut">Shrinks every drawn label by the same factor, keeping the size ranking (busy genes stay the biggest). Relabels in place &mdash; the layout is not recomputed.</div></div>
+ <div class="row">Font size: <b id="fsv">50%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="50" aria-label="Label font size">
+  <div class="mut">Scales every drawn label by the same factor, keeping the size ranking (busy genes stay the biggest). <b>50%</b> is the built-in size; the scale runs to 100%, which is twice that. Relabels in place &mdash; the layout is not recomputed.</div></div>
  <div class="row">Min cluster size: <select id="mincluster"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
  <div class="row">Min connections: <select id="mindeg"><option selected>1</option><option>2</option><option>3</option><option>4</option></select><div class="mut">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe.</div></div>
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
@@ -761,6 +761,8 @@ __LIBTAG__
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
  <div class="row">Match text in sentence:<br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
   <div class="mut">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
+ <div class="row" id="tissuerow"><label><input type=checkbox id="tissuestack" checked> Stack same-tissue diseases</label>
+  <div class="mut">Drops the disease nodes naming one tissue onto a single spot, overlapping, so <em>lung cancer</em>, <em>lung adenocarcinoma</em> and <em>non-small cell lung carcinoma</em> read as one place on the canvas instead of three. They stay separate nodes with their own edges and tooltips &mdash; only their positions are pooled, after the layout settles. Tissue is read from the name (<span id="tissuen"></span>).</div></div>
  <div class="row" id="cmrow">Co-mention links:<br><select id="comention"><option value="">(off)</option></select>
   <div class="mut">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
 __KINDROW__
@@ -923,6 +925,43 @@ function cmTip(link,dis){
  d.innerHTML=h;return d;
 }
 function activeComention(){return (document.getElementById('comention')||{}).value||'';}
+// --- same-tissue disease stacking ------------------------------------------------------
+// One tissue is spread over many disease nodes -- 22 of them name the lung here, carrying 4196
+// connections between them -- because the corpus says "lung cancer" where it means NSCLC and
+// vice versa. Merging them would be a claim about ontology this script has no business making,
+// so instead their POSITIONS are pooled: same tissue, same spot, overlapping. Each keeps its own
+// edges, size and tooltip; only the layout is touched, and only after it has settled.
+// Tissue is read off the label. \b in front of "renal" is what keeps adrenal out of the kidney.
+const TISSUE_RULES=[['lung',/\b(lung|pulmonary|nsclc|sclc|bronch|pleural)/i],
+ ['breast',/\b(breast|mammary)/i],['liver',/\b(liver|hepat)/i],['stomach',/\b(gastric|stomach)/i],
+ ['colon',/\b(colorect|colon|rectal|bowel|intestin)/i],['prostate',/\bprostat/i],
+ ['brain',/\b(brain|glio|astrocyt|neuroblast|medulloblast|cerebr|meningi)/i],['pancreas',/\bpancrea/i],
+ ['ovary',/\bovari/i],['kidney',/\b(renal|kidney|nephro)/i],['thyroid',/\bthyroid/i],
+ ['skin',/\b(melanom|skin|cutaneous)/i],['esophagus',/\b(esophag|oesophag)/i],
+ ['bladder',/\b(bladder|urothelial)/i],['cervix',/\bcervi/i],['uterus',/\b(uterine|endometri)/i],
+ ['blood',/\b(leukemi|lymphom|myelom|myeloid|myelodysplas|marrow)/i],   // marrow before bone: it is haematopoietic
+ ['head/neck',/\b(head and neck|nasopharyng|laryn|oral|tongue)/i],['bone',/\b(osteo|bone)/i],
+ ['heart',/\b(cardiac|cardio|myocard|heart)/i]];
+function tissueOf(label){for(const [t,re] of TISSUE_RULES)if(re.test(label||''))return t;return '';}
+function activeTissueStack(){const el=document.getElementById('tissuestack');return el?!!el.checked:true;}
+// drawn disease nodes that share a tissue, two or more of them -- nothing else is worth moving
+function tissueGroups(nodes){
+ const by={};
+ nodes.forEach(n=>{if(KIND[n.id]!=='disease')return;const t=tissueOf(labelById[n.id]||n.id);if(t)(by[t]=by[t]||[]).push(n.id);});
+ return Object.keys(by).filter(t=>by[t].length>1).map(t=>({tissue:t,ids:by[t]}));
+}
+// pool each group onto its own centre: a ring tight enough that the discs overlap, wide enough
+// that every node stays individually clickable
+function stackTissues(net,groups){
+ groups.forEach(g=>{
+  const pos=net.getPositions(g.ids);let x=0,y=0,n=0;
+  g.ids.forEach(id=>{const p=pos[id];if(p){x+=p.x;y+=p.y;n++;}});
+  if(!n)return;
+  x/=n;y/=n;
+  const R=Math.min(30,8+g.ids.length*0.6);
+  g.ids.forEach((id,k)=>{const a=2*Math.PI*k/g.ids.length;net.moveNode(id,x+R*Math.cos(a),y+R*Math.sin(a));});
+ });
+}
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
 function fontSize(c){return c<5?13:2*Math.max(13,Math.min(Math.round(c*2.2),48));}
 // Label size is a per-node property (a busy gene is drawn larger), so the slider is a single
@@ -930,7 +969,11 @@ function fontSize(c){return c<5?13:2*Math.max(13,Math.min(Math.round(c*2.2),48))
 // survives. The base size rides along on each node as _fs, which is what lets the slider relabel
 // the existing DataSet instead of rebuilding -- a rebuild would re-run the layout.
 let FSCALE=1;
-function activeFontScale(){const el=document.getElementById('fscale');const v=el?parseInt(el.value):100;return (isNaN(v)?100:v)/100;}
+// FS_BASE: the slider reading that means "the size fontSize() computed". Everything above it
+// enlarges, so the old ceiling (the built-in size) now sits mid-scale at 50% and the slider
+// runs to twice that. The divisor -- not the range -- is what fixes where 1.0x lands.
+const FS_BASE=50;
+function activeFontScale(){const el=document.getElementById('fscale');const v=el?parseInt(el.value):FS_BASE;return (isNaN(v)?FS_BASE:v)/FS_BASE;}
 function scaledFont(b){return Math.max(4,Math.round(b*FSCALE));}
 // Which node kinds have their NAME DRAWN on the canvas. Disease and chemical names are long,
 // repeat across many edges and out-shout the gene symbols simply by being wordy, so those
@@ -966,7 +1009,21 @@ function build(thr){
  // fell under min-cluster: an empty canvas from a query with thousands of hits. So support is
  // measured text-blind here; the lens comes further down, and only min-connections/min-cluster
  // are re-judged on what it leaves (they describe the picture, so they have to).
- DATA.edges.forEach(e=>{ if(kinds&&!(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to])))return; const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return; if(mp>1&&new Set(sup.map(s=>s.pmid)).size<mp)return; edges.push({e:e,sup:sup,vis:sup,w:sup.length,cat:viewCat(e,sup)}); });
+ // Some node types have no relations OF THEIR OWN: the RE routing pairs a disease with a gene
+ // or a chemical, never with another disease, so ticking disease alone can never draw an edge
+ // and the canvas went blank. When the ticked types admit no edge anywhere in the file, the
+ // nodes are drawn on their own instead -- each one that still has evidence through a partner
+ // of an unticked type -- so a disease-only view shows the disease landscape (sized by
+ // evidence, pooled by tissue) rather than nothing. `orphan` collects that evidence as we go.
+ let kindOK=false; const orphan={};
+ DATA.edges.forEach(e=>{
+   const kf=!kinds||(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to]));
+   if(kf)kindOK=true;
+   const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
+   if(mp>1&&new Set(sup.map(s=>s.pmid)).size<mp)return;
+   if(kf){edges.push({e:e,sup:sup,vis:sup,w:sup.length,cat:viewCat(e,sup)});return;}
+   if(kinds)[e.from,e.to].forEach(nd=>{if(kinds.has(KIND[nd]))(orphan[nd]=orphan[nd]||[]).push(...sup);});
+ });
  const gf=(document.getElementById('genefilter').value||'').trim().toLowerCase();
  const chemSel=document.getElementById('chemfilter').value;
  let focusActive=false, focusLabel='', focusSeeds=null, focusHops=1;
@@ -1022,7 +1079,14 @@ function build(thr){
  const keep=new Set();edges.forEach(o=>{keep.add(o.e.from);keep.add(o.e.to);});
  if(cmLinks.length)keep.add(cmDis);   // the disease itself may have no surviving relation edge
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
- const nsz=id=>(nss[id]?nss[id].size:0);
+ // the edgeless fallback, sized by the same measure as everything else: unique sentences in view
+ const isoSz={}, isoPub=new Set();
+ if(kinds&&!kindOK)Object.keys(orphan).forEach(nd=>{
+   const t=new Set(),p=new Set();
+   orphan[nd].forEach(s=>{if(!tm||tm.test(s.text)){t.add(s.text);p.add(s.pmid);}});
+   if(t.size){isoSz[nd]=t.size;keep.add(nd);p.forEach(x=>isoPub.add(x));}});
+ const nIso=Object.keys(isoSz).length;
+ const nsz=id=>(nss[id]?nss[id].size:(isoSz[id]||0));
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),_fs:fontSize(nsz(n.id)),font:{size:scaledFont(fontSize(nsz(n.id)))}}));
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,value:o.w,width:Math.min(1+o.w*0.7,10),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,title:edgeTip(o.e,o.vis,o.cat)}));
  // undirected and unarrowed: a shared sentence has no subject and object
@@ -1030,16 +1094,23 @@ function build(thr){
  cmLinks.forEach((L,k)=>{const id='cm'+k;_cm[id]=L;
    eds.push({id:id,from:L.nd,to:cmDis,width:1,dashes:[3,4],color:{color:'#9aa4b2',opacity:0.45},
              arrows:{to:{enabled:false}},title:cmTip(L,cmDis)});});
- const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
+ const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));isoPub.forEach(p=>vpub.add(p));
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size>1?'nodes':'genes')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(cmLinks.length?' &middot; <b>'+cmLinks.length+'</b> co-mention links to <b>'+esc(labelById[cmDis]||cmDis)+'</b>':'');
+ // name what is actually on screen: "378 diseases" beats "378 genes" in a disease-only view
+ const KLAB={gene:'genes',disease:'diseases',chemical:'chemicals'};
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(nIso?' &middot; <b>'+nIso+'</b> drawn unconnected: nothing in the corpus relates these node types to each other':'')+(cmLinks.length?' &middot; <b>'+cmLinks.length+'</b> co-mention links to <b>'+esc(labelById[cmDis]||cmDis)+'</b>':'');
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  NODEDS=data.nodes;
  const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
  network=new vis.Network(net,data,options);
  LABEL_N=nodes.length; LABEL_A=-1;
- network.on('stabilizationIterationsDone',()=>{network.setOptions({physics:false});network.fit({animation:false});LABEL_A=-1;updateLabels();network.redraw();});
+ // stack once physics is off, so nothing pulls the pooled nodes apart again, and fit afterwards
+ // so the moved positions are inside the view
+ const tgroups=activeTissueStack()?tissueGroups(nodes):[];
+ network.on('stabilizationIterationsDone',()=>{network.setOptions({physics:false});
+   if(tgroups.length)stackTissues(network,tgroups);
+   network.fit({animation:false});LABEL_A=-1;updateLabels();network.redraw();});
  network.on('zoom',updateLabels);
  network.on('animationFinished',updateLabels);
  const _e=edges;
@@ -1072,7 +1143,7 @@ thr.addEventListener('input',()=>{document.getElementById('thv').textContent=thr
 const mpb=document.getElementById('minpub');
 mpb.addEventListener('input',()=>{document.getElementById('mpv').textContent=mpb.value;build(+thr.value);});
 const fsc=document.getElementById('fscale');
-fsc.addEventListener('input',()=>{FSCALE=activeFontScale();document.getElementById('fsv').textContent=Math.round(FSCALE*100)+'%';
+fsc.addEventListener('input',()=>{FSCALE=activeFontScale();document.getElementById('fsv').textContent=fsc.value+'%';
  if(NODEDS)NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:{size:scaledFont(n._fs||13)}})));});
 const mcl=document.getElementById('mincluster');
 mcl.addEventListener('change',()=>build(+thr.value));
@@ -1101,7 +1172,15 @@ yh.addEventListener('input',()=>{updYr();build(+thr.value);});
 const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
 // disease list for the co-mention picker; the gene-only graph has none, so the row hides itself
 (function(){const sel=document.getElementById('comention');const ds=DATA.nodes.filter(n=>(n.kind||'gene')==='disease').sort((a,b)=>a.label.localeCompare(b.label));
- if(!ds.length){const r=document.getElementById('cmrow');if(r)r.style.display='none';return;}
+ const trow=document.getElementById('tissuerow');
+ if(!ds.length){const r=document.getElementById('cmrow');if(r)r.style.display='none';if(trow)trow.style.display='none';return;}
+ // say up front how much of the disease list the name-based tissue reading actually covers
+ const tg={};ds.forEach(n=>{const t=tissueOf(n.label);if(t)(tg[t]=tg[t]||[]).push(n.label);});
+ const multi=Object.keys(tg).filter(t=>tg[t].length>1);
+ const hit=multi.reduce((s,t)=>s+tg[t].length,0);
+ const el=document.getElementById('tissuen');
+ if(el)el.textContent=hit+' of '+ds.length+' disease nodes fall into '+multi.length+' tissues; the rest are left where the layout puts them';
+ document.getElementById('tissuestack').addEventListener('change',()=>build(+thr.value));
  ds.forEach(n=>{const o=document.createElement('option');o.value=n.id;o.textContent=n.label;sel.appendChild(o);});
  sel.addEventListener('change',()=>build(+thr.value));})();
 const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
@@ -1127,7 +1206,11 @@ KIND_ROW = (' <div class="row mut">Node type:</div>\n'
             ' <div class="row mut">Shapes: gene &#9679; &middot; disease &#9670; &middot; chemical &#9632;. '
             'Only <b>gene</b> names are drawn on the canvas &mdash; disease and chemical names are long '
             'and would bury the symbols, so <b>hover</b> (or click) those nodes to read them. '
-            'An edge is shown only when BOTH its endpoint types are ticked.</div>')
+            'An edge is shown only when BOTH its endpoint types are ticked &mdash; and where the '
+            'ticked types have no relations at all between them (nothing in the corpus relates a '
+            '<b>disease</b> to a disease), the nodes are drawn on their own instead of leaving a '
+            'blank canvas: every one that still has evidence through a partner you unticked, '
+            'sized by that evidence and pooled by tissue.</div>')
 
 
 def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query="", multi=False):
