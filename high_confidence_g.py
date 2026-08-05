@@ -746,6 +746,9 @@ __LIBTAG__
  .pm{display:inline-block;background:#eef3fb;color:#2b6cb0;border-radius:4px;padding:0 5px;margin-right:5px;font-weight:600;font-size:11px;text-decoration:none}
  a.pm:hover{background:#d6e6fb;text-decoration:underline} .more{margin-top:5px;color:#888;font-style:italic}
  #info{max-height:240px;overflow:auto} #info .stip{border-top:1px solid #e3e3e3}
+ /* the details box is 12px prose; its heading takes the panel's normal size so the block reads
+    as a section rather than as more small print */
+ #info .ihead{font-size:14px;color:#1c2330;margin-bottom:4px}
  /* one screen, two columns is a desktop luxury: on a phone they stack, one at each edge */
  @media (max-width:700px){
   #panel,#lpanel{left:12px;right:12px;max-width:none;max-height:42vh;overflow:auto}
@@ -788,7 +791,7 @@ __LIBTAG__
 __KINDROW__
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
- <div class="row mut help" data-help="rel">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels.</div>
+ <div class="row mut help" data-help="rel">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels. Thickness and arrowhead size follow the number of <b>independent publications</b> behind the edge, not its sentence count &mdash; one paper repeating itself never thickens a line.</div>
  <div class="row mut help" data-help="rel">Counts read <em>total &middot; in view</em>: the total is every edge in the file carrying at least one sentence of that type (an edge with mixed readings counts under each, so the totals exceed the edge count), &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
  <div class="row">Training set behind the edge <button class="ihelp" data-help="src" aria-label="About training sets" aria-expanded="false">i</button></div>
  <div class="row" id="srcbtns"></div>
@@ -1018,6 +1021,18 @@ function stackTissues(net,groups){
   g.ids.forEach((id,k)=>{const a=2*Math.PI*k/g.ids.length;net.moveNode(id,x+R*Math.cos(a),y+R*Math.sin(a));});
  });
 }
+// Edge weight = INDEPENDENT PUBLICATIONS, not sentences: one paper restating a finding five
+// times must not draw a line five times heavier than five papers agreeing once each. 11,025 of
+// this corpus's 31,149 edges carry more sentences than papers, so the two measures differ for a
+// third of the graph. Square-rooted because the distribution is brutally skewed -- 89% of edges
+// rest on a single publication and the heaviest on 269 -- and capped so one hub cannot draw a
+// band across the canvas. The arrowhead grows with the same measure, so direction stays legible
+// on the thick edges instead of being swallowed by them.
+function edgeWidth(np){return Math.min(1+2.0*Math.sqrt(Math.max(0,np-1)),12);}
+function arrowScale(np){return Math.min(0.5+0.18*Math.sqrt(Math.max(0,np-1)),1.6);}
+// heads the details box whenever it lists sentences -- above the "A -> B" line, not in the
+// hover tooltip, which is transient and already framed by the edge you are pointing at
+const INFO_HEAD='<div class="ihead">Sentences of interest</div>';
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
 function fontSize(c){return c<5?13:2*Math.max(13,Math.min(Math.round(c*2.2),48));}
 // Label size is a per-node property (a busy gene is drawn larger), so the slider is a single
@@ -1080,8 +1095,9 @@ function build(thr){
    const kf=!kinds||(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to]));
    if(kf)kindOK=true;
    const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
-   if(mp>1&&new Set(sup.map(s=>s.pmid)).size<mp)return;
-   if(kf){edges.push({e:e,sup:sup,vis:sup,w:sup.length,cat:viewCat(e,sup)});return;}
+   const np=new Set(sup.map(s=>s.pmid)).size;
+   if(mp>1&&np<mp)return;
+   if(kf){edges.push({e:e,sup:sup,vis:sup,w:sup.length,np:np,cat:viewCat(e,sup)});return;}
    if(kinds)[e.from,e.to].forEach(nd=>{if(kinds.has(KIND[nd]))(orphan[nd]=orphan[nd]||[]).push(...sup);});
  });
  const gf=(document.getElementById('genefilter').value||'').trim().toLowerCase();
@@ -1097,7 +1113,7 @@ function build(thr){
    focusLabel=labs.join(', ');
  }
  // the lens: keep the edges that still say the word, and show those sentences only
- if(tm)edges=edges.filter(o=>{const v=o.sup.filter(s=>tm.test(s.text));if(!v.length)return false;o.vis=v;o.w=v.length;o.cat=viewCat(o.e,v);return true;});
+ if(tm)edges=edges.filter(o=>{const v=o.sup.filter(s=>tm.test(s.text));if(!v.length)return false;o.vis=v;o.w=v.length;o.np=new Set(v.map(s=>s.pmid)).size;o.cat=viewCat(o.e,v);return true;});
  // and re-cut the neighbourhood on what the lens left, so a focus view never shows the seed's
  // neighbours to each other with the seed itself missing
  if(tm&&focusActive)edges=focusKeep(edges,focusSeeds,focusHops);
@@ -1148,7 +1164,8 @@ function build(thr){
  const nIso=Object.keys(isoSz).length;
  const nsz=id=>(nss[id]?nss[id].size:(isoSz[id]||0));
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),_fs:fontSize(nsz(n.id)),font:{size:scaledFont(fontSize(nsz(n.id)))}}));
- const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,value:o.w,width:Math.min(1+o.w*0.7,10),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,title:edgeTip(o.e,o.vis,o.cat)}));
+ // no `value`: vis would then scale the width itself and ignore edgeWidth()
+ const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:true,scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
  // undirected and unarrowed: a shared sentence has no subject and object
  const _cm={};
  cmLinks.forEach((L,k)=>{const id='cm'+k;_cm[id]=L;
@@ -1177,8 +1194,8 @@ function build(thr){
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
-   else if(p.edges.length&&_cm[p.edges[0]]){const L=_cm[p.edges[0]];info.innerHTML=cmTip(L,cmDis).innerHTML;}
-   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
+   else if(p.edges.length&&_cm[p.edges[0]]){const L=_cm[p.edges[0]];info.innerHTML=INFO_HEAD+cmTip(L,cmDis).innerHTML;}
+   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=INFO_HEAD+edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
 }
 const thr=document.getElementById('thr');
 let CATTOT={};
