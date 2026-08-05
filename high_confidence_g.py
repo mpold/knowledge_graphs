@@ -714,7 +714,8 @@ __LIBTAG__
  .row{margin:8px 0}
  input[type=range]{width:150px;max-width:100%;vertical-align:middle}
  .legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}
- .legend b{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px;border:1px solid #999}
+ /* round: the node legend stands for nodes, which are drawn as circles */
+ .legend b{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:-1px;border:1px solid #999}
  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px}
  .mut{color:#5b6677;font-size:12px} b{color:#2b6cb0}
  #conf{width:190px;cursor:pointer}
@@ -744,12 +745,8 @@ __LIBTAG__
 <button id="toggle" aria-label="Toggle controls">&#9776;</button>
 <div id="panel">
  __PUBMED_QUERY__
- <h1>Gene&ndash;gene interactions</h1>
- <div class="row mut" id="pubinfo"></div>
  <div class="row legend"><b style="background:#cfe3ff;border-color:#2b6cb0"></b>gene <b style="background:#1b7837;border-color:#145a28"></b>approved anti-neoplastic <b style="background:#e08600;border-color:#9a6700"></b>approved (other) <b style="background:#c2185b;border-color:#7a0f3a"></b>ChEBI</div>
  <div class="row mut">Drug-target genes (corpus chemicals): deeper colour = more chemicals. <b style="color:#1b7837">Green</b> = DGIdb approved anti-neoplastic, <b style="color:#e08600">amber</b> = DGIdb approved (non-anti-neoplastic), <b style="color:#c2185b">pink</b> = ChEBI, absent in DGIdb.</div>
- <div class="row legend"><span class="sw" style="background:#2e9e5b"></span>activates <span class="sw" style="background:#e0533d"></span>inhibits <span class="sw" style="background:#3b7dd8"></span>binds <span class="sw" style="background:#6b3fa0"></span>interacts <span class="sw" style="background:#8a8f98"></span>associated <span class="sw" style="background:#d59a2e"></span>negated</div>
- <div class="row mut">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction and relation; hover for the per-sentence labels.</div>
  <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
  <div class="row">Min unique publications: <b id="mpv">1</b><br><input id="minpub" type="range" min="1" max="10" value="1">
   <div class="mut">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
@@ -763,13 +760,16 @@ __LIBTAG__
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
  <div class="row">Match text in sentence:<br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
-  <div class="mut">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence.</div></div>
+  <div class="mut">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
+ <div class="row" id="cmrow">Co-mention links:<br><select id="comention"><option value="">(off)</option></select>
+  <div class="mut">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
 __KINDROW__
- <div class="row mut">Relation type <span class="mut">(as predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed)</span>:</div><div id="catfilters"></div>
- <div class="row mut">Counts read <em>total &middot; in view</em>: the total is every edge of that type in the file, &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
+ <div class="row mut">Relation type <span class="mut">(as predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed)</span>. Unticking one hides <em>sentences</em> with that label, and any edge left without support:</div><div id="catfilters"></div>
+ <div class="row mut">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels.</div>
+ <div class="row mut">Counts read <em>total &middot; in view</em>: the total is every edge in the file carrying at least one sentence of that type (an edge with mixed readings counts under each, so the totals exceed the edge count), &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
  <div class="row mut">Training set behind the edge:</div>
  <div class="row" id="srcbtns"></div>
- <div class="row mut" id="srchint">Which corpus the relation was learned from &mdash; <b>PPI-only</b> = found by the BioInfer/PPI model alone, <b>BioRED-only</b> = by the BioRED model alone (typed and often signed), <b>both</b> = the two agreed a relation is there. Edges here can carry several sentences from different models; an edge counts as &ldquo;both&rdquo; if any of its support is corroborated.</div>
+ <div class="row mut" id="srchint">Which corpus the relation was learned from &mdash; <b>PPI-only</b> = found by the BioInfer/PPI model alone, <b>BioRED-only</b> = by the BioRED model alone (typed and often signed), <b>both</b> = the two agreed a relation is there. These cut at the <em>sentence</em>, like the relation types: an edge whose support is split between the models appears under each button with that model's sentences only, so the counts sum past the edge total. Since <b>interacts</b> is the binary model's only positive label, <b>PPI-only</b> and &ldquo;All with just interacts ticked&rdquo; are the same view.</div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row">Relationship score: <b id="scval">&ge;0.99</b><br><input id="conf" type="range" min="0" max="13" step="1" value="__CONFDEF__" aria-label="Minimum relationship score"></div>
  <div class="row mut" id="stats"></div>
@@ -787,14 +787,18 @@ const MAXTGT=Math.max(1,...DATA.nodes.map(n=>n.target||0));
 function nodeColor(n){if(n.kind&&n.kind!=='gene')return {background:n.bg,border:n.border};if(!n.target)return {background:n.bg||'#cfe3ff',border:n.border||'#2b6cb0'};const t=n.target/MAXTGT,L=(a,b)=>Math.round(a+(b-a)*t);if(n.tcat==='green')return {background:'rgb('+L(200,27)+','+L(230,120)+','+L(201,55)+')',border:'#145a28'};if(n.tcat==='amber')return {background:'rgb('+L(255,224)+','+L(231,134)+','+L(179,0)+')',border:'#9a6700'};return {background:'rgb('+L(255,194)+','+L(217,24)+','+L(232,91)+')',border:'#7a0f3a'};}
 const KIND={};DATA.nodes.forEach(n=>{KIND[n.id]=n.kind||'gene';});
 // --- training-set provenance ---------------------------------------------------------
-// Each edge records which corpus produced it: 'ppi' (BioInfer only), 'biored' (BioRED only,
-// i.e. relations the binary model never claimed) or 'both'. The buttons isolate each, which
-// is how you SEE what a training set contributes rather than inferring it from counts.
+// Every SENTENCE records which corpus produced it: 'ppi' (BioInfer only), 'biored' (BioRED
+// only, i.e. a reading the binary model never claimed) or 'both' (the merge corroborated it).
+// The buttons isolate each, which is how you SEE what a training set contributes rather than
+// inferring it from counts -- and they cut at the sentence, so an edge the two models split
+// between them shows up under each, carrying only that model's half of the evidence.
 let SRC_MODE='all';
 const SRC_BTN=[['all','All'],['ppi','PPI-only'],['biored','BioRED-only'],['both','Both agreed']];
 function buildSrcButtons(){
+ // counted like the relation types: edges holding at least one sentence from that source, so a
+ // pair the two models split between them counts under each (the parts sum past the edge total)
  const n={all:DATA.edges.length,ppi:0,biored:0,both:0};
- DATA.edges.forEach(e=>{n[e.src||'ppi']=(n[e.src||'ppi']||0)+1;});
+ DATA.edges.forEach(e=>{const r={};e.sents.forEach(s=>r[sentSrc(e,s)]=1);for(const k in r)n[k]=(n[k]||0)+1;});
  document.getElementById('srcbtns').innerHTML=SRC_BTN.map(([k,lab])=>
    '<button class="srcb'+(k===SRC_MODE?' on':'')+'" data-src="'+k+'"'+(n[k]?'':' disabled')+'>'
    +lab+' ('+(n[k]||0)+')</button>').join('');
@@ -851,14 +855,74 @@ function hl(t){
  }
  return out+esc(t.slice(last));
 }
-function visSents(e,conf,lo,hi,tm){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&(!tm||tm.test(s.text)));}
+// The relation-type boxes filter SENTENCES, not whole edges. An edge's payload "cat" is the
+// label that won over the whole file, so once a score/year/text filter narrows the support the
+// sentences still in view can all carry a different label -- SOCS1-MALAT1 is 'interacts' over
+// its nine sentences, but the three that mention "lung" all say 'activates'. Filtering,
+// counting and colouring on the per-sentence label is what keeps the panel honest: "activates
+// 0 in view" then means no visible sentence says activates, which is what the reader sees.
+function sentCat(e,s){return s.rc||e.cat;}
+// Same story for the training set: e.src is the union of model roles over ALL the pair's
+// triples, so a pair where PPI said "interacts" in one sentence and BioRED said "activates" in
+// another is tagged 'both' -- and an edge-level filter then hid its PPI-only sentences from the
+// PPI-only view. Filtering per sentence makes the buttons agree with the relation boxes: since
+// 'interacts' is the PPI checkpoint's only positive label, "PPI-only" and "all sources with
+// just interacts ticked" now describe the same 14125 edges instead of 10395 and 14125.
+function sentSrc(e,s){return s.sr||e.src||'ppi';}
+function visSents(e,conf,lo,hi,tm,cats,mode){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&(!tm||tm.test(s.text))&&(!cats||cats.has(sentCat(e,s)))&&(!mode||mode==='all'||sentSrc(e,s)===mode));}
+// The relation an edge is DRAWN as: whichever label carries the most sentences in view. A tie
+// keeps the payload's own cat if it is among the leaders, else the last alphabetically --
+// mirroring the reverse sort that picked cat in the first place.
+function viewCat(e,vis){
+ if(!vis.length)return e.cat;
+ const n={};vis.forEach(s=>{const c=sentCat(e,s);n[c]=(n[c]||0)+1;});
+ let best=null;
+ for(const c in n){if(best===null||n[c]>n[best]||(n[c]===n[best]&&(c===e.cat||(best!==e.cat&&c>best))))best=c;}
+ return best;
+}
 const SRCLAB={ppi:'PPI',biored:'BioRED',both:'PPI+BioRED'};
-function edgeHead(e,vis){const np=new Set(vis.map(s=>s.pmid)).size;return '<div class=eth><b>'+esc(labelById[e.from])+' &rarr; '+esc(labelById[e.to])+'</b> ('+vis.length+' sentences &middot; '+np+' PMIDs &middot; '+e.cat+' &middot; '+(SRCLAB[e.src]||'PPI')+')</div>';}
+// the provenance of what is ON SCREEN: roles pooled over the visible sentences, so an edge
+// reads PPI+BioRED only while sentences from both are actually in view
+function viewSrc(e,vis){
+ if(!vis.length)return e.src||'ppi';
+ let p=false,b=false;
+ vis.forEach(s=>{const r=sentSrc(e,s);if(r==='both'){p=true;b=true;}else if(r==='biored')b=true;else p=true;});
+ return p&&b?'both':(b?'biored':'ppi');
+}
+function edgeHead(e,vis,cat){const np=new Set(vis.map(s=>s.pmid)).size;return '<div class=eth><b>'+esc(labelById[e.from])+' &rarr; '+esc(labelById[e.to])+'</b> ('+vis.length+' sentences &middot; '+np+' PMIDs &middot; '+esc(cat||viewCat(e,vis))+' &middot; '+(SRCLAB[viewSrc(e,vis)]||'PPI')+')</div>';}
 // per-sentence relation tag: the label the model gave THIS sentence (an edge shows its
 // dominant relation, so a minority reading -- e.g. one "inhibits" under an "interacts"
 // edge -- would otherwise be invisible). "?" marks a speculated statement.
 function relTag(s){return s.rc?' <span class=mut style="color:'+(CCOLOR[s.rc]||'#888')+'">['+esc(s.rc)+(s.sp?' ?':'')+']</span>'+(s.sr?' <span class=mut>'+esc(SRCLAB[s.sr]||s.sr)+'</span>':''):'';}
-function edgeTip(e,vis){const d=document.createElement('div');let h=edgeHead(e,vis);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span>'+relTag(s)+' '+hl(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
+function edgeTip(e,vis,cat){const d=document.createElement('div');let h=edgeHead(e,vis,cat);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span>'+relTag(s)+' '+hl(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
+// --- co-mention links -----------------------------------------------------------------
+// Sentences name a disease far more often than the models emit a relation for it: 1195 edges
+// in this corpus mention NSCLC, yet 70 of their endpoint nodes carry no NSCLC edge at all --
+// the triple went to "lung cancer" while the sentence said "the lung cancer of NSCLC". These
+// links show that co-occurrence for what it is: dashed, grey, undirected, never given a
+// relation colour, so nothing here can be misread as something a checkpoint predicted.
+// Aliases come from the label itself -- words separated by any run of spaces/hyphens, an
+// interchangeable cancer/carcinoma/tumour/neoplasm tail, and the initials when they spell an
+// acronym of three or more letters ("non-small cell lung carcinoma" -> NSCLC).
+const CM_STOP=new Set(['of','the','and','with','in','a','to']);
+const CM_TAIL='(?:carcinomas?|cancers?|tumou?rs?|neoplasms?)';
+function diseaseAliases(label){
+ const words=(label||'').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+ if(!words.length)return null;
+ const alts=[words.map((w,i)=>(i===words.length-1&&new RegExp('^'+CM_TAIL+'$').test(w))?CM_TAIL:reEsc(w)).join('[-\\s]+')];
+ const ac=words.filter(w=>!CM_STOP.has(w)).map(w=>w[0]).join('').toUpperCase();
+ if(ac.length>=3)alts.push('\\b'+ac+'s?\\b');
+ return new RegExp(alts.join('|'),'i');
+}
+function cmTip(link,dis){
+ const d=document.createElement('div');const lim=20;
+ let h='<div class=eth><b>'+esc(labelById[link.nd]||link.nd)+' &middot;&middot;&middot; '+esc(labelById[dis]||dis)+'</b> ('
+  +link.sents.length+' sentences &middot; co-mentioned, no relation predicted)</div>';
+ link.sents.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>';});
+ if(link.sents.length>lim)h+='<div class=more>+'+(link.sents.length-lim)+' more</div>';
+ d.innerHTML=h;return d;
+}
+function activeComention(){return (document.getElementById('comention')||{}).value||'';}
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
 function fontSize(c){return c<5?13:2*Math.max(13,Math.min(Math.round(c*2.2),48));}
 // Label size is a per-node property (a busy gene is drawn larger), so the slider is a single
@@ -878,29 +942,55 @@ function nodeLabel(n){return LABEL_KINDS.has(n.kind||'gene')?n.label:'';}
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?2:v;}
 function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?1:v;}
 function activeMinPub(){const v=parseInt((document.getElementById('minpub')||{}).value);return isNaN(v)?1:v;}
+// Gene/chem focus: expand `hops` steps from the seeds over the CURRENT edge set and keep the
+// edges whose both endpoints are in reach. It has to run again after the text lens -- expanding
+// text-blind and then letting the query delete edges leaves the neighbourhood the query erased:
+// PIK3CA-AKT1 (two MALAT1 neighbours) drawn while every MALAT1 edge is gone. Re-expanding over
+// what survived means the seed either appears with its links or the canvas is empty.
+function focusKeep(edges,seeds,hops){
+ const ag={};edges.forEach(o=>{(ag[o.e.from]=ag[o.e.from]||[]).push(o.e.to);(ag[o.e.to]=ag[o.e.to]||[]).push(o.e.from);});
+ const seen=new Set(seeds);let fr=[...seeds];
+ for(let h=0;h<hops;h++){const nf=[];fr.forEach(x=>{(ag[x]||[]).forEach(y=>{if(!seen.has(y)){seen.add(y);nf.push(y);}});});fr=nf;}
+ return edges.filter(o=>seen.has(o.e.from)&&seen.has(o.e.to));
+}
 function build(thr){
  const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
  const txt=activeText(), tm=textMatcher(txt); TM=tm;
  const kinds=activeKinds();
  let edges=[];
- DATA.edges.forEach(e=>{ if(!cats.has(e.cat))return; if(SRC_MODE!=='all'&&(e.src||'ppi')!==SRC_MODE)return; if(kinds&&!(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to])))return; const vis=visSents(e,conf,ylo,yhi,tm); if(vis.length<thr)return; if(mp>1&&new Set(vis.map(s=>s.pmid)).size<mp)return; edges.push({e:e,vis:vis,w:vis.length}); });
+ // The text query is a LENS, not a threshold input: an edge's support is what survives the
+ // score, year, relation and source settings, and the thresholds below judge THAT. Feeding the
+ // matched-only sentences to them instead made typing a word collapse the graph -- "lung" cut
+ // MALAT1-non-small cell lung carcinoma from 8 publications to 2 (under min-publications 7),
+ // and thinning the edge set dropped whole genes under min-connections, whose components then
+ // fell under min-cluster: an empty canvas from a query with thousands of hits. So support is
+ // measured text-blind here; the lens comes further down, and only min-connections/min-cluster
+ // are re-judged on what it leaves (they describe the picture, so they have to).
+ DATA.edges.forEach(e=>{ if(kinds&&!(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to])))return; const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return; if(mp>1&&new Set(sup.map(s=>s.pmid)).size<mp)return; edges.push({e:e,sup:sup,vis:sup,w:sup.length,cat:viewCat(e,sup)}); });
  const gf=(document.getElementById('genefilter').value||'').trim().toLowerCase();
  const chemSel=document.getElementById('chemfilter').value;
- let focusActive=false, focusLabel='';
+ let focusActive=false, focusLabel='', focusSeeds=null, focusHops=1;
  if(gf||chemSel){
    focusActive=true;
    const seeds=new Set(), labs=[];
    if(gf){const fn=DATA.nodes.find(n=>n.label.toLowerCase()===gf)||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(gf)===0);if(fn){seeds.add(fn.id);labs.push(fn.label);}else labs.push('(no gene: '+gf+')');}
    if(chemSel){DATA.nodes.forEach(n=>{if((n.chems||[]).indexOf(chemSel)>=0)seeds.add(n.id);});labs.push('chem: '+chemSel);}
-   const hops=parseInt(document.getElementById('hops').value)||1;
-   const ag={};edges.forEach(o=>{(ag[o.e.from]=ag[o.e.from]||[]).push(o.e.to);(ag[o.e.to]=ag[o.e.to]||[]).push(o.e.from);});
-   const seen=new Set(seeds);let fr=[...seeds];
-   for(let h=0;h<hops;h++){const nf=[];fr.forEach(x=>{(ag[x]||[]).forEach(y=>{if(!seen.has(y)){seen.add(y);nf.push(y);}});});fr=nf;}
-   edges=edges.filter(o=>seen.has(o.e.from)&&seen.has(o.e.to));
+   focusSeeds=seeds;focusHops=parseInt(document.getElementById('hops').value)||1;
+   edges=focusKeep(edges,focusSeeds,focusHops);
    focusLabel=labs.join(', ');
  }
- // min-cluster prunes small connected components; it stays live under a text/year/etc. filter (set it
- // to 1 to see every match), and is skipped only under gene/chem focus where you want the neighborhood
+ // the lens: keep the edges that still say the word, and show those sentences only
+ if(tm)edges=edges.filter(o=>{const v=o.sup.filter(s=>tm.test(s.text));if(!v.length)return false;o.vis=v;o.w=v.length;o.cat=viewCat(o.e,v);return true;});
+ // and re-cut the neighbourhood on what the lens left, so a focus view never shows the seed's
+ // neighbours to each other with the seed itself missing
+ if(tm&&focusActive)edges=focusKeep(edges,focusSeeds,focusHops);
+ // Structure comes LAST, on the edges that are actually drawn: min-connections peels the
+ // single-link fringe, then min-cluster drops the small components -- so "min cluster size 6"
+ // is a statement about the picture, not about some graph behind it. (It once ran before the
+ // lens, and typing a word then shattered a 6-node floor into pairs and triples.) The support
+ // thresholds above stay text-blind, which is what keeps a query from collapsing the view:
+ // min-publications judges an edge's whole evidence, only these two judge the query's leavings.
+ // Skipped under gene/chem focus, where you asked for a neighborhood and want all of it.
  if(!focusActive){
    if(md>1){ // single-pass degree filter: measure each gene's links once, drop the ones below md (peels the fringe)
      const deg={};edges.forEach(o=>{deg[o.e.from]=(deg[o.e.from]||0)+1;deg[o.e.to]=(deg[o.e.to]||0)+1;});
@@ -913,16 +1003,36 @@ function build(thr){
    const csz={};for(const n in comp)csz[comp[n]]=(csz[comp[n]]||0)+1;
    edges=edges.filter(o=>csz[comp[o.e.from]]>=mc);
  }
- updateCatCounts(edges,cats);   // edges is final here (category, score, year, text, degree, cluster)
+ updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text)
+ // co-mentions ride on the edges that survived: every endpoint whose visible sentences name the
+ // chosen disease gets one dashed link to it, with those sentences (deduped) as its evidence
+ const cmDis=activeComention();
+ let cmLinks=[];
+ if(cmDis){
+   const re=diseaseAliases(labelById[cmDis]||cmDis), by={};
+   // a node already wired to the disease by a drawn relation needs no second, weaker link:
+   // the dashed one means "co-mentioned, and nothing predicted it" for the view you are in
+   const linked=new Set();edges.forEach(o=>{if(o.e.from===cmDis)linked.add(o.e.to);if(o.e.to===cmDis)linked.add(o.e.from);});
+   edges.forEach(o=>{const ms=o.vis.filter(s=>re.test(s.text));if(!ms.length)return;
+     [o.e.from,o.e.to].forEach(nd=>{if(nd!==cmDis&&!linked.has(nd))(by[nd]=by[nd]||[]).push(...ms);});});
+   cmLinks=Object.keys(by).map(nd=>{const seen=new Set(),ss=[];
+     by[nd].forEach(s=>{if(!seen.has(s.text)){seen.add(s.text);ss.push(s);}});
+     ss.sort((a,b)=>b.sc-a.sc);return {nd:nd,sents:ss};});
+ }
  const keep=new Set();edges.forEach(o=>{keep.add(o.e.from);keep.add(o.e.to);});
+ if(cmLinks.length)keep.add(cmDis);   // the disease itself may have no surviving relation edge
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  const nsz=id=>(nss[id]?nss[id].size:0);
- const allCatsSel=[...new Set(DATA.edges.map(e=>e.cat))].every(c=>cats.has(c));
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),_fs:fontSize(nsz(n.id)),font:{size:scaledFont(fontSize(nsz(n.id)))}}));
- const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,value:o.w,width:Math.min(1+o.w*0.7,10),color:{color:o.e.color,opacity:0.6},dashes:!!o.e.neg,title:edgeTip(o.e,o.vis)}));
+ const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,value:o.w,width:Math.min(1+o.w*0.7,10),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,title:edgeTip(o.e,o.vis,o.cat)}));
+ // undirected and unarrowed: a shared sentence has no subject and object
+ const _cm={};
+ cmLinks.forEach((L,k)=>{const id='cm'+k;_cm[id]=L;
+   eds.push({id:id,from:L.nd,to:cmDis,width:1,dashes:[3,4],color:{color:'#9aa4b2',opacity:0.45},
+             arrows:{to:{enabled:false}},title:cmTip(L,cmDis)});});
  const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size>1?'nodes':'genes')+', <b>'+eds.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'');
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size>1?'nodes':'genes')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(cmLinks.length?' &middot; <b>'+cmLinks.length+'</b> co-mention links to <b>'+esc(labelById[cmDis]||cmDis)+'</b>':'');
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  NODEDS=data.nodes;
  const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
@@ -935,18 +1045,26 @@ function build(thr){
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
-   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=edgeHead(o.e,o.vis)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
+   else if(p.edges.length&&_cm[p.edges[0]]){const L=_cm[p.edges[0]];info.innerHTML=cmTip(L,cmDis).innerHTML;}
+   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
 }
 const thr=document.getElementById('thr');
 let CATTOT={};
-function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>CATTOT[e.cat]=(CATTOT[e.cat]||0)+1);const cats=Object.keys(CATTOT).sort((a,b)=>CATTOT[b]-CATTOT[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+esc(c)+'" checked> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+esc(c)+' <span class=cnt data-cat="'+esc(c)+'">('+CATTOT[c]+')</span></label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
-// Counts are LIVE: "(total · N in view)" is recomputed from the edges actually drawn. The
-// total is the whole payload (everything qualifying at >=0.5), which is NOT what you see --
-// the score slider, year range, text filter, min-connections and min-cluster size all prune
-// afterwards. A category whose edges are all pruned now reads 0 (in red) instead of looking
-// available: that is the case where ticking it alone leaves the canvas blank, typically
+// One edge counts under EVERY relation its sentences carry (a nine-sentence edge holding both
+// 'interacts' and 'activates' readings counts once under each), so the totals add up to more
+// than the edge count -- they answer "how many edges can show me this label", which is the
+// question the tick boxes and the "in view" half answer too.
+function catsOf(e){const c={};e.sents.forEach(s=>c[sentCat(e,s)]=1);return Object.keys(c);}
+function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>CATTOT[c]=(CATTOT[c]||0)+1));const cats=Object.keys(CATTOT).sort((a,b)=>CATTOT[b]-CATTOT[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+esc(c)+'" checked> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+esc(c)+' <span class=cnt data-cat="'+esc(c)+'">('+CATTOT[c]+')</span></label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
+// Counts are LIVE: "(total · N in view)" is recomputed from the sentences actually drawn, so
+// "N in view" is exactly the number of drawn edges that can show you a sentence tagged with
+// that relation -- 0 means no visible sentence carries the label, never "0 but there it is in
+// the tooltip". The total is the whole payload (everything qualifying at >=0.5), which is NOT
+// what you see: the score slider, year range, text filter, min-publications, min-connections
+// and min-cluster size all prune afterwards. A category pruned to nothing reads 0 (in red)
+// instead of looking available: ticking it alone would leave the canvas blank, typically
 // because its edges form components smaller than "Min cluster size".
-function updateCatCounts(edges,cats){const seen={};edges.forEach(o=>seen[o.e.cat]=(seen[o.e.cat]||0)+1);
+function updateCatCounts(edges,cats){const seen={};edges.forEach(o=>{const c={};o.vis.forEach(s=>c[sentCat(o.e,s)]=1);for(const k in c)seen[k]=(seen[k]||0)+1;});
  document.querySelectorAll('#catfilters .cnt').forEach(el=>{const c=el.getAttribute('data-cat');
   el.textContent=cats.has(c)?('('+CATTOT[c]+' · '+(seen[c]||0)+' in view)'):('('+CATTOT[c]+' · off)');
   el.style.color=(cats.has(c)&&!seen[c])?'#b3243b':'';});}
@@ -981,11 +1099,15 @@ updYr();
 yl.addEventListener('input',()=>{updYr();build(+thr.value);});
 yh.addEventListener('input',()=>{updYr();build(+thr.value);});
 const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
+// disease list for the co-mention picker; the gene-only graph has none, so the row hides itself
+(function(){const sel=document.getElementById('comention');const ds=DATA.nodes.filter(n=>(n.kind||'gene')==='disease').sort((a,b)=>a.label.localeCompare(b.label));
+ if(!ds.length){const r=document.getElementById('cmrow');if(r)r.style.display='none';return;}
+ ds.forEach(n=>{const o=document.createElement('option');o.value=n.id;o.textContent=n.label;sel.appendChild(o);});
+ sel.addEventListener('change',()=>build(+thr.value));})();
 const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
 document.getElementById('toggle').addEventListener('click',()=>document.getElementById('panel').classList.toggle('collapsed'));
 if(window.innerWidth<=700)document.getElementById('panel').classList.add('collapsed');
 window.addEventListener('resize',()=>{if(network)network.redraw();});
-(function(){const pm=new Set();DATA.edges.forEach(e=>e.sents.forEach(s=>pm.add(s.pmid)));document.getElementById('pubinfo').innerHTML='<b>'+pm.size+'</b> out of <b>'+__NXML__+'</b> produced high-score gene-gene interactions';})();
 document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
 buildCatFilters();buildSrcButtons();build(1);
 </script></body></html>"""
@@ -994,7 +1116,8 @@ buildCatFilters();buildSrcButtons();build(1);
 KIND_ROW = (' <div class="row mut">Node type:</div>\n'
             ' <div class="row legend" id="kindfilters">'
             '<label><input type=checkbox class=kindf value="gene" checked> '
-            '<span class="sw" style="background:#cfe3ff;border:1px solid #2b6cb0"></span> gene</label> '
+            '<span class="sw" style="background:#cfe3ff;border:1px solid #2b6cb0;'
+            'border-radius:50%"></span> gene</label> '
             '<label><input type=checkbox class=kindf value="disease" checked> '
             '<span class="sw" style="background:#ffe0e0;border:1px solid #b3243b;'
             'transform:rotate(45deg)"></span> disease</label> '
@@ -1007,7 +1130,8 @@ KIND_ROW = (' <div class="row mut">Node type:</div>\n'
             'An edge is shown only when BOTH its endpoint types are ticked.</div>')
 
 
-def render_graph(payload, lib, miny, maxy, nxml, pubmed_query="", multi=False):
+def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query="", multi=False):
+    # nxml is kept for the caller's signature; the panel no longer prints a corpus-coverage line
     if lib:
         libtag = "<script>\n" + lib.replace("</script>", "<\\/script>") + "\n</script>"
     else:
@@ -1029,7 +1153,6 @@ def render_graph(payload, lib, miny, maxy, nxml, pubmed_query="", multi=False):
             .replace("__PUBMED_QUERY__", qrow)
             .replace("__PAYLOAD__", json.dumps(payload, ensure_ascii=False))
             .replace("__CCOLOR__", json.dumps(RCOLOR))
-            .replace("__NXML__", str(nxml))
             .replace("__MINY__", str(miny)).replace("__MAXY__", str(maxy)))
 
 
