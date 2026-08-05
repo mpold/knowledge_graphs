@@ -709,7 +709,11 @@ __LIBTAG__
  #net{position:absolute;top:0;left:0;right:0;bottom:0;background:#ffffff}
  /* max-height + overflow keep the panel inside the viewport: without them a tall control list runs off the
     bottom edge and that overflowing tail covers the graph with no way to scroll it back into reach. */
- #panel{position:absolute;top:12px;right:12px;z-index:5;background:rgba(255,255,255,.97);border:1px solid #cdd5e0;border-radius:10px;padding:14px 16px;max-width:320px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain;box-shadow:0 2px 12px rgba(0,0,0,.18);color:#1c2330}
+ #panel,#lpanel{position:absolute;top:12px;z-index:5;background:rgba(255,255,255,.97);border:1px solid #cdd5e0;border-radius:10px;padding:14px 16px;max-width:320px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain;box-shadow:0 2px 12px rgba(0,0,0,.18);color:#1c2330}
+ #panel{right:12px}
+ /* left column: what the picture LOOKS like (names, spacing, grouping) -- the right one keeps
+    what is IN it (thresholds, filters, provenance), so the two columns split by question */
+ #lpanel{left:12px}
  #panel h1{font-size:13px;margin:0 0 8px;color:#1c2330;font-variant:small-caps;letter-spacing:.4px}
  .row{margin:8px 0}
  input[type=range]{width:150px;max-width:100%;vertical-align:middle}
@@ -718,64 +722,79 @@ __LIBTAG__
  .legend b{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:-1px;border:1px solid #999}
  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px}
  .mut{color:#5b6677;font-size:12px} b{color:#2b6cb0}
+ /* the left column's prose is longer than its controls, so it hides behind an "i" per section */
+ .ihelp{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:6px;padding:0;border:1px solid #cdd5e0;border-radius:50%;background:#eef2f7;color:#2b6cb0;font:600 11px/1 Segoe UI,Arial,sans-serif;cursor:pointer;vertical-align:1px}
+ .ihelp:hover{background:#dde4ee}
+ .ihelp.on{background:#0969da;border-color:#0969da;color:#fff}
+ .help{display:none;margin-top:4px} .help.open{display:block}
  #conf{width:190px;cursor:pointer}
  select,#search,#genefilter,#drugsearch,#textfilter{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
  #search,#genefilter,#drugsearch,#textfilter{width:200px}
  mark{background:#ffe680;color:inherit;border-radius:2px;padding:0 1px}
  #catfilters label{display:block;cursor:pointer;white-space:nowrap;font-size:12px;margin:1px 0}
- #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px;max-height:140px;overflow:auto}
+ /* no inner scroller: the relation list is a dozen rows at most, and a box that scrolls inside
+    a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
+ #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
  #catfilters .cnt{color:#5b6677;font-size:11px}
- #zoom button,#srcbtns button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
- #zoom button:hover,#srcbtns button:hover{background:#dde4ee}
- #srcbtns button{margin-bottom:4px}
- #srcbtns button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
+ #zoom button,#srcbtns button,#labelbtns button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
+ #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover{background:#dde4ee}
+ #srcbtns button,#labelbtns button{margin-bottom:4px}
+ #srcbtns button.on,#labelbtns button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  #srcbtns button:disabled{opacity:.45;cursor:default}
  .vis-tooltip{max-width:480px!important;white-space:normal!important;background:#fff!important;color:#1a1a1a!important;border:1px solid #999!important;border-radius:8px!important;padding:8px 10px!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;font:12px/1.45 Segoe UI,Arial,sans-serif!important}
  .eth{font-size:13px;margin-bottom:6px} .stip{padding:3px 0;border-top:1px solid #e3e3e3}
  .pm{display:inline-block;background:#eef3fb;color:#2b6cb0;border-radius:4px;padding:0 5px;margin-right:5px;font-weight:600;font-size:11px;text-decoration:none}
  a.pm:hover{background:#d6e6fb;text-decoration:underline} .more{margin-top:5px;color:#888;font-style:italic}
  #info{max-height:240px;overflow:auto} #info .stip{border-top:1px solid #e3e3e3}
- #toggle{position:absolute;top:12px;left:12px;z-index:6;background:#fff;color:#1c2330;border:1px solid #cdd5e0;border-radius:8px;padding:5px 11px;font-size:18px;line-height:1;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.18)}
- #panel.collapsed{display:none}
+ /* one screen, two columns is a desktop luxury: on a phone they stack, one at each edge */
  @media (max-width:700px){
-  #panel{left:12px;right:12px;max-width:none;max-height:62vh;overflow:auto;top:56px}
+  #panel,#lpanel{left:12px;right:12px;max-width:none;max-height:42vh;overflow:auto}
+  #lpanel{top:12px}
+  #panel{top:auto;bottom:12px}
   .vis-tooltip{max-width:88vw!important}
  }
 </style></head><body>
-<button id="toggle" aria-label="Toggle controls">&#9776;</button>
-<div id="panel">
+<div id="lpanel">
  __PUBMED_QUERY__
- <div class="row legend"><b style="background:#cfe3ff;border-color:#2b6cb0"></b>gene <b style="background:#1b7837;border-color:#145a28"></b>approved anti-neoplastic <b style="background:#e08600;border-color:#9a6700"></b>approved (other) <b style="background:#c2185b;border-color:#7a0f3a"></b>ChEBI</div>
- <div class="row mut">Drug-target genes (corpus chemicals): deeper colour = more chemicals. <b style="color:#1b7837">Green</b> = DGIdb approved anti-neoplastic, <b style="color:#e08600">amber</b> = DGIdb approved (non-anti-neoplastic), <b style="color:#c2185b">pink</b> = ChEBI, absent in DGIdb.</div>
- <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
- <div class="row">Min unique publications: <b id="mpv">1</b><br><input id="minpub" type="range" min="1" max="10" value="1">
-  <div class="mut">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
- <div class="row">Font size: <b id="fsv">50%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="50" aria-label="Label font size">
-  <div class="mut">Scales every drawn label by the same factor, keeping the size ranking (busy genes stay the biggest). <b>50%</b> is the built-in size; the scale runs to 100%, which is twice that. Relabels in place &mdash; the layout is not recomputed.</div></div>
- <div class="row">Min cluster size: <select id="mincluster"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
- <div class="row">Min connections: <select id="mindeg"><option selected>1</option><option>2</option><option>3</option><option>4</option></select><div class="mut">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe.</div></div>
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
+ <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease">Disease names</button><button class="lblb" data-kind="chemical">Drug names</button></span>
+  <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. Applies in place; the layout is not recomputed.</div></div>
+ <div class="row">Shrink periphery: <b id="shv">0%</b> <button class="ihelp" aria-label="About shrink periphery" aria-expanded="false">i</button><br><input id="shrink" type="range" min="0" max="90" step="5" value="0" aria-label="Shrink periphery">
+  <div class="mut help">Pulls everything past the middle distance inward, so the small clusters physics flung to the edges come back where you can read them without zooming out. The centre is left alone.</div></div>
+ <div class="row">Expand center: <b id="exv">0%</b> <button class="ihelp" aria-label="About expand center" aria-expanded="false">i</button><br><input id="expand" type="range" min="0" max="100" step="5" value="0" aria-label="Expand center">
+  <div class="mut help">Blows the crowded core outward and carries the rest along, thinning the hairball without moving anything past its neighbours. Both reshape the drawn layout only &mdash; radially, from the stabilized positions, so nothing changes order and returning a slider to 0% restores the layout exactly.</div></div>
+ <div class="row" id="tissuerow"><label><input type=checkbox id="tissuestack" checked> Stack same-tissue diseases</label> <button class="ihelp" aria-label="About tissue stacking" aria-expanded="false">i</button>
+  <div class="mut help">Drops the disease nodes naming one tissue onto a single spot, overlapping, so <em>lung cancer</em>, <em>lung adenocarcinoma</em> and <em>non-small cell lung carcinoma</em> read as one place on the canvas instead of three. They stay separate nodes with their own edges and tooltips &mdash; only their positions are pooled, after the layout settles. Tissue is read from the name (<span id="tissuen"></span>).</div></div>
+ <div class="row" id="cmrow">Co-mention links: <button class="ihelp" aria-label="About co-mention links" aria-expanded="false">i</button><br><select id="comention"><option value="">(off)</option></select>
+  <div class="mut help">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
+ <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
+ <div class="row mut" id="info">Click a node or edge for details.</div>
+</div>
+<div id="panel">
+ <div class="row legend"><b style="background:#cfe3ff;border-color:#2b6cb0"></b>gene <b style="background:#1b7837;border-color:#145a28"></b>approved anti-neoplastic <b style="background:#e08600;border-color:#9a6700"></b>approved (other) <b style="background:#c2185b;border-color:#7a0f3a"></b>ChEBI <button class="ihelp" data-help="col" aria-label="About node colours" aria-expanded="false">i</button></div>
+ <div class="row mut help" data-help="col">Drug-target genes (corpus chemicals): deeper colour = more chemicals. <b style="color:#1b7837">Green</b> = DGIdb approved anti-neoplastic, <b style="color:#e08600">amber</b> = DGIdb approved (non-anti-neoplastic), <b style="color:#c2185b">pink</b> = ChEBI, absent in DGIdb.</div>
+ <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
+ <div class="row">Min unique publications: <b id="mpv">1</b> <button class="ihelp" aria-label="About min unique publications" aria-expanded="false">i</button><br><input id="minpub" type="range" min="1" max="10" value="1">
+  <div class="mut help">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
+ <div class="row">Font size: <b id="fsv">50%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="50" aria-label="Label font size"></div>
+ <div class="row">Min cluster size: <select id="mincluster"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
+ <div class="row">Min connections: <select id="mindeg"><option selected>1</option><option>2</option><option>3</option><option>4</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. A single pass: nodes that lose links in it can finish below the bar.</div></div>
  <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
- <div class="row">Match text in sentence:<br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
-  <div class="mut">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
- <div class="row" id="tissuerow"><label><input type=checkbox id="tissuestack" checked> Stack same-tissue diseases</label>
-  <div class="mut">Drops the disease nodes naming one tissue onto a single spot, overlapping, so <em>lung cancer</em>, <em>lung adenocarcinoma</em> and <em>non-small cell lung carcinoma</em> read as one place on the canvas instead of three. They stay separate nodes with their own edges and tooltips &mdash; only their positions are pooled, after the layout settles. Tissue is read from the name (<span id="tissuen"></span>).</div></div>
- <div class="row" id="cmrow">Co-mention links:<br><select id="comention"><option value="">(off)</option></select>
-  <div class="mut">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
+ <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
+  <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
 __KINDROW__
- <div class="row mut">Relation type <span class="mut">(as predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed)</span>. Unticking one hides <em>sentences</em> with that label, and any edge left without support:</div><div id="catfilters"></div>
- <div class="row mut">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels.</div>
- <div class="row mut">Counts read <em>total &middot; in view</em>: the total is every edge in the file carrying at least one sentence of that type (an edge with mixed readings counts under each, so the totals exceed the edge count), &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
- <div class="row mut">Training set behind the edge:</div>
+ <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
+  <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
+ <div class="row mut help" data-help="rel">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels.</div>
+ <div class="row mut help" data-help="rel">Counts read <em>total &middot; in view</em>: the total is every edge in the file carrying at least one sentence of that type (an edge with mixed readings counts under each, so the totals exceed the edge count), &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
+ <div class="row">Training set behind the edge <button class="ihelp" data-help="src" aria-label="About training sets" aria-expanded="false">i</button></div>
  <div class="row" id="srcbtns"></div>
- <div class="row mut" id="srchint">Which corpus the relation was learned from &mdash; <b>PPI-only</b> = found by the BioInfer/PPI model alone, <b>BioRED-only</b> = by the BioRED model alone (typed and often signed), <b>both</b> = the two agreed a relation is there. These cut at the <em>sentence</em>, like the relation types: an edge whose support is split between the models appears under each button with that model's sentences only, so the counts sum past the edge total. Since <b>interacts</b> is the binary model's only positive label, <b>PPI-only</b> and &ldquo;All with just interacts ticked&rdquo; are the same view.</div>
- <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
+ <div class="row mut help" data-help="src" id="srchint">Which corpus the relation was learned from &mdash; <b>PPI-only</b> = found by the BioInfer/PPI model alone, <b>BioRED-only</b> = by the BioRED model alone (typed and often signed), <b>both</b> = the two agreed a relation is there. These cut at the <em>sentence</em>, like the relation types: an edge whose support is split between the models appears under each button with that model's sentences only, so the counts sum past the edge total. Since <b>interacts</b> is the binary model's only positive label, <b>PPI-only</b> and &ldquo;All with just interacts ticked&rdquo; are the same view.</div>
  <div class="row">Relationship score: <b id="scval">&ge;0.99</b><br><input id="conf" type="range" min="0" max="13" step="1" value="__CONFDEF__" aria-label="Minimum relationship score"></div>
  <div class="row mut" id="stats"></div>
- <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
 <div id="net"></div>
 <script>
@@ -815,6 +834,15 @@ function buildSrcButtons(){
 }
 function activeKinds(){const b=[...document.querySelectorAll('.kindf')];return b.length?new Set(b.filter(c=>c.checked).map(c=>c.value)):null;}
 const net=document.getElementById('net'); let network=null, NODEDS=null;
+// the layout exactly as physics left it, plus the tissue groups of what is on screen; every
+// position control replays from these, so they compose and none of them accumulates drift
+let BASEPOS=null, TGROUPS=[];
+function applyLayoutShape(){
+ if(!network||!BASEPOS)return;
+ reshapeRadial(network,BASEPOS,activeShrink(),activeExpand());
+ if(activeTissueStack()&&TGROUPS.length)stackTissues(network,TGROUPS);
+ network.redraw();
+}
 // Labels fade in as you zoom: small graphs always show every symbol; dense views reveal labels as the
 // zoom scale climbs from LABEL_LO to LABEL_HI. Opacity is driven through the shared node-font colour, so
 // one setOptions call recolours all labels (per-node font carries only size, inheriting this colour).
@@ -950,6 +978,34 @@ function tissueGroups(nodes){
  nodes.forEach(n=>{if(KIND[n.id]!=='disease')return;const t=tissueOf(labelById[n.id]||n.id);if(t)(by[t]=by[t]||[]).push(n.id);});
  return Object.keys(by).filter(t=>by[t].length>1).map(t=>({tissue:t,ids:by[t]}));
 }
+// --- radial reshaping ------------------------------------------------------------------
+// Two knobs on the DRAWN layout, both radial around the graph's centre of mass, both monotone
+// in the radius: no node ever passes another, so the picture stays the one physics produced --
+// only the spacing changes. The boundary between "centre" and "periphery" is the median radius,
+// which puts half the nodes on each side whatever the graph's shape.
+//   expand: r <= R -> r*(1+e)  (the core swells)   r > R -> r + R*e  (the rest rides out rigidly)
+//   shrink: past the expanded boundary b, distances compress by (1-s), pulling the far clusters in
+// Both read BASEPOS, the untouched stabilized positions, so the sliders never compound: every
+// move is computed from the original layout and 0% restores it exactly.
+function activeShrink(){const v=parseInt((document.getElementById('shrink')||{}).value);return isNaN(v)?0:v/100;}
+function activeExpand(){const v=parseInt((document.getElementById('expand')||{}).value);return isNaN(v)?0:v/100;}
+function reshapeRadial(net,pos,s,e){
+ const ids=Object.keys(pos);
+ if(!ids.length)return;
+ let cx=0,cy=0;
+ ids.forEach(id=>{cx+=pos[id].x;cy+=pos[id].y;});
+ cx/=ids.length;cy/=ids.length;
+ const rs=ids.map(id=>Math.hypot(pos[id].x-cx,pos[id].y-cy)).sort((a,b)=>a-b);
+ const R=rs[Math.floor(rs.length/2)]||1, b=R*(1+e);
+ ids.forEach(id=>{
+  const dx=pos[id].x-cx,dy=pos[id].y-cy,r=Math.hypot(dx,dy);
+  if(r<1e-6)return;
+  let nr=e?(r<=R?r*(1+e):r+R*e):r;
+  if(s&&nr>b)nr=b+(nr-b)*(1-s);
+  const k=nr/r;
+  net.moveNode(id,cx+dx*k,cy+dy*k);
+ });
+}
 // pool each group onto its own centre: a ring tight enough that the discs overlap, wide enough
 // that every node stays individually clickable
 function stackTissues(net,groups){
@@ -977,11 +1033,15 @@ function activeFontScale(){const el=document.getElementById('fscale');const v=el
 function scaledFont(b){return Math.max(4,Math.round(b*FSCALE));}
 // Which node kinds have their NAME DRAWN on the canvas. Disease and chemical names are long,
 // repeat across many edges and out-shout the gene symbols simply by being wordy, so those
-// nodes are drawn unlabelled -- shape and colour say what they are, and the name is one hover
-// (or click) away in the tooltip and the info panel. Add 'disease'/'chemical' here to get the
-// drawn names back.
+// nodes start unlabelled -- shape and colour say what they are, and the name is one hover
+// (or click) away. The two buttons put them back: the set is live, so toggling relabels the
+// nodes already on screen (a rebuild would re-run the layout for a question about text).
 const LABEL_KINDS=new Set(['gene']);
 function nodeLabel(n){return LABEL_KINDS.has(n.kind||'gene')?n.label:'';}
+function applyLabelKinds(){
+ if(!NODEDS)return;
+ NODEDS.update(NODEDS.get().map(n=>({id:n.id,label:LABEL_KINDS.has(KIND[n.id]||'gene')?(labelById[n.id]||''):''})));
+}
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?2:v;}
 function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?1:v;}
 function activeMinPub(){const v=parseInt((document.getElementById('minpub')||{}).value);return isNaN(v)?1:v;}
@@ -1105,11 +1165,12 @@ function build(thr){
  if(network)network.destroy();
  network=new vis.Network(net,data,options);
  LABEL_N=nodes.length; LABEL_A=-1;
- // stack once physics is off, so nothing pulls the pooled nodes apart again, and fit afterwards
- // so the moved positions are inside the view
- const tgroups=activeTissueStack()?tissueGroups(nodes):[];
+ // reshape once physics is off, so nothing pulls the moved nodes back, and fit afterwards so the
+ // new positions are inside the view. BASEPOS is captured first: it is the layout to replay from.
+ TGROUPS=tissueGroups(nodes);
  network.on('stabilizationIterationsDone',()=>{network.setOptions({physics:false});
-   if(tgroups.length)stackTissues(network,tgroups);
+   BASEPOS=network.getPositions();
+   applyLayoutShape();
    network.fit({animation:false});LABEL_A=-1;updateLabels();network.redraw();});
  network.on('zoom',updateLabels);
  network.on('animationFinished',updateLabels);
@@ -1145,6 +1206,31 @@ mpb.addEventListener('input',()=>{document.getElementById('mpv').textContent=mpb
 const fsc=document.getElementById('fscale');
 fsc.addEventListener('input',()=>{FSCALE=activeFontScale();document.getElementById('fsv').textContent=fsc.value+'%';
  if(NODEDS)NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:{size:scaledFont(n._fs||13)}})));});
+// Each "i" reveals its own section's prose. Most sections keep their help inside the row, but
+// a few explain a control from BELOW it -- the relation counts, the training-set hint -- and
+// those are tagged data-help="<group>" so one button can open every part of its section at once.
+document.querySelectorAll('.ihelp').forEach(b=>b.addEventListener('click',()=>{
+ const g=b.getAttribute('data-help');
+ const row=b.closest?b.closest('.row'):null;
+ const hs=g?[...document.querySelectorAll('.help[data-help="'+g+'"]')]:(row?[row.querySelector('.help')]:[]);
+ const targets=hs.filter(Boolean);
+ if(!targets.length)return;
+ const open=!targets[0].classList.contains('open');
+ targets.forEach(h=>h.classList.toggle('open',open));
+ b.classList.toggle('on',open);
+ b.setAttribute('aria-expanded',open?'true':'false');}));
+// the position controls all replay from BASEPOS, so they reshape in place -- no rebuild, no relayout
+const shr=document.getElementById('shrink'), exp=document.getElementById('expand');
+shr.addEventListener('input',()=>{document.getElementById('shv').textContent=shr.value+'%';applyLayoutShape();});
+exp.addEventListener('input',()=>{document.getElementById('exv').textContent=exp.value+'%';applyLayoutShape();});
+// name buttons: gene symbols are always drawn, these two add the wordy kinds back
+document.querySelectorAll('.lblb').forEach(b=>b.addEventListener('click',()=>{
+ const k=b.getAttribute('data-kind');
+ if(LABEL_KINDS.has(k))LABEL_KINDS.delete(k);else LABEL_KINDS.add(k);
+ b.classList.toggle('on',LABEL_KINDS.has(k));
+ applyLabelKinds();}));
+// the gene-only graph has nothing else to name
+(function(){if(!DATA.nodes.some(n=>(n.kind||'gene')!=='gene')){const r=document.getElementById('lblrow');if(r)r.style.display='none';}})();
 const mcl=document.getElementById('mincluster');
 mcl.addEventListener('change',()=>build(+thr.value));
 document.getElementById('mindeg').addEventListener('change',()=>build(+thr.value));
@@ -1180,19 +1266,23 @@ const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]
  const hit=multi.reduce((s,t)=>s+tg[t].length,0);
  const el=document.getElementById('tissuen');
  if(el)el.textContent=hit+' of '+ds.length+' disease nodes fall into '+multi.length+' tissues; the rest are left where the layout puts them';
- document.getElementById('tissuestack').addEventListener('change',()=>build(+thr.value));
+ // also a position control: replay from BASEPOS instead of rebuilding the whole network
+ document.getElementById('tissuestack').addEventListener('change',applyLayoutShape);
  ds.forEach(n=>{const o=document.createElement('option');o.value=n.id;o.textContent=n.label;sel.appendChild(o);});
  sel.addEventListener('change',()=>build(+thr.value));})();
 const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
-document.getElementById('toggle').addEventListener('click',()=>document.getElementById('panel').classList.toggle('collapsed'));
-if(window.innerWidth<=700)document.getElementById('panel').classList.add('collapsed');
 window.addEventListener('resize',()=>{if(network)network.redraw();});
 document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
+// gene-only runs hide every row the left column holds; an empty white box is worse than none
+(function(){const lp=document.getElementById('lpanel');
+ const kids=lp?Array.prototype.slice.call(lp.children||[]):[];   // HTMLCollection, not an array
+ if(kids.length&&!kids.some(c=>!c.style||c.style.display!=='none'))lp.style.display='none';})();
 buildCatFilters();buildSrcButtons();build(1);
 </script></body></html>"""
 
 
-KIND_ROW = (' <div class="row mut">Node type:</div>\n'
+KIND_ROW = (' <div class="row">Node type <button class="ihelp" data-help="kind" '
+            'aria-label="About node types" aria-expanded="false">i</button></div>\n'
             ' <div class="row legend" id="kindfilters">'
             '<label><input type=checkbox class=kindf value="gene" checked> '
             '<span class="sw" style="background:#cfe3ff;border:1px solid #2b6cb0;'
@@ -1203,7 +1293,7 @@ KIND_ROW = (' <div class="row mut">Node type:</div>\n'
             '<label><input type=checkbox class=kindf value="chemical" checked> '
             '<span class="sw" style="background:#ece0f8;border:1px solid #6b3fa0"></span> chemical</label>'
             '</div>\n'
-            ' <div class="row mut">Shapes: gene &#9679; &middot; disease &#9670; &middot; chemical &#9632;. '
+            ' <div class="row mut help" data-help="kind">Shapes: gene &#9679; &middot; disease &#9670; &middot; chemical &#9632;. '
             'Only <b>gene</b> names are drawn on the canvas &mdash; disease and chemical names are long '
             'and would bury the symbols, so <b>hover</b> (or click) those nodes to read them. '
             'An edge is shown only when BOTH its endpoint types are ticked &mdash; and where the '
@@ -1219,10 +1309,12 @@ def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query="", multi=Fal
         libtag = "<script>\n" + lib.replace("</script>", "<\\/script>") + "\n</script>"
     else:
         libtag = f'<script src="{VIS_URL}"></script>'
-    # legend line above the title: the PubMed query this corpus came from (empty -> nothing shown)
-    qrow = (f'<div class="row" id="pubmedq" style="font-size:12px;line-height:1.35;font-weight:600;'
-            f'color:#2b6cb0;word-break:break-word;margin-bottom:6px">PubMed query = '
-            f'{html.escape(pubmed_query)}</div>'
+    # heads the left column: the PubMed query this corpus came from (empty -> nothing shown).
+    # The query itself can run to several lines of boolean, so it sits behind the section's "i"
+    # like every other explanation in this column -- the heading alone says where the data is from.
+    qrow = (f'<div class="row" id="pubmedq">PubMed query '
+            f'<button class="ihelp" aria-label="Show the PubMed query" aria-expanded="false">i</button>'
+            f'<div class="mut help" style="word-break:break-word">{html.escape(pubmed_query)}</div></div>'
             if pubmed_query else "")
     title = html.escape(pubmed_query) if pubmed_query else (
         "High-confidence gene / disease / chemical relations" if multi
