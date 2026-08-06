@@ -69,6 +69,80 @@ node's own kind, since a gene is only remarkable among genes. The percentile is 
 (hover a row, or read the table) but it saturates — every member of a top six reads 99.9%, while
 z still separates them (EGFR +6.3, CDH1 +5.6).
 
+### How firm is the ranking?
+
+**Bootstrap CIs**, a button in the table, resamples the view's **publications** with replacement
+300 times, recomputes the measure and the whole ordering each time, and reports 95% percentile
+intervals for every node's count and rank. Papers are the unit because they are the independent
+one — sentences within an article are the same authors saying the same thing twice, and
+resampling them would give intervals several times too tight.
+
+It costs about 1.5 s over 5,288 genes and runs only when asked, since it is only worth having
+once you have settled on a view. Any change to the graph discards it, so what you read always
+belongs to what is on screen.
+
+Read the rank interval before believing an ordering:
+
+| rank | gene | count | count 95% CI | rank 95% CI |
+|---|---|---|---|---|
+| 1 | EGFR | 880 | 832–933 | 1–2 |
+| 2 | AKT1 | 866 | 814–918 | 1–2 |
+| 30 | HIF1A | 120 | 101–142 | 26–37 |
+| 500 | UCA1 | 8 | 3–15 | 264–1447 |
+
+The top of the list is firm and the tail is meaningless: a gene sitting 500th could belong
+anywhere from 264th to 1447th. The count intervals track √n as they should — the width at
+n = 880 is 108, against 2·1.96·√880 ≈ 116 for a Poisson count.
+
+This measures **sampling variability of the corpus only**. It says nothing about whether a gene
+is enriched relative to the literature at large; for that you need a background corpus and a
+Fisher exact test, which this page does not do.
+
+### Is it enriched, or just big?
+
+The bootstrap says how firm the ranking is; it does not say whether a gene is *characteristic*
+of the view. The table's **corpus papers**, **OR vs corpus** and **q (BH)** columns do, from a
+2×2 over publications:
+
+| | mentions it | doesn't |
+|---|---|---|
+| in view | a | view − a |
+| rest of the corpus | c − a | N − view − (c − a) |
+
+`c` and `N` come from a per-entity document index built over **every normalized triple in the
+file** — 10,662 publications, score-unfiltered on purpose, since a corpus already filtered by the
+cutoff you are testing is no denominator at all. It is embedded in the page (~104 KB) and keyed
+by the same normalized ids the nodes use, so no string matching is involved.
+
+Fisher's exact test, two-sided; the odds ratio carries a Haldane–Anscombe 0.5 correction and a
+Woolf interval (an approximation, not the conditional MLE); **q** is Benjamini–Hochberg over the
+entities with at least 5 corpus papers — roughly 1,000–1,300 genes depending on the view, the
+rest being untestable at any sensible rate. It recomputes with the view, in well under a second.
+
+What it finds is recognisable. Typing `immunotherapy` (159 papers):
+
+| gene | view | corpus | OR | q |
+|---|---|---|---|---|
+| PDCD1 | 46 | 508 | 8.89 | 1.7e-22 |
+| CD274 | 56 | 794 | 7.22 | 1.7e-22 |
+| CTLA4 | 16 | 254 | 4.95 | 3.8e-05 |
+| EGFR | 7 | 1224 | **0.38** | 0.06 |
+
+The checkpoint axis is enriched and EGFR is *depleted* — which is the biology. Restricting to
+2024–2026 surfaces GPX4 (OR 5.4) and SLC7A11 (3.6), the ferroptosis pair.
+
+Two limits worth stating whenever you quote a q-value:
+
+- **It cannot say "specific to lung adenocarcinoma."** Every paper in the denominator is already
+  a lung paper, so the contrast is view-against-corpus. Answering the specificity question needs
+  an outside corpus this page does not have.
+- **The counts are model output.** At score ≥0.99 the enriched gene is MALAT1 while EGFR, KRAS,
+  TP53 and ALK come out depleted — that is the extraction behaviour of the high-confidence
+  checkpoint as much as the literature. Run the test at two cutoffs and trust what survives both.
+
+The population is also "documents with an extracted candidate pair", not "documents mentioning
+the entity": a gene named only in a methods section enters neither column.
+
 **Full table view** replaces the canvas with the whole ranking: every node of that kind, all
 three counts, percentile, z and a bar, sortable by any column, with its own year handles and
 kind/measure dropdowns that mirror the panel's. Click a row to centre that node in the graph; if
