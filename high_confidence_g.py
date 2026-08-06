@@ -800,9 +800,11 @@ __LIBTAG__
  #sigtab:hover,#sigboot:hover{background:#dde4ee}
  #sigboot{margin-left:14px}
  #sigboot:disabled{opacity:.6;cursor:default}
- /* the table is a NON-GRAPH view: it covers the canvas and both panels rather than floating
-    over them, so nothing competes with it while you read */
+ /* The table replaces the CANVAS, not the controls: it covers the graph and the left column, but
+    stops short of the right panel (layoutTable measures it), which stays live above the overlay.
+    Filtering while reading the table is the point -- every change re-runs the ranking under it. */
  #sigtable{display:none;position:absolute;top:0;left:0;right:0;bottom:0;z-index:20;background:#fff;overflow:auto;padding:16px 20px}
+ #sigtable.open+#panel,#panel.overtable{z-index:25}
  #sigtable.open{display:block}
  #sigtable h2{font-size:15px;margin:0 0 2px;color:#1c2330}
  #sigtable table{border-collapse:collapse;font-size:13px;margin-top:10px;min-width:620px}
@@ -810,7 +812,6 @@ __LIBTAG__
  #sigtable th{position:sticky;top:0;background:#fff;color:#2b6cb0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #cdd5e0}
  #sigtable th.on{font-weight:700;text-decoration:underline}
  #sigtable td.nm,#sigtable th.nm{text-align:left}
- #sigtable tbody tr{cursor:pointer}
  #sigtable tbody tr:hover{background:#eef2f7}
  #sigyr{margin:10px 0 2px;font-size:13px}
  /* the bars live here now: a table row has the width for them, a 320px panel row does not */
@@ -865,7 +866,7 @@ __LIBTAG__
   <div id="sighdr">publications &nbsp;&nbsp;z</div>
   <div id="siglist"></div>
   <button id="sigtab">Full table view</button>
-  <div class="mut help" id="sighelp">The top six of whatever the graph is <em>currently drawing</em>: every control reshapes this too &mdash; score, year, text, node and relation type, training set, the support thresholds and the structural pruning &mdash; and it is recomputed on every redraw, so the ranking and the picture can never disagree. Widen the filters to read it as the corpus; narrow them to ask the same question of a slice. Co-mention links are excluded, since this counts relations. <b>Publications</b> counts the distinct papers behind a node's relations &mdash; the measure the edge thicknesses use; <b>partners</b> counts the distinct entities it is related to (breadth, not weight); <b>sentences</b> counts the unique sentences supporting them. The second column is <b>z</b>: standard deviations above the mean on a log&#8321;&#8320; scale, <em>among its own kind</em>, since a gene is only remarkable among genes. The percentile is there too (hover a row), but it saturates &mdash; every one of a top six reads 99.9%, while z still separates them. Click a row to select and centre that node; if the current filters have removed it, the details box says so rather than moving the view. <b>Bootstrap CIs</b>, in the table, resamples the view's <em>publications</em> with replacement 300 times and reports 95% intervals for each count and each rank &mdash; papers, because that is the independent unit; resampling sentences would give intervals several times too tight. Ranks at the top are firm (1&ndash;2) and the tail is not (a gene ranked 500th may belong anywhere from 264th to 1447th), which is the honest width of &ldquo;top ten&rdquo;. <b>OR vs corpus</b> and <b>q</b> ask a different question: is this entity over-represented in the current view compared with the whole normalized corpus? A 2&times;2 over publications &mdash; in view or not, mentions it or not &mdash; by Fisher's exact test, with a Haldane-corrected odds ratio, a Woolf interval and Benjamini-Hochberg q-values over the entities with at least 5 corpus papers. Type &ldquo;immunotherapy&rdquo; and PDCD1, CD274 and CTLA4 come out at OR 5&ndash;9; EGFR comes out <em>depleted</em>. It cannot say an entity is specific to lung adenocarcinoma &mdash; every paper here is a lung paper, so the contrast is view-against-corpus, never corpus-against-literature. <b>Full table view</b> opens the whole ranking &mdash; every node of that kind, all three counts, both statistics and a bar, sortable by any column, with its own year handles.</div></div>
+  <div class="mut help" id="sighelp">The top six of whatever the graph is <em>currently drawing</em>: every control reshapes this too &mdash; score, year, text, node and relation type, training set, the support thresholds and the structural pruning &mdash; and it is recomputed on every redraw, so the ranking and the picture can never disagree. Widen the filters to read it as the corpus; narrow them to ask the same question of a slice. Co-mention links are excluded, since this counts relations. <b>Publications</b> counts the distinct papers behind a node's relations &mdash; the measure the edge thicknesses use; <b>partners</b> counts the distinct entities it is related to (breadth, not weight); <b>sentences</b> counts the unique sentences supporting them. The second column is <b>z</b>: standard deviations above the mean on a log&#8321;&#8320; scale, <em>among its own kind</em>, since a gene is only remarkable among genes. The percentile is there too (hover a row), but it saturates &mdash; every one of a top six reads 99.9%, while z still separates them. In the panel list, click a row to select and centre that node; if the current filters have removed it, the details box says so rather than moving the view. Table rows do not navigate &mdash; they are there to be read and sorted. <b>Bootstrap CIs</b>, in the table, resamples the view's <em>publications</em> with replacement 300 times and reports 95% intervals for each count and each rank &mdash; papers, because that is the independent unit; resampling sentences would give intervals several times too tight. Ranks at the top are firm (1&ndash;2) and the tail is not (a gene ranked 500th may belong anywhere from 264th to 1447th), which is the honest width of &ldquo;top ten&rdquo;. <b>OR vs corpus</b> and <b>q</b> ask a different question: is this entity over-represented in the current view compared with the whole normalized corpus? A 2&times;2 over publications &mdash; in view or not, mentions it or not &mdash; by Fisher's exact test, with a Haldane-corrected odds ratio, a Woolf interval and Benjamini-Hochberg q-values over the entities with at least 5 corpus papers. Type &ldquo;immunotherapy&rdquo; and PDCD1, CD274 and CTLA4 come out at OR 5&ndash;9; EGFR comes out <em>depleted</em>. It cannot say an entity is specific to lung adenocarcinoma &mdash; every paper here is a lung paper, so the contrast is view-against-corpus, never corpus-against-literature. <b>Full table view</b> opens the whole ranking &mdash; every node of that kind, all three counts, both statistics and a bar, sortable by any column, with its own year handles.</div></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
 <div id="panel">
@@ -901,7 +902,7 @@ __KINDROW__
   <select id="sigmeasure2"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
   &nbsp; Year: <b id="yrlab2"></b> <input id="yrlo2" type="range" style="width:120px"> <input id="yrhi2" type="range" style="width:120px">
   <button id="sigboot">Bootstrap CIs</button>
-  <button id="sigclose">Close</button>
+  <button id="sigclose">Graph view</button>
   <button class="ihelp" data-help="sig" aria-label="About significance in view" aria-expanded="false">i</button>
   <div class="mut help" data-help="sig" id="sighelp2"></div></div>
  <div id="sigtbody"></div></div>
@@ -1638,7 +1639,7 @@ function sigTable(){
  document.getElementById('sigsub').innerHTML=SIGTAB_ROWS.length+' '+(KL[kind]||kind)+' in the graph as currently drawn &mdash; <b>'
   +yr[0]+'&ndash;'+yr[1]+'</b>, score &ge;'+activeConf()+', and every other filter in force. '
   +'Percentile and z are computed among those '+(KL[kind]||kind)+' for <b>'+
-  ({pub:'publications',deg:'partners',sent:'sentences'}[sigMeas()])+'</b>; click a heading to sort, a row to centre that node in the graph.'
+  ({pub:'publications',deg:'partners',sent:'sentences'}[sigMeas()])+'</b>; click a heading to sort. The controls on the right stay live &mdash; filter while you read and the table follows.'
   +(ENRICH?(' &middot; enrichment: this view’s <b>'+ENRICH.view+'</b> papers against the corpus’ <b>'+ENRICH.n
     +'</b>, Fisher exact on <b>'+ENRICH.tested+'</b> testable '+(KL[kind]||kind)+' (≥'+ENRICH_MIN+' corpus papers), q = Benjamini-Hochberg.'):'');
  sigNote('signote2',kind);
@@ -1653,14 +1654,26 @@ function sigTable(){
  document.querySelectorAll('#sigtbody th').forEach(th=>{const k=th.getAttribute('data-k');
    if(SIGSORTABLE.has(k))th.addEventListener('click',()=>{SIGTAB_SORT=k;sigTable();});
    else th.style.cursor='default';});
- document.querySelectorAll('#sigtbody tbody tr').forEach(tr=>tr.addEventListener('click',()=>{
-   sigClose();sigFocus(SIGTAB_ROWS[parseInt(tr.getAttribute('data-i'))]);}));
+ // rows are not links: a click used to close the table and jump the graph to that node, which
+ // is the wrong default while you are reading a table. Headings still sort; the panel's top-six
+ // list still navigates.
+}
+// Leave room for the right panel and lift it above the overlay, so every filter stays usable
+// while the table is open -- build() re-runs the ranking and redraws the table under it. On a
+// narrow screen there is no room to sit side by side, so the table covers everything as before.
+function layoutTable(){
+ const st=document.getElementById('sigtable'), pn=document.getElementById('panel');
+ if(!st||!pn)return;
+ if(!SIGTAB_OPEN||window.innerWidth<=700){st.style.right='';pn.classList.remove('overtable');return;}
+ const w=Math.ceil(pn.getBoundingClientRect().width);
+ st.style.right=(w>0?w+24:0)+'px';
+ pn.classList.add('overtable');
 }
 function sigOpen(){SIGTAB_OPEN=true;SIGTAB_SORT=null;
  const k2=document.getElementById('sigkind2'),m2=document.getElementById('sigmeasure2');
  if(k2){k2.value=sigKind();m2.value=sigMeas();}   // open showing what the panel was showing
- sigTable();document.getElementById('sigtable').classList.add('open');}
-function sigClose(){SIGTAB_OPEN=false;document.getElementById('sigtable').classList.remove('open');}
+ sigTable();document.getElementById('sigtable').classList.add('open');layoutTable();}
+function sigClose(){SIGTAB_OPEN=false;document.getElementById('sigtable').classList.remove('open');layoutTable();}
 // one source for the explanation: the panel's copy is authored in the template, the table's is
 // filled from it at load, so the two can never drift apart
 (function(){const a=document.getElementById('sighelp'),b=document.getElementById('sighelp2');
@@ -1738,7 +1751,7 @@ function fitLeftPanel(){
  lp.style.width=w+'px';                // content-box: the padding stays outside this, as the gap
 }
 fitLeftPanel();
-window.addEventListener('resize',()=>{fitLeftPanel();if(network)network.redraw();});
+window.addEventListener('resize',()=>{fitLeftPanel();layoutTable();if(network)network.redraw();});
 document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
 // gene-only runs hide every row the left column holds; an empty white box is worse than none
 (function(){const lp=document.getElementById('lpanel');

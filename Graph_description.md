@@ -145,8 +145,9 @@ the entity": a gene named only in a methods section enters neither column.
 
 **Full table view** replaces the canvas with the whole ranking: every node of that kind, all
 three counts, percentile, z and a bar, sortable by any column, with its own year handles and
-kind/measure dropdowns that mirror the panel's. Click a row to centre that node in the graph; if
-the filters have removed it, the details box says so rather than moving the view. When drugs are
+kind/measure dropdowns that mirror the panel's. Table rows do not navigate — they are there to be
+read and sorted; the panel's top-six list is what centres a node in the graph, and if the filters
+have removed it the details box says so rather than moving the view. When drugs are
 selected, both views state that the list mixes clinically used drugs with lab chemicals used only
 in experiments — ChEBI recognises both, so LY294002 ranks among the leaders and has never been
 given to a patient.
