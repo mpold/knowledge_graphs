@@ -952,9 +952,9 @@ __LIBTAG__
  <div class="row" id="cmrow">Co-mention links: <button class="ihelp" aria-label="About co-mention links" aria-expanded="false">i</button><br><select id="comention"><option value="">(off)</option></select>
   <div class="mut help">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
- <div class="row" id="qrow">Significance: <b id="qsv">off (show all)</b><br><input id="qsig" type="range" min="0" max="9" step="1" value="0" aria-label="Significance cutoff">
+ <div class="row" id="qrow">Significance: <b id="qsv">off (show all)</b> <button class="ihelp" aria-label="About the significance cutoff" aria-expanded="false">i</button><br><input id="qsig" type="range" min="0" max="9" step="1" value="0" aria-label="Significance cutoff">
   <div id="orbtns"><button class="orb" data-or="gt1">OR&gt;1</button><button class="orb" data-or="lt1">OR&lt;1</button></div>
-  <div class="mut">Hides genes and drugs whose enrichment misses the cutoff. The buttons keep one side of it &mdash; over-represented in this view (OR&gt;1) or under-represented (OR&lt;1) &mdash; and press the lit one again to clear. The depleted side is a finding too: in an adenocarcinoma view the small-cell markers DLL3 and ASCL1 land there. Diseases stay throughout: they carry no ranking of their own.</div></div>
+  <div class="mut help" id="qhelp">Hides genes and drugs whose enrichment misses the cutoff. The buttons keep one side of it &mdash; over-represented in this view (OR&gt;1) or under-represented (OR&lt;1) &mdash; and press the lit one again to clear. The depleted side is a finding too: in an adenocarcinoma view the small-cell markers DLL3 and ASCL1 land there. Diseases stay throughout: they carry no ranking of their own.</div></div>
  <div class="row" id="sigrow">Significance in view <button class="ihelp" aria-label="About significance in view" aria-expanded="false">i</button><br>
   <select id="sigkind"><option value="gene">genes</option><option value="chemical">drugs</option></select>
   <select id="sigmeasure"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
@@ -998,7 +998,8 @@ __KINDROW__
  <div class="row" id="qrow2">Significance: <b id="qsv2">off (show all)</b>
   <input id="qsig2" type="range" min="0" max="9" step="1" value="0" style="width:160px;vertical-align:middle" aria-label="Significance cutoff">
   <span id="orbtns2"><button class="orb2" data-or="gt1">OR&gt;1</button><button class="orb2" data-or="lt1">OR&lt;1</button></span>
-  <span class="mut">rows below the cutoff, or on the other side of the odds ratio, are hidden here and in the graph</span></div>
+  <button class="ihelp" aria-label="About the significance cutoff" aria-expanded="false">i</button>
+  <div class="mut help" id="qhelp2"></div></div>
  <div class="mut" id="signote2" style="display:none"></div>
  <div id="signotest" style="display:none"></div>
  <div id="sigyr" class="row"><select id="sigkind2"><option value="gene">genes</option><option value="chemical">drugs</option></select>
@@ -1908,8 +1909,9 @@ function sigOpen(){SIGTAB_OPEN=true;SIGTAB_SORT=null;
 function sigClose(){SIGTAB_OPEN=false;document.getElementById('sigtable').classList.remove('open');layoutTable();}
 // one source for the explanation: the panel's copy is authored in the template, the table's is
 // filled from it at load, so the two can never drift apart
-(function(){const a=document.getElementById('sighelp'),b=document.getElementById('sighelp2');
- if(a&&b)b.innerHTML=a.innerHTML;})();
+(function(){[['sighelp','sighelp2'],['qhelp','qhelp2']].forEach(([x,y])=>{
+ const a=document.getElementById(x),b=document.getElementById(y);
+ if(a&&b)b.innerHTML=a.innerHTML;});})();
 // run on demand, not on every redraw: it is the one thing here that costs real work, and it is
 // only meaningful once you have settled on the view you want to read
 const BOOT_B=300;
