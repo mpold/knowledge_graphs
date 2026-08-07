@@ -906,19 +906,21 @@ __LIBTAG__
  #signotest{margin:8px 0 2px;padding:6px 10px;border:1px solid #e5cf9a;border-left:4px solid #d59a2e;
             border-radius:6px;background:#fdf7e8;font-size:12px;color:#5b4a1f;max-width:760px}
  /* the bars live here now: a table row has the width for them, a 320px panel row does not */
- #sigtable td.bar{width:90px;padding-right:0}
+ #sigtable td.bar,#sigtable th.bar{width:130px;padding-right:0}
  #sigtable td.bar span{display:block;height:9px;background:#2b6cb0;border-radius:3px;min-width:1px}
  #sigclose{margin-left:14px;background:#eef2f7;border:1px solid #cdd5e0;border-radius:6px;padding:3px 12px;cursor:pointer;font-size:13px}
  #sigclose:hover{background:#dde4ee}
  #sighelp2{max-width:640px}
- #zoom button,#srcbtns button,#labelbtns button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
- #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover{background:#dde4ee}
- #srcbtns button,#labelbtns button{margin-bottom:4px}
+ #zoom button,#srcbtns button,#labelbtns button,#orbtns button,#orbtns2 button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
+ #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#orbtns button:hover,#orbtns2 button:hover{background:#dde4ee}
+ #srcbtns button,#labelbtns button,#orbtns button{margin-bottom:4px}
+ #orbtns{margin-top:5px}
+ #orbtns2 button{margin-left:6px;margin-right:0}
  /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
     carry a trailing margin -- 6px of it would push Fit onto a second line */
  #zoom button:last-child{margin-right:0}
  #comention{width:100%}
- #srcbtns button.on,#labelbtns button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
+ #srcbtns button.on,#labelbtns button.on,#orbtns button.on,#orbtns2 button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  #srcbtns button:disabled{opacity:.45;cursor:default}
  .vis-tooltip{max-width:480px!important;white-space:normal!important;background:#fff!important;color:#1a1a1a!important;border:1px solid #999!important;border-radius:8px!important;padding:8px 10px!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;font:12px/1.45 Segoe UI,Arial,sans-serif!important}
  .eth{font-size:13px;margin-bottom:6px} .stip{padding:3px 0;border-top:1px solid #e3e3e3}
@@ -951,7 +953,8 @@ __LIBTAG__
   <div class="mut help">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row" id="qrow">Significance: <b id="qsv">off (show all)</b><br><input id="qsig" type="range" min="0" max="9" step="1" value="0" aria-label="Significance cutoff">
-  <div class="mut">Hides genes and drugs whose enrichment misses the cutoff. Diseases stay &mdash; they carry no ranking of their own.</div></div>
+  <div id="orbtns"><button class="orb" data-or="gt1">OR&gt;1</button><button class="orb" data-or="lt1">OR&lt;1</button></div>
+  <div class="mut">Hides genes and drugs whose enrichment misses the cutoff. The buttons keep one side of it &mdash; over-represented in this view (OR&gt;1) or under-represented (OR&lt;1) &mdash; and press the lit one again to clear. The depleted side is a finding too: in an adenocarcinoma view the small-cell markers DLL3 and ASCL1 land there. Diseases stay throughout: they carry no ranking of their own.</div></div>
  <div class="row" id="sigrow">Significance in view <button class="ihelp" aria-label="About significance in view" aria-expanded="false">i</button><br>
   <select id="sigkind"><option value="gene">genes</option><option value="chemical">drugs</option></select>
   <select id="sigmeasure"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
@@ -994,7 +997,8 @@ __KINDROW__
  <div class="mut" id="sigsub"></div>
  <div class="row" id="qrow2">Significance: <b id="qsv2">off (show all)</b>
   <input id="qsig2" type="range" min="0" max="9" step="1" value="0" style="width:160px;vertical-align:middle" aria-label="Significance cutoff">
-  <span class="mut">rows below the cutoff are hidden here and in the graph</span></div>
+  <span id="orbtns2"><button class="orb2" data-or="gt1">OR&gt;1</button><button class="orb2" data-or="lt1">OR&lt;1</button></span>
+  <span class="mut">rows below the cutoff, or on the other side of the odds ratio, are hidden here and in the graph</span></div>
  <div class="mut" id="signote2" style="display:none"></div>
  <div id="signotest" style="display:none"></div>
  <div id="sigyr" class="row"><select id="sigkind2"><option value="gene">genes</option><option value="chemical">drugs</option></select>
@@ -1354,10 +1358,12 @@ function build(thr){
  ENRICH=enrichCompute(VIEW_PUBS,VIEW_ENTS);
  QMAP=qMapFor(VIEW_PUBS,VIEW_ENTS);    // q for genes AND drugs, so the cut can judge both
  const qcut=activeQ();
- if(qcut!==null){
-  // a node survives if it was tested and reached the threshold; diseases carry no ranking of
-  // their own, so they stay as context rather than being cut on evidence they never had
-  const ok=id=>KIND[id]==='disease'||(QMAP[id]!==undefined&&QMAP[id]<=qcut);
+ if(qcut!==null||OR_MODE){
+  // a node survives if it was tested, reached the threshold and points the way the buttons ask;
+  // diseases carry no ranking of their own, so they stay as context rather than being cut on
+  // evidence they never had
+  const ok=id=>KIND[id]==='disease'
+    ||((qcut===null||(QMAP[id]!==undefined&&QMAP[id]<=qcut))&&orPass(id));
   edges=edges.filter(o=>ok(o.e.from)&&ok(o.e.to));
  }
  sigRender();
@@ -1417,6 +1423,7 @@ function build(thr){
    network.fit({animation:false});LABEL_A=-1;updateLabels();network.redraw();});
  network.on('zoom',updateLabels);
  network.on('animationFinished',updateLabels);
+ fitLeftPanel();    // self-correcting: a panel narrowed by anything recovers on the next redraw
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
@@ -1473,6 +1480,14 @@ function qChanged(fromTable){
 }
 ['qsig','qsig2'].forEach((id,i)=>{const el=document.getElementById(id);
  if(el)el.addEventListener('input',()=>qChanged(i===1));});
+function orPaint(){document.querySelectorAll('.orb,.orb2').forEach(b=>
+  b.classList.toggle('on',b.getAttribute('data-or')===OR_MODE));}
+document.querySelectorAll('.orb,.orb2').forEach(b=>b.addEventListener('click',()=>{
+ const m=b.getAttribute('data-or');
+ OR_MODE=(OR_MODE===m)?null:m;        // pressing the lit one clears it
+ orPaint();
+ build(+thr.value);
+}));
 const shr=document.getElementById('shrink'), exp=document.getElementById('expand');
 shr.addEventListener('input',()=>{document.getElementById('shv').textContent=shr.value+'%';applyLayoutShape();});
 exp.addEventListener('input',()=>{document.getElementById('exv').textContent=exp.value+'%';applyLayoutShape();});
@@ -1635,16 +1650,30 @@ function enrichCompute(viewPubs,viewEnts){
 }
 function orStr(e){return e?e.or.toFixed(2)+' <span class=mut>('+e.lo.toFixed(2)+'&ndash;'+e.hi.toFixed(2)+')</span>':'&mdash;';}
 function qStr(e){return e?(e.q<1e-4?e.q.toExponential(1):e.q.toFixed(4)):'&mdash;';}
-let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0, VIEW_ENTS=0, QMAP={};
+let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0, VIEW_ENTS=0, QMAP={}, ORMAP={};
+// --- direction of enrichment --------------------------------------------------------------
+// The q cut says how sure; these two say which way. An odds ratio above 1 means the entity is
+// over-represented in this view against the shared corpus, below 1 under-represented -- and the
+// depleted side is a finding, not a leftover: in an adenocarcinoma view the small-cell markers
+// DLL3 and ASCL1 land there at q well under 0.05. Untested entities have no OR and are hidden by
+// either button, the same rule the q slider follows; diseases carry no ranking and are exempt.
+const OR_TESTS={gt1:{fn:v=>v>1},lt1:{fn:v=>v<1}};
+let OR_MODE=null;
+function orPass(id){
+ if(!OR_MODE)return true;
+ const v=ORMAP[id];
+ return v!==undefined&&OR_TESTS[OR_MODE].fn(v);
+}
 // q for BOTH rankable kinds, so the slider can cut genes and drugs in one pass. The table shows
 // one kind at a time; the graph has to judge whatever it draws.
 function qMapFor(viewPubs,viewEnts){
  const keep=sigKind(), out={};
+ ORMAP={};
  ['gene','chemical'].forEach(k=>{
   const sel=document.getElementById('sigkind');
   if(sel)sel.value=k;                  // enrichCompute reads the selector; borrow it, then restore
   const e=enrichCompute(viewPubs,viewEnts);
-  if(e)Object.keys(e.rows).forEach(id=>{out[id]=e.rows[id].q;});
+  if(e)Object.keys(e.rows).forEach(id=>{out[id]=e.rows[id].q;ORMAP[id]=e.rows[id].or;});
  });
  const sel=document.getElementById('sigkind');
  if(sel)sel.value=keep;
@@ -1784,7 +1813,9 @@ const SIGCOLS=[['nm','node',s=>esc(s.label)],['pub','publications',s=>s.pub],['d
                ['corpus',()=>enrichUnit()==='par'?'corpus partners':'corpus papers',s=>{const v=bgCount(s);return v===null?'&mdash;':v;}],
                ['or','OR vs corpus',s=>orStr(ENRICH&&ENRICH.rows[s.id])],
                ['q','q (BH)',s=>qStr(ENRICH&&ENRICH.rows[s.id])],
-               ['bar','',null]];
+               // the bar is drawn from whichever measure the table is sorted by, so it says which
+               ['bar',()=>'relative '+SIG_LAB[barMeas()],null]];
+function barMeas(){const m=SIGTAB_SORT||sigMeas();return ['pub','deg','sent'].indexOf(m)>=0?m:sigMeas();}
 // Columns only exist once they carry something. Twelve of them ran off the right edge of the
 // space left beside the panel, which is how a computed enrichment can look like a missing one:
 // the bootstrap pair appears when you press the button, the enrichment trio when there is a
@@ -1809,7 +1840,7 @@ function sigTable(){
  // the same cut the graph applies, so the two views never disagree about what is significant
  const qcut=activeQ();
  SIGTAB_ROWS=SIG.filter(s=>s.kind===kind)
-   .filter(s=>qcut===null||(QMAP[s.id]!==undefined&&QMAP[s.id]<=qcut))
+   .filter(s=>(qcut===null||(QMAP[s.id]!==undefined&&QMAP[s.id]<=qcut))&&orPass(s.id))
    .sort((a,b)=>{
    if(meas==='nm')return a.label.localeCompare(b.label);
    if(meas==='pct'||meas==='z')return (b[meas][sigMeas()]-a[meas][sigMeas()])||a.label.localeCompare(b.label);
@@ -1843,7 +1874,7 @@ function sigTable(){
     +'&mdash; raising <b>Min unique publications</b> to 2 or <b>Min connections</b> to 2 is usually enough.';
  }
  // the bar column tracks whatever the table is sorted by, scaled to the leading row
- const bmeas=['pub','deg','sent'].indexOf(meas)>=0?meas:sigMeas();
+ const bmeas=barMeas();
  const bmax=Math.max(1,...SIGTAB_ROWS.map(s=>s[bmeas]));
  const COLS=sigCols();
  const head='<tr>'+COLS.map(([k,lab])=>'<th class="'+(k==='nm'?'nm':k)+(k===meas?' on':'')+'" data-k="'+k+'">'
@@ -1940,16 +1971,26 @@ const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'
 // CSS, because the buttons' width depends on the font that actually resolved. Fit's right edge
 // then lands on the content edge, so the gap to the border is the padding -- the same gap the
 // "genes" select has on the left. Skipped on narrow screens, where the media query takes over.
+// Measured UNCONSTRAINED, which is the whole trick. Measuring the row inside the width this
+// function set last time is a feedback loop: let the buttons wrap onto a second line and Fit's
+// right edge is measured on that second line, so the width collapses to roughly one button --
+// which guarantees the wrap next time. It ratchets narrower on every call and never recovers,
+// which is exactly what a large graph did, since its redraws fire enough resize events to keep
+// calling this. Clearing the width first lets the row lay out at its natural size; the same-line
+// and range checks refuse a nonsense measurement rather than acting on it.
+const FIT_MIN=160, FIT_MAX=520;
 function fitLeftPanel(){
  const lp=document.getElementById('lpanel'), z=document.getElementById('zoom');
  if(!lp||!z)return;
- if(window.innerWidth<=700||lp.style.display==='none'){lp.style.width='';return;}
+ if(window.innerWidth<=700||lp.style.display==='none'){lp.style.width='';lp.style.maxWidth='';return;}
  const b=z.getElementsByTagName?z.getElementsByTagName('button'):[];
  if(!b.length||!b[0].getBoundingClientRect)return;   // nothing measurable: keep the CSS width
- const w=Math.ceil(b[b.length-1].getBoundingClientRect().right-b[0].getBoundingClientRect().left);
- if(w<=0)return;                       // not laid out yet (hidden panel): leave the CSS width
- lp.style.maxWidth='none';
- lp.style.width=w+'px';                // content-box: the padding stays outside this, as the gap
+ const prevW=lp.style.width, prevM=lp.style.maxWidth;
+ lp.style.maxWidth='none';lp.style.width='auto';     // shrink-to-fit: the row cannot wrap here
+ const first=b[0].getBoundingClientRect(), last=b[b.length-1].getBoundingClientRect();
+ const w=Math.ceil(last.right-first.left);
+ if(Math.abs(last.top-first.top)<2&&w>=FIT_MIN&&w<=FIT_MAX){lp.style.width=w+'px';}
+ else {lp.style.width=prevW;lp.style.maxWidth=prevM;}
 }
 fitLeftPanel();
 window.addEventListener('resize',()=>{fitLeftPanel();layoutTable();if(network)network.redraw();});
