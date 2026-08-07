@@ -39,10 +39,15 @@ headed *Sentences of interest*, which lists an edge's sentences with linked PMID
 it. Each section's explanation is behind a small round **i** beside its heading.
 
 **Right column — what is in the picture.** Support thresholds (min unique sentences, min unique
-publications); label font size; structural pruning (min cluster size, min connections); gene and
-drug search; focus-on-gene with 1 or 2 hops; drug filter; free-text sentence match (substring, or
-`/regex/` when wrapped in slashes); node-type, relation-type and training-set filters; the score
-slider — 0.5 to 0.95 in steps of 0.05, then 0.96 to 0.99 — and a live stats line.
+publications); label font size; structural pruning (min cluster size, min connections, both
+floored at 2); gene and drug search; focus-on-gene with 1 or 2 hops; drug filter; free-text
+sentence match (substring, or `/regex/` when wrapped in slashes); node-type, relation-type and
+training-set filters; the score slider — 0.5 to 0.95 in steps of 0.05, then 0.96 to 0.99 — and a
+live stats line.
+
+The floor of 2 on the two structural controls matters beyond tidiness: at *Min connections* 1 the
+view holds every partner every gene has, which leaves the enrichment test below with nothing
+outside the view to contrast against.
 
 ## Significance in view
 
@@ -85,57 +90,97 @@ Read the rank interval before believing an ordering:
 
 | rank | gene | count | count 95% CI | rank 95% CI |
 |---|---|---|---|---|
-| 1 | EGFR | 880 | 832–933 | 1–2 |
-| 2 | AKT1 | 866 | 814–918 | 1–2 |
-| 30 | HIF1A | 120 | 101–142 | 26–37 |
-| 500 | UCA1 | 8 | 3–15 | 264–1447 |
+| 1 | EGFR | 867 | 812–925 | 1–2 |
+| 2 | AKT1 | 864 | 811–920 | 1–2 |
+| 30 | SNAI2 | 119 | 99–145 | 26–36 |
+| 500 | STAT6 | 8 | 3–13 | 292–1408 |
 
 The top of the list is firm and the tail is meaningless: a gene sitting 500th could belong
-anywhere from 264th to 1447th. The count intervals track √n as they should — the width at
-n = 880 is 108, against 2·1.96·√880 ≈ 116 for a Poisson count.
+anywhere from 292nd to 1408th, and EGFR and AKT1 are statistically indistinguishable, so "the top
+gene" is not a claim this corpus supports. The count intervals track √n as they should — the
+width at n = 867 is 113, against 2·1.96·√867 ≈ 115 for a Poisson count.
 
-This measures **sampling variability of the corpus only**. It says nothing about whether a gene
-is enriched relative to the literature at large; for that you need a background corpus and a
-Fisher exact test, which this page does not do.
+This measures **sampling variability only** — whether the ranking would survive another draw of
+the literature. Whether a gene is *characteristic* of the view is the next section's question.
 
 ### Is it enriched, or just big?
 
 The bootstrap says how firm the ranking is; it does not say whether a gene is *characteristic*
 of the view. The table's **corpus papers**, **OR vs corpus** and **q (BH)** columns do, from a
-2×2 over publications:
+2×2:
 
 | | mentions it | doesn't |
 |---|---|---|
 | in view | a | view − a |
 | rest of the corpus | c − a | N − view − (c − a) |
 
-`c` and `N` come from a per-entity document index built over **every normalized triple in the
-file** — 10,662 publications, score-unfiltered on purpose, since a corpus already filtered by the
-cutoff you are testing is no denominator at all. It is embedded in the page (~104 KB) and keyed
-by the same normalized ids the nodes use, so no string matching is involved.
+**The unit follows the ranking.** By publications the cells count papers against the corpus'
+papers; by **partners** they count entities against the corpus' entities, drawn from a separate
+partner background — testing breadth against a paper denominator would compare two different
+things. Ranking by sentences falls back to the publication test on purpose: sentences are
+pseudo-replicates, and a Fisher test on them would be anticonservative by a large factor.
+
+### One corpus for every lung project
+
+`c` and `N` come from a per-entity index built over **every normalized triple**, score-unfiltered
+on purpose, since a corpus already filtered by the cutoff you are testing is no denominator at
+all. The index is the **union across all `lung_*` projects** — currently **15,538 publications
+and 9,685 entities** from `lung_adeno`, `lung_large`, `lung_neuroendocrine`, `lung_pancoast`,
+`lung_small` and `lung_squamous` — so an odds ratio computed in one directory means the same
+thing as one computed in another.
+
+A union, not a sum: the corpora overlap (one paper today, between `lung_adeno` and
+`lung_pancoast`), and adding counts would corrupt the denominator the moment two queries pull the
+same article. Each project caches its own slice as sets under `databases/corpus_contrib.json`,
+keyed to the source file's size and mtime; a project that has never been run is *absent* rather
+than assumed, and both the console and the table name the corpora that contributed. The merged
+index rides in the page at ~193 KB, keyed by the same normalized ids the nodes use, so no string
+matching is involved.
+
+### Reading the columns
 
 Fisher's exact test, two-sided; the odds ratio carries a Haldane–Anscombe 0.5 correction and a
 Woolf interval (an approximation, not the conditional MLE); **q** is Benjamini–Hochberg over the
-entities with at least 5 corpus papers — roughly 1,000–1,300 genes depending on the view, the
-rest being untestable at any sensible rate. It recomputes with the view, in well under a second.
+entities with at least 5 in the corpus. It recomputes with the view, in well under a second.
 
-What it finds is recognisable. Typing `immunotherapy` (159 papers):
+Rows that cannot be tested show their corpus count with a blank OR and q — never a blank
+denominator, which would imply the corpus holds fewer papers than the view. Two reasons a row
+goes untested, both named in the subtitle: it falls below the 5-in-corpus floor, or it has
+**nothing outside the view** to contrast against. If every row hits the second case the table
+says so outright rather than hiding the columns, and narrowing the view restores the contrast.
+
+What it finds is recognisable. Typing `immunotherapy` (86 papers in view):
 
 | gene | view | corpus | OR | q |
 |---|---|---|---|---|
-| PDCD1 | 46 | 508 | 8.89 | 1.7e-22 |
-| CD274 | 56 | 794 | 7.22 | 1.7e-22 |
-| CTLA4 | 16 | 254 | 4.95 | 3.8e-05 |
-| EGFR | 7 | 1224 | **0.38** | 0.06 |
+| PDCD1 | 34 | 741 | 13.70 | 2.7e-21 |
+| CD274 | 40 | 1198 | 10.75 | 6.9e-21 |
+| CTLA4 | 16 | 327 | 11.38 | 4.4e-10 |
+| EGFR | 5 | 1396 | **0.68** | 0.465 |
 
-The checkpoint axis is enriched and EGFR is *depleted* — which is the biology. Restricting to
-2024–2026 surfaces GPX4 (OR 5.4) and SLC7A11 (3.6), the ferroptosis pair.
+The checkpoint axis is enriched and EGFR is not — which is the biology.
+
+### The Significance slider
+
+A q cutoff, in the left column above *Significance in view* and in the table below its summary;
+either handle moves the other and both views apply the same cut. Ten stops on the conventional
+thresholds — off, 0.5, 0.2, 0.1, 0.05, 0.01, 0.001, 1e-4, 1e-5, 1e-6 — because q is read on a log
+scale. On `lung_adeno` at defaults, `q ≤ 0.05` takes the graph from 29,310 edges over 3,960 genes
+to 1,249 over 62.
+
+Genes and drugs are judged and untested counts as non-significant; **diseases stay**, since they
+carry no ranking of their own, and survive only where they still connect to something
+significant. The ranking is computed from the view *before* the cut and the cut only hides what
+it judged — otherwise each notch would move the very numbers it filters on, and the q beside a
+node would not be the q it was judged by.
 
 Two limits worth stating whenever you quote a q-value:
 
-- **It cannot say "specific to lung adenocarcinoma."** Every paper in the denominator is already
-  a lung paper, so the contrast is view-against-corpus. Answering the specificity question needs
-  an outside corpus this page does not have.
+- **It cannot say "specific to lung cancer."** Every paper in the denominator is a lung paper, so
+  the contrast is view-against-corpus. What it *can* now say is that an entity is characteristic
+  of one lung subtype against the rest, since the denominator spans all six — running the same
+  query in `lung_small` and reading it against the shared corpus is a subtype question, not a
+  cancer-versus-everything one.
 - **The counts are model output.** At score ≥0.99 the enriched gene is MALAT1 while EGFR, KRAS,
   TP53 and ALK come out depleted — that is the extraction behaviour of the high-confidence
   checkpoint as much as the literature. Run the test at two cutoffs and trust what survives both.
@@ -143,14 +188,27 @@ Two limits worth stating whenever you quote a q-value:
 The population is also "documents with an extracted candidate pair", not "documents mentioning
 the entity": a gene named only in a methods section enters neither column.
 
-**Full table view** replaces the canvas with the whole ranking: every node of that kind, all
-three counts, percentile, z and a bar, sortable by any column, with its own year handles and
-kind/measure dropdowns that mirror the panel's. Table rows do not navigate — they are there to be
-read and sorted; the panel's top-six list is what centres a node in the graph, and if the filters
-have removed it the details box says so rather than moving the view. When drugs are
-selected, both views state that the list mixes clinically used drugs with lab chemicals used only
-in experiments — ChEBI recognises both, so LY294002 ranks among the leaders and has never been
-given to a patient.
+### Full table view
+
+Replaces the canvas with the whole ranking: every node of that kind, all three counts,
+percentile, z, the enrichment trio and a bar, sortable by any column, with its own year handles,
+significance slider and kind/measure dropdowns mirroring the panel's. `Graph view` or `Esc`
+returns you.
+
+It stops short of the **right panel, which stays live** — every threshold, filter and the score
+slider keep working while you read, and the ranking under them recomputes. Tighten to score ≥0.99
+without leaving the table and it goes from 5,288 rows led by EGFR to 2,519 led by MALAT1.
+
+Columns appear only once they carry something: the bootstrap pair after you press the button, the
+enrichment trio when there is a contrast to test. Twelve columns otherwise run off the right edge,
+which is how a computed enrichment can look like a missing one. The name column is pinned while
+the rest scrolls sideways.
+
+Table rows do not navigate — they are there to be read and sorted; the panel's top-six list is
+what centres a node in the graph, and if the filters have removed it the details box says so
+rather than moving the view. When drugs are selected, both views state that the list mixes
+clinically used drugs with lab chemicals used only in experiments — ChEBI recognises both, so
+LY294002 ranks among the leaders and has never been given to a patient.
 
 ## How filtering works
 
@@ -180,6 +238,14 @@ The order is deliberate, and it is what keeps the panel honest:
 - **Score >=0.95 and >=0.99 are effectively PPI-only** — the BioRED checkpoint's composite tops
   out around 0.926, as the build log warns.
 - **`Min connections` is a single pass**, so nodes that lose links in it can finish below the bar.
+- **Partner enrichment degenerates more readily than publication enrichment.** A gene's whole
+  neighbourhood tends to survive into the view while its papers do not, so at a loose view many
+  genes have no partner outside it and go untested. Prune first — the floor of 2 on
+  `Min connections` exists for this.
+- **A few chemicals are blocked from being nodes at all** (`CHEMICAL_IGNORE`: tyrosine, glucose).
+  ChEBI resolves them correctly, but their mentions are residue names and culture conditions, not
+  compounds under study. The match is exact, so `2-deoxy-D-glucose` and
+  `tyrosine kinase inhibitor` survive.
 - **Tissue grouping and co-mention aliases are read from names**, so a disease whose name does
   not say its tissue is not grouped.
 - **Counts sum past the edge total** for relation types and training sets, since an edge with
@@ -198,3 +264,10 @@ python high_confidence_g.py --data-root kaggle_working               # gene-only
 
 Publication years come from `databases/pmc_years.json`, built by `pub_years.py`; run that first
 if the corpus has grown, or the year slider will silently drop undated evidence.
+
+The enrichment denominator is shared across projects, so a run also writes its own slice to
+`databases/corpus_contrib.json` and merges whatever slices the sibling `lung_*` projects have
+written. **Run the script once in each project** to populate them; until then the console names
+the corpora still missing, and the denominator is honestly smaller. Re-running a project after
+its pipeline changes refreshes its slice automatically — the cache is keyed to the source file's
+size and mtime.
