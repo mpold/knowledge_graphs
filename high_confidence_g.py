@@ -96,6 +96,8 @@ DATA_ROOT = ROOT / "kaggle_working"
 # module-level paths; (re)bound to DATA_ROOT by set_data_root() so --data-root can retarget them
 OUT_DIR = XML_DIR = SENT_DIR = None
 RE_FILE = PMC_YEARS = TARGET_FILE = None
+# every lung_* project caches its slice of the shared corpus under this name
+CONTRIB_NAME = "corpus_contrib.json"
 DISEASE_LIB = CHEM_LIB = None
 JSON_OUT = GRAPH_OUT = None
 
@@ -694,37 +696,120 @@ def graph_payload_multi(triples, flags):
     return {"nodes": nodes, "edges": edges}
 
 
-def background_index(triples):
-    """Per-entity document counts over ALL normalized triples -- the denominator the in-browser
-    Fisher test needs.
+def corpus_contrib(triples, flags):
+    """This run's contribution to the shared lung corpus: which publications and partners stand
+    behind each entity, as SETS rather than counts.
+
+    Sets, because the sibling corpora overlap -- only by one paper today, but summing counts
+    would make the denominator wrong the moment two queries pull the same article, and a
+    denominator quietly off by a few is worse than one that is obviously off."""
+    flags = flags or {"phenotype": {}, "non_chemical": {}}
+    pm, ents = set(), set()
+    doc = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
+    par = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
+    for t in triples:
+        p = (t.get("pmid") or "?").split(".")[0]
+        pm.add(p)
+        a, b = node_of(t["subject"], flags), node_of(t["object"], flags)
+        for n in (a, b):
+            if n:
+                ents.add(n[1])
+                if n[0] in doc:
+                    doc[n[0]][n[1]].add(p)
+        if a and b and a[1] != b[1]:
+            if a[0] in par:
+                par[a[0]][a[1]].add(b[1])
+            if b[0] in par:
+                par[b[0]][b[1]].add(a[1])
+    return {"pm": sorted(pm), "ents": sorted(ents),
+            "doc": {k: {i: sorted(v) for i, v in d.items()} for k, d in doc.items()},
+            "par": {k: {i: sorted(v) for i, v in d.items()} for k, d in par.items()}}
+
+
+def shared_background(data_root, contrib, src_file):
+    """Merge this run's contribution with every sibling lung_* corpus into one background.
+
+    Every lung analysis then divides by the same denominator, so an odds ratio from one
+    directory means the same thing as one from another. Each directory caches its own
+    contribution next to its databases (keyed to the source file's size and mtime, so an
+    updated pipeline invalidates it); a sibling that has never been run is simply absent, and
+    the page says which corpora it actually covers rather than pretending to totality."""
+    root = Path(data_root).resolve()
+    cache = root / "databases" / CONTRIB_NAME
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    st = src_file.stat()
+    payload = dict(contrib, _src={"size": st.st_size, "mtime": int(st.st_mtime)})
+    cache.write_text(json.dumps(payload), encoding="utf-8")
+
+    family = root.parent.parent            # <...>/relationship_graphs/<project>/<data_root>
+    here = root.parent.name
+    parts, missing = {here: contrib}, []
+    for sib in sorted(family.glob("lung_*")):
+        if not sib.is_dir() or sib.name == here:
+            continue
+        f = sib / root.name / "databases" / CONTRIB_NAME
+        if not f.exists():
+            missing.append(sib.name)
+            continue
+        try:
+            parts[sib.name] = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            missing.append(sib.name)
+
+    pm, ents = set(), set()
+    doc = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
+    par = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
+    for c in parts.values():
+        pm.update(c.get("pm", ()))
+        ents.update(c.get("ents", ()))
+        for kind in doc:
+            for i, v in (c.get("doc", {}).get(kind) or {}).items():
+                doc[kind][i].update(v)
+            for i, v in (c.get("par", {}).get(kind) or {}).items():
+                par[kind][i].update(v)
+    return {"n": len(pm), "ne": len(ents),
+            "doc": {k: {i: len(v) for i, v in d.items()} for k, d in doc.items()},
+            "par": {k: {i: len(v) for i, v in d.items()} for k, d in par.items()},
+            "src": sorted(parts), "missing": missing}
+
+
+def background_index(triples, flags):
+    """Per-entity denominators over ALL normalized triples, for the in-browser Fisher test.
+
+    Two backgrounds, because the panel ranks on two different units and a test must use the
+    unit it is ranking on:
+      doc  publications mentioning the entity, and `n`, the corpus publication count
+      par  distinct partners the entity is related to, and `ne`, the corpus entity count
 
     Deliberately score-unfiltered: the page tests a filtered view against the corpus, so the
-    corpus must not already be filtered by the cutoff being tested. Counted in PUBLICATIONS,
-    the independent unit, and keyed by the same normalized ids the graph nodes use, so a count
-    joins to a node without any string matching.
+    corpus must not already be filtered by the cutoff being tested. Keyed through node_of, the
+    same identity the graph nodes use -- including its ignore lists -- so a count joins to a
+    node without any string matching.
 
     The population is "documents with an extracted candidate pair", not "documents mentioning
     the entity": a gene named only in a methods section never enters either column of the
     table. That is what a p-value from this index is about."""
-    pm = set()
-    gene, chem = collections.defaultdict(set), collections.defaultdict(set)
+    flags = flags or {"phenotype": {}, "non_chemical": {}}   # gene-only runs load no type flags
+    pm, ents = set(), set()
+    doc = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
+    par = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
     for t in triples:
         p = (t.get("pmid") or "?").split(".")[0]
         pm.add(p)
-        for side in ("subject", "object"):
-            e = t[side]
-            typ = e.get("type")
-            if typ == "GENETIC":
-                s = single(e.get("hgnc_symbol"))
-                if s and s != "MKI67" and e.get("control") != "yes":
-                    gene[s].add(p)
-            elif typ == "CHEMICAL":
-                s = single(e.get("chebi_label"))
-                if s and s.strip().lower() not in CHEMICAL_IGNORE:
-                    chem[s.strip()].add(p)
-    return {"n": len(pm),
-            "gene": {k: len(v) for k, v in gene.items()},
-            "chemical": {k: len(v) for k, v in chem.items()}}
+        a, b = node_of(t["subject"], flags), node_of(t["object"], flags)
+        for n in (a, b):
+            if n:
+                ents.add(n[1])
+                if n[0] in doc:
+                    doc[n[0]][n[1]].add(p)
+        if a and b and a[1] != b[1]:
+            if a[0] in par:
+                par[a[0]][a[1]].add(b[1])
+            if b[0] in par:
+                par[b[0]][b[1]].add(a[1])
+    return {"n": len(pm), "ne": len(ents),
+            "doc": {k: {i: len(v) for i, v in d.items()} for k, d in doc.items()},
+            "par": {k: {i: len(v) for i, v in d.items()} for k, d in par.items()}}
 
 
 def read_pubmed_query():
@@ -806,16 +891,22 @@ __LIBTAG__
  #sigtable{display:none;position:absolute;top:0;left:0;right:0;bottom:0;z-index:20;background:#fff;overflow:auto;padding:16px 20px}
  #sigtable.open+#panel,#panel.overtable{z-index:25}
  #sigtable.open{display:block}
- #sigtable h2{font-size:15px;margin:0 0 2px;color:#1c2330}
+ /* inline-block so the "i" sits beside the title rather than under it */
+ #sigtable h2{font-size:15px;margin:0;color:#1c2330;display:inline-block}
  #sigtable table{border-collapse:collapse;font-size:13px;margin-top:10px;min-width:620px}
- #sigtable th,#sigtable td{padding:3px 10px;border-bottom:1px solid #e9edf3;text-align:right;font-variant-numeric:tabular-nums}
+ #sigtable th,#sigtable td{padding:3px 8px;border-bottom:1px solid #e9edf3;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
  #sigtable th{position:sticky;top:0;background:#fff;color:#2b6cb0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #cdd5e0}
  #sigtable th.on{font-weight:700;text-decoration:underline}
- #sigtable td.nm,#sigtable th.nm{text-align:left}
+ #sigtable td.nm,#sigtable th.nm{text-align:left;position:sticky;left:0;background:#fff}
+ #sigtable tbody tr:hover td.nm{background:#eef2f7}
+ #sigtbody{overflow-x:auto}   /* the table scrolls sideways inside the page, name column pinned */
  #sigtable tbody tr:hover{background:#eef2f7}
  #sigyr{margin:10px 0 2px;font-size:13px}
+ /* an undefined test is not a missing feature: say so where the columns would have been */
+ #signotest{margin:8px 0 2px;padding:6px 10px;border:1px solid #e5cf9a;border-left:4px solid #d59a2e;
+            border-radius:6px;background:#fdf7e8;font-size:12px;color:#5b4a1f;max-width:760px}
  /* the bars live here now: a table row has the width for them, a 320px panel row does not */
- #sigtable td.bar{width:190px;padding-right:0}
+ #sigtable td.bar{width:90px;padding-right:0}
  #sigtable td.bar span{display:block;height:9px;background:#2b6cb0;border-radius:3px;min-width:1px}
  #sigclose{margin-left:14px;background:#eef2f7;border:1px solid #cdd5e0;border-radius:6px;padding:3px 12px;cursor:pointer;font-size:13px}
  #sigclose:hover{background:#dde4ee}
@@ -876,8 +967,8 @@ __LIBTAG__
  <div class="row">Min unique publications: <b id="mpv">1</b> <button class="ihelp" aria-label="About min unique publications" aria-expanded="false">i</button><br><input id="minpub" type="range" min="1" max="10" value="1">
   <div class="mut help">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
  <div class="row">Font size: <b id="fsv">50%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="50" aria-label="Label font size"></div>
- <div class="row">Min cluster size: <select id="mincluster"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
- <div class="row">Min connections: <select id="mindeg"><option selected>1</option><option>2</option><option>3</option><option>4</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. A single pass: nodes that lose links in it can finish below the bar.</div></div>
+ <div class="row">Min cluster size: <select id="mincluster"><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
+ <div class="row">Min connections: <select id="mindeg"><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. A single pass: nodes that lose links in it can finish below the bar.</div></div>
  <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
@@ -896,15 +987,16 @@ __KINDROW__
  <div class="row mut" id="stats"></div>
 </div>
 <div id="net"></div>
-<div id="sigtable"><h2 id="sigttl"></h2><div class="mut" id="sigsub"></div>
+<div id="sigtable"><h2 id="sigttl"></h2><button class="ihelp" data-help="sig" aria-label="About significance in view" aria-expanded="false">i</button>
+ <div class="mut help" data-help="sig" id="sighelp2"></div>
+ <div class="mut" id="sigsub"></div>
  <div class="mut" id="signote2" style="display:none"></div>
+ <div id="signotest" style="display:none"></div>
  <div id="sigyr" class="row"><select id="sigkind2"><option value="gene">genes</option><option value="chemical">drugs</option></select>
   <select id="sigmeasure2"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
   &nbsp; Year: <b id="yrlab2"></b> <input id="yrlo2" type="range" style="width:120px"> <input id="yrhi2" type="range" style="width:120px">
   <button id="sigboot">Bootstrap CIs</button>
-  <button id="sigclose">Graph view</button>
-  <button class="ihelp" data-help="sig" aria-label="About significance in view" aria-expanded="false">i</button>
-  <div class="mut help" data-help="sig" id="sighelp2"></div></div>
+  <button id="sigclose">Graph view</button></div>
  <div id="sigtbody"></div></div>
 <script>
 const DATA=__PAYLOAD__;
@@ -1165,7 +1257,7 @@ function applyLabelKinds(){
  NODEDS.update(NODEDS.get().map(n=>({id:n.id,label:LABEL_KINDS.has(KIND[n.id]||'gene')?(labelById[n.id]||''):''})));
 }
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?2:v;}
-function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?1:v;}
+function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?2:v;}
 function activeMinPub(){const v=parseInt((document.getElementById('minpub')||{}).value);return isNaN(v)?1:v;}
 // Gene/chem focus: expand `hops` steps from the seeds over the CURRENT edge set and keep the
 // edges whose both endpoints are in reach. It has to run again after the text lens -- expanding
@@ -1300,8 +1392,8 @@ function build(thr){
  network.on('animationFinished',updateLabels);
  // the ranking rides on the same edge list that was just drawn, so the two can never disagree
  DRAWN_EDGES=edges;BOOT=null;          // a new view invalidates any bootstrap taken of the old one
- VIEW_PUBS=vpub.size;
- sigCompute(edges);ENRICH=enrichCompute(VIEW_PUBS);sigRender();
+ VIEW_PUBS=vpub.size;VIEW_ENTS=keep.size;   // the two universes the enrichment table can use
+ sigCompute(edges);ENRICH=enrichCompute(VIEW_PUBS,VIEW_ENTS);sigRender();
  if(SIGTAB_OPEN)sigTable();
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
@@ -1466,16 +1558,38 @@ function oddsRatio(a,b,c,d){                    // Haldane-Anscombe: 0.5 keeps a
  const se=Math.sqrt(1/A+1/B+1/C+1/D), l=Math.log(or);
  return {or:or,lo:Math.exp(l-1.96*se),hi:Math.exp(l+1.96*se)};
 }
-const ENRICH_MIN=5;                             // below ~5 corpus papers Fisher cannot reach significance
-function enrichCompute(viewPubs){
- const kind=sigKind(), bg=(BG&&BG[kind])||{}, N=(BG&&BG.n)||0;
- if(!N||!viewPubs)return null;
+const ENRICH_MIN=5;                             // below ~5 in the corpus Fisher cannot reach significance
+// The unit follows the ranking. By publications the table is papers-with-the-entity out of the
+// corpus' papers; by PARTNERS it is entities-related-to-it out of the corpus' entities, against
+// a separate partner background -- testing breadth against a paper denominator would be
+// comparing two different things. Sentences fall back to the publication test on purpose: they
+// are pseudo-replicates, and a Fisher test on them would be anticonservative by a large factor.
+function enrichUnit(){return sigMeas()==='deg'?'par':'doc';}
+// The corpus count is known for every node whether or not its row can be TESTED -- it comes
+// straight from BG. Tying it to the test result printed a blank next to a positive view count,
+// which reads as "0 corpus papers behind 37 in view", an impossibility: the corpus contains the
+// view. Untestable now means an empty OR and q, never an empty denominator.
+function bgCount(s){const m=(BG&&BG[enrichUnit()]&&BG[enrichUnit()][s.kind])||{};
+ const v=m[s.id];return v===undefined?null:v;}
+function enrichCompute(viewPubs,viewEnts){
+ const kind=sigKind(), unit=enrichUnit();
+ const bg=(BG&&BG[unit]&&BG[unit][kind])||{};
+ const N=(unit==='par'?(BG&&BG.ne):(BG&&BG.n))||0;
+ const V=unit==='par'?viewEnts:viewPubs;
+ const val=s=>unit==='par'?s.deg:s.pub;
+ if(!N||!V)return null;
  const out={}, tested=[];
+ let nocontrast=0, belowfloor=0;
  SIG.forEach(s=>{
   if(s.kind!==kind)return;
-  const c=bg[s.id];                             // corpus documents mentioning it
-  if(!c||c<ENRICH_MIN)return;
-  const a=Math.min(s.pub,c), b=Math.max(0,viewPubs-a), cc=Math.max(0,c-a), d=Math.max(0,N-viewPubs-cc);
+  const c=bg[s.id];                             // corpus documents (or partners) for it
+  if(!c||c<ENRICH_MIN){belowfloor++;return;}
+  const a=Math.min(val(s),c), b=Math.max(0,V-a), cc=Math.max(0,c-a), d=Math.max(0,N-V-cc);
+  // Nothing outside the view: every paper (or partner) this entity has is already in front of
+  // you, so there is no contrast to test. The Haldane 0.5 would still hand back a huge odds
+  // ratio and a tiny q -- an artefact of the correction, not a finding -- so the row says
+  // nothing instead. On an unfiltered view that is every row, which is the honest answer.
+  if(cc<1){nocontrast++;return;}
   const r=oddsRatio(a,b,cc,d);
   out[s.id]={a:a,c:c,or:r.or,lo:r.lo,hi:r.hi,p:fisherP(a,b,cc,d)};
   tested.push(s.id);
@@ -1485,11 +1599,11 @@ function enrichCompute(viewPubs){
  let prev=1;
  for(let i=m-1;i>=0;i--){const id=tested[i];
   prev=Math.min(prev,out[id].p*m/(i+1));out[id].q=prev;}
- return {kind:kind,n:N,view:viewPubs,tested:m,rows:out};
+ return {kind:kind,unit:unit,n:N,view:V,tested:m,nocontrast:nocontrast,belowfloor:belowfloor,rows:out};
 }
 function orStr(e){return e?e.or.toFixed(2)+' <span class=mut>('+e.lo.toFixed(2)+'&ndash;'+e.hi.toFixed(2)+')</span>':'&mdash;';}
 function qStr(e){return e?(e.q<1e-4?e.q.toExponential(1):e.q.toFixed(4)):'&mdash;';}
-let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0;
+let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0, VIEW_ENTS=0;
 function bootstrapCIs(B){
  const kind=sigKind(), meas=sigMeas();
  const kidx=new Map(), ids=[];
@@ -1595,6 +1709,7 @@ function sigSync(fromTable){
  if(fromTable&&k2){k.value=k2.value;m.value=m2.value;}
  else if(k2){k2.value=k.value;m2.value=m.value;}
  SIGTAB_SORT=null;                      // the ranking changed; drop a column sort from before it
+ ENRICH=enrichCompute(VIEW_PUBS,VIEW_ENTS);   // by-partners tests partners, not papers
  sigRender();
  if(SIGTAB_OPEN)sigTable();
 }
@@ -1612,14 +1727,22 @@ const SIGCOLS=[['nm','node',s=>esc(s.label)],['pub','publications',s=>s.pub],['d
                ['z','z (log₁₀)',s=>zStr(s.z[sigMeas()])],
                ['cic','count 95% CI',s=>bootStr(BOOT&&BOOT.count[s.id])],
                ['cir','rank 95% CI',s=>bootStr(BOOT&&BOOT.rank[s.id])],
-               ['corpus','corpus papers',s=>(ENRICH&&ENRICH.rows[s.id])?ENRICH.rows[s.id].c:'&mdash;'],
+               ['corpus',()=>enrichUnit()==='par'?'corpus partners':'corpus papers',s=>{const v=bgCount(s);return v===null?'&mdash;':v;}],
                ['or','OR vs corpus',s=>orStr(ENRICH&&ENRICH.rows[s.id])],
                ['q','q (BH)',s=>qStr(ENRICH&&ENRICH.rows[s.id])],
                ['bar','',null]];
+// Columns only exist once they carry something. Twelve of them ran off the right edge of the
+// space left beside the panel, which is how a computed enrichment can look like a missing one:
+// the bootstrap pair appears when you press the button, the enrichment trio when there is a
+// contrast to test, and the table stays narrow enough to read until then.
+function sigCols(){return SIGCOLS.filter(([k])=>
+  (k==='cic'||k==='cir')?!!BOOT
+  :(k==='corpus')?!!(BG&&BG.n)
+  :((k==='or'||k==='q')?!!(ENRICH&&ENRICH.tested):true));}
 const SIGSORTABLE=new Set(['nm','pub','deg','sent','pct','z','corpus','or','q']);   // intervals are not a sort key
 function sigSortVal(s,k){                       // enrichment columns sort on their own numbers
  const e=ENRICH&&ENRICH.rows[s.id];
- if(k==='corpus')return e?e.c:-1;
+ if(k==='corpus'){const v=bgCount(s);return v===null?-1:v;}
  if(k==='or')return e?e.or:-1;
  if(k==='q')return e?-e.q:-Infinity;            // smallest q first
  return s[k];
@@ -1640,14 +1763,34 @@ function sigTable(){
   +yr[0]+'&ndash;'+yr[1]+'</b>, score &ge;'+activeConf()+', and every other filter in force. '
   +'Percentile and z are computed among those '+(KL[kind]||kind)+' for <b>'+
   ({pub:'publications',deg:'partners',sent:'sentences'}[sigMeas()])+'</b>; click a heading to sort. The controls on the right stay live &mdash; filter while you read and the table follows.'
-  +(ENRICH?(' &middot; enrichment: this view’s <b>'+ENRICH.view+'</b> papers against the corpus’ <b>'+ENRICH.n
-    +'</b>, Fisher exact on <b>'+ENRICH.tested+'</b> testable '+(KL[kind]||kind)+' (≥'+ENRICH_MIN+' corpus papers), q = Benjamini-Hochberg.'):'');
+  +(ENRICH?(' &middot; enrichment counts '+(ENRICH.unit==='par'?'<b>partners</b>':'<b>publications</b>')
+    +': this view’s <b>'+ENRICH.view+'</b> against the shared lung corpus'
+    +((BG&&BG.src&&BG.src.length>1)?(' ('+BG.src.join(' + ')+')'):'')+'’ <b>'+ENRICH.n
+    +'</b>, Fisher exact on <b>'+ENRICH.tested+'</b> testable '+(KL[kind]||kind)+' (≥'+ENRICH_MIN
+    +' in the corpus), q = Benjamini-Hochberg.'
+    +(ENRICH.belowfloor?(' <b>'+ENRICH.belowfloor+'</b> fall below that floor'):'')
+    +(ENRICH.nocontrast?((ENRICH.belowfloor?' and ':' ')+'<b>'+ENRICH.nocontrast+'</b> have nothing outside the view to contrast against'):'')
+    +((ENRICH.belowfloor||ENRICH.nocontrast)?(', so their OR and q are blank &mdash; their corpus counts are still shown'
+      +(ENRICH.tested?'':'; narrow the view to make the comparison mean something')+'.'):'')):'');
  sigNote('signote2',kind);
+ // when nothing can be tested the OR/q columns are absent; without this they would just look missing
+ const nt=document.getElementById('signotest');
+ if(nt){
+  const dead=ENRICH&&!ENRICH.tested;
+  nt.style.display=dead?'':'none';
+  if(dead)nt.innerHTML='<b>No enrichment to test at this view.</b> All <b>'+ENRICH.nocontrast+'</b> '
+    +(KL[kind]||kind)+' with enough corpus '+(ENRICH.unit==='par'?'partners':'papers')
+    +' already have every one of them on screen, so there is nothing outside the view to compare against and '
+    +'<em>OR vs corpus</em> and <em>q</em> are undefined rather than missing. Narrow the view to create the contrast '
+    +'&mdash; raising <b>Min unique publications</b> to 2 or <b>Min connections</b> to 2 is usually enough.';
+ }
  // the bar column tracks whatever the table is sorted by, scaled to the leading row
  const bmeas=['pub','deg','sent'].indexOf(meas)>=0?meas:sigMeas();
  const bmax=Math.max(1,...SIGTAB_ROWS.map(s=>s[bmeas]));
- const head='<tr>'+SIGCOLS.map(([k,lab])=>'<th class="'+(k==='nm'?'nm':k)+(k===meas?' on':'')+'" data-k="'+k+'">'+lab+'</th>').join('')+'</tr>';
- const body=SIGTAB_ROWS.map((s,i)=>'<tr data-i="'+i+'">'+SIGCOLS.map(([k,lab,f])=>
+ const COLS=sigCols();
+ const head='<tr>'+COLS.map(([k,lab])=>'<th class="'+(k==='nm'?'nm':k)+(k===meas?' on':'')+'" data-k="'+k+'">'
+   +(typeof lab==='function'?lab():lab)+'</th>').join('')+'</tr>';
+ const body=SIGTAB_ROWS.map((s,i)=>'<tr data-i="'+i+'">'+COLS.map(([k,lab,f])=>
    k==='bar'?'<td class=bar><span style="width:'+Math.max(1,Math.round(100*s[bmeas]/bmax))+'%"></span></td>'
    :'<td class="'+(k==='nm'?'nm':'')+'">'+(k==='nm'?(i+1)+'. '+f(s):f(s))+'</td>').join('')+'</tr>').join('');
  document.getElementById('sigtbody').innerHTML='<table><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
@@ -1807,7 +1950,7 @@ def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query="", multi=Fal
             .replace("__CONFDEF__", "6" if multi else "13")
             .replace("__PUBMED_QUERY__", qrow)
             .replace("__PAYLOAD__", json.dumps(payload, ensure_ascii=False))
-            .replace("__BACKGROUND__", json.dumps(background or {"n": 0, "gene": {}, "chemical": {}}))
+            .replace("__BACKGROUND__", json.dumps(background or {"n": 0, "ne": 0, "doc": {}, "par": {}}))
             .replace("__CCOLOR__", json.dumps(RCOLOR))
             .replace("__MINY__", str(miny)).replace("__MAXY__", str(maxy)))
 
@@ -1877,6 +2020,12 @@ def main():
 
     # 3) the graph (universe = qualifying at GRAPH_BASE; in-browser score slider 0.5..0.99)
     if not args.no_graph:
+        # one denominator for every lung_* analysis: this run's slice, merged with the
+        # siblings' cached slices (see shared_background)
+        bg = shared_background(DATA_ROOT, corpus_contrib(d, flags), RE_FILE)
+        print(f"  corpus for enrichment: {bg['n']:,} publications, {bg['ne']:,} entities "
+              f"from {', '.join(bg['src'])}"
+              + (f"; not yet run: {', '.join(bg['missing'])}" if bg['missing'] else ""))
         universe = kept if args.score <= GRAPH_BASE else [t for t in d if keep_fn(t, GRAPH_BASE)]
         payload = graph_payload_multi(universe, flags) if multi else graph_payload(universe)
         yrs = [s["yr"] for e in payload["edges"] for s in e["sents"] if s.get("yr")]
@@ -1888,7 +2037,7 @@ def main():
         GRAPH_OUT.parent.mkdir(parents=True, exist_ok=True)
         pubmed_query = read_pubmed_query()
         GRAPH_OUT.write_text(render_graph(payload, lib, miny, maxy, nxml, pubmed_query, multi,
-                                          background_index(d)),
+                                          bg),
                              encoding="utf-8")
         n99 = sum(1 for e in payload["edges"] if any(s["sc"] >= 0.99 for s in e["sents"]))
         npubs = len({s["pmid"] for e in payload["edges"] for s in e["sents"]})
