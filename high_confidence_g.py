@@ -950,6 +950,8 @@ __LIBTAG__
  <div class="row" id="cmrow">Co-mention links: <button class="ihelp" aria-label="About co-mention links" aria-expanded="false">i</button><br><select id="comention"><option value="">(off)</option></select>
   <div class="mut help">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
+ <div class="row" id="qrow">Significance: <b id="qsv">off (show all)</b><br><input id="qsig" type="range" min="0" max="9" step="1" value="0" aria-label="Significance cutoff">
+  <div class="mut">Hides genes and drugs whose enrichment misses the cutoff. Diseases stay &mdash; they carry no ranking of their own.</div></div>
  <div class="row" id="sigrow">Significance in view <button class="ihelp" aria-label="About significance in view" aria-expanded="false">i</button><br>
   <select id="sigkind"><option value="gene">genes</option><option value="chemical">drugs</option></select>
   <select id="sigmeasure"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
@@ -990,6 +992,9 @@ __KINDROW__
 <div id="sigtable"><h2 id="sigttl"></h2><button class="ihelp" data-help="sig" aria-label="About significance in view" aria-expanded="false">i</button>
  <div class="mut help" data-help="sig" id="sighelp2"></div>
  <div class="mut" id="sigsub"></div>
+ <div class="row" id="qrow2">Significance: <b id="qsv2">off (show all)</b>
+  <input id="qsig2" type="range" min="0" max="9" step="1" value="0" style="width:160px;vertical-align:middle" aria-label="Significance cutoff">
+  <span class="mut">rows below the cutoff are hidden here and in the graph</span></div>
  <div class="mut" id="signote2" style="display:none"></div>
  <div id="signotest" style="display:none"></div>
  <div id="sigyr" class="row"><select id="sigkind2"><option value="gene">genes</option><option value="chemical">drugs</option></select>
@@ -1335,7 +1340,29 @@ function build(thr){
    const csz={};for(const n in comp)csz[comp[n]]=(csz[comp[n]]||0)+1;
    edges=edges.filter(o=>csz[comp[o.e.from]]>=mc);
  }
- updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text)
+ // --- the ranking, then the significance cut -------------------------------------------------
+ // Order matters and is deliberate. The enrichment is computed from the view BEFORE the q cut,
+ // and the cut only hides what it judged: if the ranking were recomputed on its own survivors,
+ // dragging the slider would move the very numbers it filters on, and each notch would be
+ // answering a different question than the one it displays. So the q shown next to a node is
+ // always the q it was judged by.
+ DRAWN_EDGES=edges;BOOT=null;          // a new view invalidates any bootstrap taken of the old one
+ (function(){const pm=new Set(), nd=new Set();
+  edges.forEach(o=>{nd.add(o.e.from);nd.add(o.e.to);o.vis.forEach(s=>pm.add(s.pmid));});
+  VIEW_PUBS=pm.size;VIEW_ENTS=nd.size;})();
+ sigCompute(edges);
+ ENRICH=enrichCompute(VIEW_PUBS,VIEW_ENTS);
+ QMAP=qMapFor(VIEW_PUBS,VIEW_ENTS);    // q for genes AND drugs, so the cut can judge both
+ const qcut=activeQ();
+ if(qcut!==null){
+  // a node survives if it was tested and reached the threshold; diseases carry no ranking of
+  // their own, so they stay as context rather than being cut on evidence they never had
+  const ok=id=>KIND[id]==='disease'||(QMAP[id]!==undefined&&QMAP[id]<=qcut);
+  edges=edges.filter(o=>ok(o.e.from)&&ok(o.e.to));
+ }
+ sigRender();
+ if(SIGTAB_OPEN)sigTable();
+ updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text, q)
  // co-mentions ride on the edges that survived: every endpoint whose visible sentences name the
  // chosen disease gets one dashed link to it, with those sentences (deduped) as its evidence
  const cmDis=activeComention();
@@ -1390,11 +1417,6 @@ function build(thr){
    network.fit({animation:false});LABEL_A=-1;updateLabels();network.redraw();});
  network.on('zoom',updateLabels);
  network.on('animationFinished',updateLabels);
- // the ranking rides on the same edge list that was just drawn, so the two can never disagree
- DRAWN_EDGES=edges;BOOT=null;          // a new view invalidates any bootstrap taken of the old one
- VIEW_PUBS=vpub.size;VIEW_ENTS=keep.size;   // the two universes the enrichment table can use
- sigCompute(edges);ENRICH=enrichCompute(VIEW_PUBS,VIEW_ENTS);sigRender();
- if(SIGTAB_OPEN)sigTable();
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
@@ -1441,6 +1463,16 @@ document.querySelectorAll('.ihelp').forEach(b=>b.addEventListener('click',()=>{
  b.classList.toggle('on',open);
  b.setAttribute('aria-expanded',open?'true':'false');}));
 // the position controls all replay from BASEPOS, so they reshape in place -- no rebuild, no relayout
+// two handles, one cutoff: the panel's and the table's mirror each other and rebuild the view
+function qChanged(fromTable){
+ const a=document.getElementById('qsig'), b=document.getElementById('qsig2');
+ if(fromTable&&b)a.value=b.value; else if(b)b.value=a.value;
+ const t=qLabel();
+ ['qsv','qsv2'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML=t;});
+ build(+thr.value);
+}
+['qsig','qsig2'].forEach((id,i)=>{const el=document.getElementById(id);
+ if(el)el.addEventListener('input',()=>qChanged(i===1));});
 const shr=document.getElementById('shrink'), exp=document.getElementById('expand');
 shr.addEventListener('input',()=>{document.getElementById('shv').textContent=shr.value+'%';applyLayoutShape();});
 exp.addEventListener('input',()=>{document.getElementById('exv').textContent=exp.value+'%';applyLayoutShape();});
@@ -1603,7 +1635,29 @@ function enrichCompute(viewPubs,viewEnts){
 }
 function orStr(e){return e?e.or.toFixed(2)+' <span class=mut>('+e.lo.toFixed(2)+'&ndash;'+e.hi.toFixed(2)+')</span>':'&mdash;';}
 function qStr(e){return e?(e.q<1e-4?e.q.toExponential(1):e.q.toFixed(4)):'&mdash;';}
-let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0, VIEW_ENTS=0;
+let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0, VIEW_ENTS=0, QMAP={};
+// q for BOTH rankable kinds, so the slider can cut genes and drugs in one pass. The table shows
+// one kind at a time; the graph has to judge whatever it draws.
+function qMapFor(viewPubs,viewEnts){
+ const keep=sigKind(), out={};
+ ['gene','chemical'].forEach(k=>{
+  const sel=document.getElementById('sigkind');
+  if(sel)sel.value=k;                  // enrichCompute reads the selector; borrow it, then restore
+  const e=enrichCompute(viewPubs,viewEnts);
+  if(e)Object.keys(e.rows).forEach(id=>{out[id]=e.rows[id].q;});
+ });
+ const sel=document.getElementById('sigkind');
+ if(sel)sel.value=keep;
+ return out;
+}
+// Stops, not a linear range: q is read on a log scale and the conventional cutoffs are what a
+// reader wants to land on. Index 0 is off, so the graph opens unfiltered.
+const Q_STEPS=[null,0.5,0.2,0.1,0.05,0.01,0.001,1e-4,1e-5,1e-6];
+function activeQ(){const el=document.getElementById('qsig');
+ let i=el?parseInt(el.value):0;if(isNaN(i))i=0;
+ return Q_STEPS[Math.max(0,Math.min(Q_STEPS.length-1,i))];}
+function qLabel(){const q=activeQ();
+ return q===null?'off (show all)':('q &le; '+(q>=0.001?q:q.toExponential(0)));}
 function bootstrapCIs(B){
  const kind=sigKind(), meas=sigMeas();
  const kidx=new Map(), ids=[];
@@ -1752,7 +1806,11 @@ function sigKind(){return (document.getElementById('sigkind')||{}).value||'gene'
 function sigMeas(){return (document.getElementById('sigmeasure')||{}).value||'pub';}
 function sigTable(){
  const kind=sigKind(), meas=SIGTAB_SORT||sigMeas();
- SIGTAB_ROWS=SIG.filter(s=>s.kind===kind).sort((a,b)=>{
+ // the same cut the graph applies, so the two views never disagree about what is significant
+ const qcut=activeQ();
+ SIGTAB_ROWS=SIG.filter(s=>s.kind===kind)
+   .filter(s=>qcut===null||(QMAP[s.id]!==undefined&&QMAP[s.id]<=qcut))
+   .sort((a,b)=>{
    if(meas==='nm')return a.label.localeCompare(b.label);
    if(meas==='pct'||meas==='z')return (b[meas][sigMeas()]-a[meas][sigMeas()])||a.label.localeCompare(b.label);
    return (sigSortVal(b,meas)-sigSortVal(a,meas))||a.label.localeCompare(b.label);});
