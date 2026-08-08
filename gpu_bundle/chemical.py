@@ -79,6 +79,7 @@ AMBIG_OUT = OUT_DIR / "chemical_ambiguous.json"
 DGIDB_PATH = ROOT / "databases" / "interactions.tsv"   # DGIdb (open) drug-gene table
 DGIDB_DRUGS_OUT = OUT_DIR / "dgidb_drugs.json"          # DGIdb drugs in corpus NOT in ChEBI
 UNMATCHED_OUT = OUT_DIR / "unmatched_chemical.json"
+NCIT_OUT = OUT_DIR / "chemical_ncit.json"      # ChEBI cannot represent these; NCIt can
 HTML_OUT = OUT_DIR / "chemical.html"
 
 _SYN_FIELD = {"hasExactSynonym": "exact", "hasRelatedSynonym": "related",
@@ -368,7 +369,7 @@ def match_cascade(value, IX):
 
 
 _MODES = ["curated synonym", "case-sensitive", "case-insensitive",
-          "hyphen/whitespace", "normalized", "separator-deletion"]
+          "hyphen/whitespace", "normalized", "separator-deletion", "ncit"]
 
 
 def chebi_term_stats(single, ambiguous):
@@ -411,12 +412,38 @@ def main():
           f"(+gazetteer: {info['gaz_surfaces']:,} surfaces, {info['gaz_occ']:,} occ) "
           f"-> {CLEAN_TSV}")
 
-    single, ambiguous, unmatched = {}, {}, {}
+    # NCIt fallback. ChEBI is a small-molecule ontology, so every biologic in the corpus --
+    # bevacizumab, pembrolizumab, the whole antibody class -- falls out of the cascade above and
+    # is discarded, even when the NER stage recognised it perfectly well. NCIt represents them,
+    # and drug_lexicon already carries surface -> (code, preferred label). Matching here rather
+    # than inside the ChEBI cascade keeps the two ontologies apart: a surface resolves to ChEBI
+    # when ChEBI knows it, and only otherwise to NCIt, which is recorded as its own field so no
+    # downstream reader mistakes an NCIt code for a ChEBI one.
+    try:
+        from drug_lexicon import DrugLexicon
+        NCIT = DrugLexicon()
+    except Exception:
+        NCIT = None
+    if NCIT is not None and NCIT.names:
+        print(f"NCIT     {len(NCIT.names):,} drug names (built {NCIT.source}) as the "
+              f"non-ChEBI fallback")
+    else:
+        print("NCIT     lexicon absent -- run drug_lexicon.py --build to normalize biologics")
+
+    single, ambiguous, unmatched, ncit_only = {}, {}, {}, {}
     mode_counts = Counter()
-    occ = {"single": 0, "ambiguous": 0, "unmatched": 0}
+    occ = {"single": 0, "ambiguous": 0, "unmatched": 0, "ncit": 0}
     for value, n in rows:
         ids, field, mode = match_cascade(value, IX)
         if not ids:
+            hit = NCIT.lookup(value) if NCIT is not None else None
+            if hit:
+                ncit_only[value] = {"occurrences": n, "match_field": "label",
+                                    "match_mode": "ncit", "ncit_id": hit[0],
+                                    "ncit_label": hit[1]}
+                occ["ncit"] += n
+                mode_counts["ncit"] += 1
+                continue
             unmatched[value] = {"occurrences": n}
             occ["unmatched"] += n
             continue
@@ -433,7 +460,7 @@ def main():
         mode_counts[mode] += 1
 
     for path, lib in ((SINGLE_OUT, single), (AMBIG_OUT, ambiguous),
-                      (UNMATCHED_OUT, unmatched)):
+                      (NCIT_OUT, ncit_only), (UNMATCHED_OUT, unmatched)):
         path.write_text(json.dumps(lib, ensure_ascii=False, indent=2) + "\n",
                         encoding="utf-8")
 
@@ -451,14 +478,16 @@ def main():
     print(f"DGIDB-ONLY in corpus (non-ChEBI) -> {DGIDB_DRUGS_OUT.name}: {len(dgidb_only):,} "
           f"drugs (of {info['dgidb_found']:,} DGIdb names seen)")
 
-    tot = len(single) + len(ambiguous) + len(unmatched)
+    tot = len(single) + len(ambiguous) + len(ncit_only) + len(unmatched)
     print(f"\nMATCH    single -> {SINGLE_OUT.name}: {len(single):,} "
           f"({occ['single']:,} occ)")
     print(f"         ambiguous -> {AMBIG_OUT.name}: {len(ambiguous):,} "
           f"({occ['ambiguous']:,} occ)")
+    print(f"         NCIt (non-ChEBI) -> {NCIT_OUT.name}: {len(ncit_only):,} "
+          f"({occ['ncit']:,} occ)")
     print(f"         unmatched -> {UNMATCHED_OUT.name}: {len(unmatched):,} "
           f"({occ['unmatched']:,} occ)")
-    print(f"         partition: {len(single)} + {len(ambiguous)} + "
+    print(f"         partition: {len(single)} + {len(ambiguous)} + {len(ncit_only)} + "
           f"{len(unmatched)} = {tot:,} (of {len(rows):,} surfaces)")
     print(f"         by mode: " + ", ".join(f"{m} {mode_counts[m]}" for m in _MODES))
     linked_occ = occ["single"] + occ["ambiguous"]
@@ -471,7 +500,7 @@ def main():
     print(f"         distinct ChEBI terms (single+ambiguous): {len(term_rank):,}; "
           f"summed term occurrences: {term_occ:,}")
 
-    render_html(rows, info, IX, single, ambiguous, unmatched, occ, mode_counts)
+    render_html(rows, info, IX, single, ambiguous, unmatched, occ, mode_counts, ncit_only)
     print(f"\nWrote {HTML_OUT}")
 
 
@@ -547,11 +576,15 @@ def render_nested_keys(named_libs):
 
 
 # ============================================================ report
-def render_html(rows, info, IX, single, ambiguous, unmatched, occ, mode_counts):
+def render_html(rows, info, IX, single, ambiguous, unmatched, occ, mode_counts,
+                ncit_only=None):
     esc = html.escape
     n_surf = len(rows)
+    ncit_only = ncit_only or {}
     linked = len(single) + len(ambiguous)
     linked_occ = occ["single"] + occ["ambiguous"]
+    n_ncit, occ_ncit = len(ncit_only), occ.get("ncit", 0)
+    tot_linked, tot_linked_occ = linked + n_ncit, linked_occ + occ_ncit
 
     def occ_of(d):
         return sorted(d.items(), key=lambda kv: -kv[1]["occurrences"])
@@ -570,6 +603,10 @@ def render_html(rows, info, IX, single, ambiguous, unmatched, occ, mode_counts):
     urows = "".join(
         f'<tr><td><code>{esc(v)}</code></td><td class="num">{e["occurrences"]:,}</td></tr>'
         for v, e in occ_of(unmatched)[:30])
+    nrows = "".join(
+        f'<tr><td><code>{esc(v)}</code></td><td class="num">{e["occurrences"]:,}</td>'
+        f'<td><code>{esc(e["ncit_id"])}</code></td><td>{esc(e["ncit_label"])}</td></tr>'
+        for v, e in occ_of(ncit_only)[:30])
     mrows = "".join(
         f'<tr><td><code>{esc(m)}</code></td><td class="num">{mode_counts[m]:,}</td></tr>'
         for m in _MODES if mode_counts[m])
@@ -585,7 +622,8 @@ def render_html(rows, info, IX, single, ambiguous, unmatched, occ, mode_counts):
         f'<tr><td><code>{esc(cid)}</code></td><td>{esc(lbl)}</td>'
         f'<td class="num">{o:,}</td></tr>' for cid, lbl, o in sterm_rank)
     nested_section = render_nested_keys([("chemical.json", single),
-                                         ("chemical_ambiguous.json", ambiguous)])
+                                         ("chemical_ambiguous.json", ambiguous),
+                                         ("chemical_ncit.json", ncit_only)])
 
     style = (
         " body{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:1000px;"
@@ -604,9 +642,9 @@ def render_html(rows, info, IX, single, ambiguous, unmatched, occ, mode_counts):
 
     doc = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>chemical &mdash; CHEMICAL entity normalization to ChEBI</title>
+<title>chemical &mdash; CHEMICAL entity normalization (ChEBI, then NCIt)</title>
 <style>{style}</style></head><body>
-<h1>chemical &mdash; CHEMICAL entity &rarr; ChEBI normalization</h1>
+<h1>chemical &mdash; CHEMICAL entity &rarr; ChEBI normalization, NCIt for the rest</h1>
 <p>The CHEMICAL analog of the GENETIC (HGNC) and DISEASE (MONDO) pipelines:
 BioBERT CHEMICAL spans from <code>sentences/*.json</code> linked to the
 <strong>ChEBI</strong> ontology by exact equality of a transformed key against
@@ -615,12 +653,17 @@ ChEBI labels and synonyms. Produced by <code>chemical.py</code>.</p>
 CHEMICAL surfaces link to ChEBI ({100*linked/n_surf:.1f}%);
 <span class="big">{100*linked_occ/info['occ']:.1f}%</span> of the
 {info['occ']:,} CHEMICAL occurrences are linked.
-Indexed against {IX['n_terms']:,} ChEBI terms.</div>
+Indexed against {IX['n_terms']:,} ChEBI terms.
+A further <span class="big">{n_ncit:,}</span> surfaces ({occ_ncit:,} occurrences) have no ChEBI
+id but resolve in <strong>NCIt</strong> &mdash; biologics ChEBI cannot represent &mdash; taking
+the linked total to {tot_linked:,} surfaces and
+{100*tot_linked_occ/info['occ']:.1f}% of occurrences.</div>
 
 <h2>Buckets</h2>
 <table><tr><th>bucket</th><th class="num">surfaces</th><th class="num">occurrences</th></tr>
 <tr><td>single ChEBI term &rarr; <code>chemical.json</code></td><td class="num">{len(single):,}</td><td class="num">{occ['single']:,}</td></tr>
 <tr><td>ambiguous (&ge;2 terms) &rarr; <code>chemical_ambiguous.json</code></td><td class="num">{len(ambiguous):,}</td><td class="num">{occ['ambiguous']:,}</td></tr>
+<tr><td>NCIt only (no ChEBI id) &rarr; <code>chemical_ncit.json</code></td><td class="num">{n_ncit:,}</td><td class="num">{occ_ncit:,}</td></tr>
 <tr><td>unmatched &rarr; <code>unmatched_chemical.json</code></td><td class="num">{len(unmatched):,}</td><td class="num">{occ['unmatched']:,}</td></tr>
 <tr><td><strong>total</strong></td><td class="num"><strong>{n_surf:,}</strong></td><td class="num"><strong>{info['occ']:,}</strong></td></tr>
 </table>
@@ -641,6 +684,18 @@ Indexed against {IX['n_terms']:,} ChEBI terms.</div>
 (abbreviations ChEBI lacks, non-compound tokens, or descriptors) &mdash;
 candidates for curation.</p>
 <table><tr><th>surface</th><th class="num">occ</th></tr>{urows}</table>
+
+<h2>NCIt fallback &mdash; the biologics ChEBI cannot hold</h2>
+<p>ChEBI is a small-molecule ontology, so antibodies, antibody&ndash;drug conjugates and
+recombinant proteins have no id there however cleanly they were tagged. These surfaces failed
+every ChEBI pass above and then matched the NCI Thesaurus drug vocabulary
+(<code>databases/ncit_drugs.json</code>, built by <code>drug_lexicon.py</code>). They are written
+to <code>chemical_ncit.json</code> with an <code>ncit_id</code> and <code>ncit_label</code> and
+never a <code>chebi_label</code>, so nothing downstream mistakes one ontology for the other.
+Synonym resolution comes free: code names and regional INNs collapse onto one concept
+(<code>anlotinib</code> &rarr; Catequentinib, <code>AG014699</code> &rarr; Rucaparib Phosphate).</p>
+<table><tr><th>surface</th><th class="num">occ</th><th>NCIt code</th><th>NCIt label</th></tr>
+{nrows}</table>
 
 {nested_section}
 

@@ -458,7 +458,10 @@ def node_of(e, flags):
         s = s.strip()
         return ("disease", DISEASE_MERGE.get(s.lower(), s))   # one disease, one node
     if t == "CHEMICAL":
-        s = single(e.get("chebi_label"))
+        # ChEBI first, then NCIt: ChEBI is a small-molecule ontology, so every antibody in the
+        # corpus would otherwise be dropped for lacking an id it can never have. chemical.py
+        # only writes ncit_label where the ChEBI cascade found nothing, so the two cannot fight.
+        s = single(e.get("chebi_label")) or single(e.get("ncit_label"))
         if not s or flags["non_chemical"].get(txt) == "yes":
             return None
         if txt in CHEMICAL_IGNORE or s.strip().lower() in CHEMICAL_IGNORE:
@@ -502,9 +505,9 @@ def node_drop_report(triples, flags, top=8):
                 else:
                     drops["disease: phenotype flag"] += 1
             elif typ == "CHEMICAL":
-                clbl = single(e.get("chebi_label"))
+                clbl = single(e.get("chebi_label")) or single(e.get("ncit_label"))
                 if not clbl:
-                    drops["chemical: no ChEBI id"] += 1
+                    drops["chemical: no ChEBI or NCIt id"] += 1
                     unnorm[f"CHEMICAL {txt}"] += 1
                 elif key in CHEMICAL_IGNORE or clbl.strip().lower() in CHEMICAL_IGNORE:
                     drops["chemical: not a compound under study (CHEMICAL_IGNORE)"] += 1

@@ -6,7 +6,7 @@ A biomedical relation-extraction pipeline: from a single **PubMed query** to an 
 | Stage | What | Where it runs | Entry point |
 |------:|------|---------------|-------------|
 | **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (10 stages over 9 root scripts) |
-| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (18-step chain) |
+| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (19-step chain) |
 | **3** | Triples → high-confidence gene–gene **graph** | local | `high_confidence_g.py` |
 
 Each stage hands off to the next **by files**. Rendered walk-throughs of every stage ship with
@@ -142,9 +142,9 @@ always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` 
   project's `gpu_bundle/experimental_ner/` against another corpus. See `step_1_publications.html`.
 
 ### Stage 2 — triples / GPU bundle (Kaggle or local GPU)
-`gpu_bundle/gpu.py` orchestrates an 18-step chain (RE-model training ×2 → BioBERT NER → GENETIC/
-DISEASE/CHEMICAL normalization → rule triples → learned relation extraction → model comparison →
-**zip**) in one working directory. See
+`gpu_bundle/gpu.py` orchestrates a 19-step chain (RE-model training ×2 → **drug lexicon** →
+BioBERT NER → GENETIC/DISEASE/CHEMICAL normalization → rule triples → learned relation extraction
+→ model comparison → **zip**) in one working directory. See
 [`Step_2_updated_triples.html`](Step_2_updated_triples.html) for the two BioRED steps and
 [`step_2_triples.html`](step_2_triples.html) for the original 16.
 
@@ -169,7 +169,7 @@ Output: `TRIPLES/` (incl. the scored + normalized triples) and `kaggle_working.z
 (**bioinfer** → `ppi-biobert-re/`, **biored** → `biored-biobert-re/`). The checkpoint is a
 function of (dataset, seed, hyperparams) only, so a run on "<pubmed_query_1>" produces the same
 model as one on "<pubmed_query_2>"; retraining per corpus is wasted GPU time. The same
-holds for the normalization libraries (steps 4–12) — HGNC / ChEBI / MONDO are ontologies, not
+holds for the normalization libraries (steps 5–13) — HGNC / ChEBI / MONDO are ontologies, not
 corpus-derived.
 
 **`gpu.py` therefore gates the two training steps** — they run **only** when the previous training
@@ -183,8 +183,8 @@ output is not already in the bundle. The gate tests the full content of four dir
 
 All four complete → steps 1 **and** 2 are dropped from the plan and the checkpoints on disk are
 used as-is. Anything absent or empty → both run, and the header names exactly which entries were
-missing. It is **all four or none** by design: step 16 routes between the two checkpoints and step
-17 compares them, so a run must never mix a reused PPI model with a freshly trained BioRED one. An
+missing. It is **all four or none** by design: step 17 routes between the two checkpoints and step
+18 compares them, so a run must never mix a reused PPI model with a freshly trained BioRED one. An
 empty file counts as missing, so a half-copied bundle retrains instead of loading a truncated
 checkpoint.
 
@@ -282,7 +282,8 @@ python high_confidence_g.py --data-root kaggle_working --merge gate    # or type
 ```
 
 `--nodes all` widens the graph past gene–gene: DISEASE and CHEMICAL endpoints become nodes
-(identified by MONDO / ChEBI label, shaped ◆ and ■), so the gene–disease and chemical–gene
+(identified by MONDO / ChEBI label — or NCIt label, for the biologics ChEBI has no term for —
+shaped ◆ and ■), so the gene–disease and chemical–gene
 edges BioRED contributes are drawn instead of discarded — on the reference run, 129 nodes /
 151 edges versus 62 / 55 gene-only. Outputs take an `_M` suffix.
 
@@ -290,11 +291,26 @@ Output: `<data-root>/summaries/high_confidence_G.html`, `<data-root>/TRIPLES/hig
 and a copy of the graph in the bundle root named after the current directory plus today's date
 (e.g. `lung_large_2026_07_19_G.html`).
 
-> **`high_confidence.py` is deprecated.** The older "G_D_C" script (gene–gene *in a
-> disease/chemical context*, unsuffixed outputs) still runs but is no longer developed: it
-> ignores `predicate.text`, so BioRED's signed labels collapse into one edge category, and it
-> has no multi-model merge, so its counts double-count an additive run. See section 8 of
-> [`step_3_graph.html`](step_3_graph.html).
+**Reading the graph.** The page is self-contained — payload, library and all — and every edge
+traces back to the sentences behind it, with clickable PMIDs. Beyond filtering, it ranks the
+**nodes** carrying the current view (*Significance in view*: publications, partners or sentences,
+with a z-score, bootstrap confidence intervals on count and rank, and Fisher enrichment against
+the corpus with BH q-values), and a *Significance* slider hides what misses a q cutoff.
+[`Graph_description.md`](Graph_description.md) is the full guide: what each control does, the
+order the filters run in, and the limits worth carrying.
+
+**One corpus for every `lung_*` project.** The enrichment denominator is the union of
+publications across all sibling `lung_*` directories, so an odds ratio computed in one means the
+same thing as one computed in another. Each project caches its slice in
+`<data-root>/databases/corpus_contrib.json` and merges whatever the siblings have written; a
+project that has never been run is reported as absent rather than silently assumed. Run stage 3
+once per project to populate it.
+
+> **`high_confidence.py` has been removed.** The older "G_D_C" script (gene–gene *in a
+> disease/chemical context*, unsuffixed outputs) was deleted in `8f420f1`: it ignored
+> `predicate.text`, so BioRED's signed labels collapsed into one edge category, and it had no
+> multi-model merge, so its counts double-counted an additive run. Sections 1–7 of
+> [`step_3_graph.html`](step_3_graph.html) still describe it, as history.
 
 ---
 
@@ -308,14 +324,20 @@ under `gpu_bundle/databases/` before running stage 2 (see
   `greek.py`, `controls.py`, `nonchemical.py`, `target_pharm.py`
 - `mondo-clingen.json` — MONDO disease ontology. **Required** by `disease.py`
 - `chebi.json` — ChEBI chemical ontology. **Required** by `chemical.py`, `target_pharm.py`
-- `interactions.tsv` — DGIdb open drug–gene interactions. *Optional*, read by `chemical.py` to
-  recover drugs the NER misses **and** ChEBI does not carry (e.g. bevacizumab). Absent, it
-  degrades silently to an empty drug set — no error, just fewer CHEMICAL surfaces
+- `interactions.tsv` — DGIdb open drug–gene interactions. *Optional*, read by `chemical.py` for
+  the drug–gene target layer. Absent, it degrades silently to an empty drug set — no error, just
+  fewer CHEMICAL surfaces
+- `ncit_drugs.json` — NCI Thesaurus drug names. *Optional but recommended*, and **generated**:
+  `python gpu_bundle/drug_lexicon.py --build` (or stage-2 step 3) downloads NCIt and distils it.
+  Two steps read it — `sentences.py` tags the drugs the BioBERT chemical model misses, and
+  `chemical.py` normalizes the ones ChEBI cannot represent. Absent, both fall back to the
+  INN-stem regex alone: antibody *names* are still recognised, but brand names, code names and
+  synonyms are not, and none of them can be normalized
 
 `gpu.py --list` preflights the three required ones and names any that are missing; the DGIdb
 table is not preflighted, precisely because it is optional.
-`gpu_bundle/databases/pmc_years.json` is produced by stage 2 (or supply it to run the year
-filter offline). The `experimental_ner/` corpus is produced by **stage 1** (or drop in your
+`gpu_bundle/databases/pmc_years.json` and `ncit_drugs.json` are produced by stage 2 (or supply
+them to run the year filter and the drug lexicon offline). The `experimental_ner/` corpus is produced by **stage 1** (or drop in your
 own). The trained checkpoints and their converted TSVs (`gpu_bundle/{ppi-biobert-re,ppi_data,
 biored-biobert-re,biored_data}/`) are generated by stage-2 steps 1–2 on the first run and are
 git-ignored — **keep them in `gpu_bundle/` afterwards**: their presence is what makes the training
@@ -339,9 +361,9 @@ it is modified. Without one, stage 1 simply downloads everything.
 ├── clean_up.py                # stage 1: step 8 — deletes the intermediate XML/PDF dirs (last)
 ├── subtract.py                # stage 1: optional dir-subtract utility (-> gpu_bundle/removed)
 ├── high_confidence_g.py       # stage 3: the graph (typed edges + --merge)
-├── high_confidence.py         # stage 3: DEPRECATED "G_D_C" variant
 ├── gpu_bundle/                # stage 2: the GPU pipeline
-│   ├── gpu.py                 #   orchestrator (18 steps)
+│   ├── gpu.py                 #   orchestrator (19 steps)
+│   ├── drug_lexicon.py        #   NCIt drug lexicon: builder + matcher (step 3)
 │   ├── requirements.txt       #   GPU deps: torch/transformers/datasets<4/numpy/lxml
 │   ├── *.py                   #   the step scripts
 │   ├── ppi-biobert-re/        #   PPI checkpoint (BioInfer) — git-ignored, KEEP between runs
@@ -380,8 +402,12 @@ it is modified. Without one, stage 1 simply downloads everything.
 │       ├── chebi.json         # 507 MB  ChEBI chemical ontology → chemical.py, target_pharm.py
 │       ├── interactions.tsv   #  12 MB  DGIdb drug–gene interactions (open) → chemical.py
 │                              #     OPTIONAL: absent = empty drug set, no error
-│       └── pmc_years.json     #   generated by pub_years.py (step 15), read by
-│                              #     relationships.py; supply it to run the year filter offline
+│       ├── ncit_drugs.json    # 5.8 MB  NCIt drug names → sentences.py (NER lexicon pass) and
+│                              #     chemical.py (non-ChEBI fallback); generated by step 3
+│       └── pmc_years.json     #   generated by pub_years.py (step 16), read by
+│                              #     relationships.py and stage 3; supply it to run offline
+├── Graph_description.md       # what the graph viewer draws and how to read it
+├── monoclonal_antibody_NER.md # why biologics were missed, and what now recognises them
 ├── step_1_publications.html   # rendered walk-throughs …
 ├── step_2_triples.html
 ├── Step_2_updated_triples.html #   stage 2 after the BioRED model was added

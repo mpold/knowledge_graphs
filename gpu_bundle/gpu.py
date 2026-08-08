@@ -5,29 +5,44 @@ entity normalization -> base triples -> learned relation extraction) as ONE step
 on Kaggle (or locally). GPU-enabled for the model-training, NER and
 relation-extraction steps.
 
-Orchestrates eighteen steps in dependency order:
+Orchestrates nineteen steps in dependency order:
 
     1  run_re_pipeline.py train + calibrate the PPI relation model
                           (BigBIO bioinfer -> ppi-biobert-re/)   GPU, internet [gated]
     2  run_re_pipeline.py --task biored   train + calibrate the BioRED relation model
                           (BigBIO biored -> biored-biobert-re/)  GPU, internet [gated]
-    3  sentences.py      BioBERT result-sentence selection + NER (experimental_ner/ -> sentences/)  GPU
-    4  roman.py          GENETIC -> HGNC (roman key)                 CPU
-    5  greek.py          GENETIC -> HGNC (greek key)                 CPU
-    6  keys_values.py    HGNC coverage reports                       CPU
-    7  controls.py       control-gene flag                           CPU
-    8  disease.py        DISEASE -> MONDO                            CPU
-    9  phenotypes.py     phenotype flag                              CPU
-    10 chemical.py       CHEMICAL -> ChEBI                           CPU
-    11 nonchemical.py    non-chemical flag                           CPU
-    12 target_pharm.py   chemical<->gene-target cross-links          CPU
-    13 triples.py        base triples + normalized variants          CPU
-    14 relationships.py  gene-gene slice (genetic_genetic.json)      CPU  [optional]
-    15 pub_years.py      PMC->year via NCBI (pmc_years.json)         CPU  [optional, internet]
-    16 relation_extraction.py --normalize --route-mode additive
+    3  drug_lexicon.py --build   NCIt drug names -> databases/ncit_drugs.json
+                         CPU  [optional, internet]
+    4  sentences.py      BioBERT result-sentence selection + NER (experimental_ner/ -> sentences/)  GPU
+    5  roman.py          GENETIC -> HGNC (roman key)                 CPU
+    6  greek.py          GENETIC -> HGNC (greek key)                 CPU
+    7  keys_values.py    HGNC coverage reports                       CPU
+    8  controls.py       control-gene flag                           CPU
+    9  disease.py        DISEASE -> MONDO                            CPU
+    10 phenotypes.py     phenotype flag                              CPU
+    11 chemical.py       CHEMICAL -> ChEBI, then NCIt for the rest   CPU
+    12 nonchemical.py    non-chemical flag                           CPU
+    13 target_pharm.py   chemical<->gene-target cross-links          CPU
+    14 triples.py        base triples + normalized variants          CPU
+    15 relationships.py  gene-gene slice (genetic_genetic.json)      CPU  [optional]
+    16 pub_years.py      PMC->year via NCBI (pmc_years.json)         CPU  [optional, internet]
+    17 relation_extraction.py --normalize --route-mode additive
                          BioBERT-scored triples, every applicable model  GPU
-    17 compare_re.py     PPI vs BioRED on the same pairs             CPU  [optional]
-    18 zip_work.py       bundle working dir -> kaggle_working.zip    CPU
+    18 compare_re.py     PPI vs BioRED on the same pairs             CPU  [optional]
+    19 zip_work.py       bundle working dir -> kaggle_working.zip    CPU
+
+THE DRUG LEXICON (step 3 -- why it is optional, and what is lost without it)
+  ChEBI is a small-molecule ontology, so biologics fall out of the pipeline twice: the
+  BioBERT chemical model, trained on the same kind of data, tags only 27% of the named
+  antibody mentions in a lung corpus, and ChEBI then has no id for the survivors. Step 3
+  distils the NCI Thesaurus into databases/ncit_drugs.json, which both the NER stage
+  (sentences.py, a lexicon pass after the models) and the normalizer (chemical.py, a
+  fallback after the ChEBI cascade) read.
+  It is NOT a hard dependency of either: without the file both fall back to the INN-stem
+  regex alone ("-mab", "-tug", "-bart", "-mig", "-cept"), which still recognises antibody
+  names but cannot resolve brand names, code names or synonyms, and chemical.py cannot
+  normalize any of them. Run it once with internet on and upload the JSON with the dataset
+  thereafter, exactly like pmc_years.json.
 
 THE TRAINING GATE (steps 1-2 are not run unconditionally)
   Neither training step reads the corpus: they fine-tune BioBERT on fixed public
@@ -108,21 +123,22 @@ unmodified.
 
 KAGGLE USAGE
   1. Upload the project as a Kaggle Dataset (read-only at /kaggle/input/<ds>/):
-       the 18 step scripts above PLUS bigbio_to_re.py + train_re.py (run by
+       the 19 step scripts above PLUS bigbio_to_re.py + train_re.py (run by
                                                   run_re_pipeline.py in steps 1 and 2)
-                                  AND calibration.py (shared: steps 1, 2 + step 16)
+                                  AND calibration.py (shared: steps 1, 2 + step 17)
        experimental_ner/                             (XML corpus; sentences.py input)
        databases/hgnc_complete_set_2026-05-01.json   (HGNC)
        databases/mondo-clingen.json                  (MONDO)
        databases/chebi.json                          (ChEBI)
+       databases/ncit_drugs.json                     (NCIt drugs; step 3 builds it)
      ppi-biobert-re/ + ppi_data/ and biored-biobert-re/ + biored_data/ are GENERATED
      by steps 1 and 2 on a first run -- but once you have them, upload all four with
      the dataset and the training gate drops both steps automatically (no --steps
      needed), which is the normal case for every corpus after the first.
-     sentences/ is likewise generated by step 3.
-     pmc_years.json is produced by step 15; upload it under databases/ only to run the
-     year filter with internet OFF.
-  2. Notebook Settings -> Accelerator -> GPU (steps 1, 2, 3 and 16 use CUDA); enable
+     sentences/ is likewise generated by step 4.
+     pmc_years.json is produced by step 16, ncit_drugs.json by step 3; upload both under
+     databases/ to run the year filter and the drug lexicon with internet OFF.
+  2. Notebook Settings -> Accelerator -> GPU (steps 1, 2, 4 and 17 use CUDA); enable
      Internet so steps 1-2 can download the BigBIO corpora, step 3 the BioBERT NER
      models, and step 15 the publication years. Setup cell:
          !pip install -q 'datasets<4' bioc
@@ -175,7 +191,8 @@ from pathlib import Path
 
 # each step: name, script, extra args, required ontology DBs, GPU?, model dirs, description
 # `models` = checkpoints the step READS (staged + exported via MODEL_ENV); optional keys:
-# support=[modules staged with the step], produces_model="dir it generates", optional=True
+# support=[modules staged with the step], produces_model="dir it generates", optional=True,
+# reads_sentences=False for a step that does not consume sentences/ (default True)
 STEPS = [
     dict(name="re_pipeline", script="run_re_pipeline.py", args=[], dbs=[], gpu=True, models=[],
          support=["bigbio_to_re.py", "train_re.py", "calibration.py"], produces_model="ppi-biobert-re",
@@ -185,8 +202,14 @@ STEPS = [
          support=["bigbio_to_re.py", "train_re.py", "calibration.py"],
          produces_model="biored-biobert-re",
          desc="[GPU][internet] train + calibrate the BioRED relation model (BigBIO biored -> biored-biobert-re/): typed + SIGNED edges over every entity-type pair [optional]"),
+    dict(name="drug_lexicon", script="drug_lexicon.py", args=["--build"], dbs=[], gpu=False,
+         models=[], optional=True, reads_sentences=False,
+         desc="[internet] distil the NCI Thesaurus into databases/ncit_drugs.json: the drug names "
+              "the BioBERT chemical model misses (biologics) and ChEBI cannot represent [optional]"),
     dict(name="sentences", script="sentences.py", args=[], dbs=[], gpu=True, models=[],
-         desc="[GPU] BioBERT result-sentence selection + NER over experimental_ner/ -> sentences/ (needs HF BioBERT models)"),
+         support=["drug_lexicon.py"],
+         desc="[GPU] BioBERT result-sentence selection + NER over experimental_ner/ -> sentences/ "
+              "(needs HF BioBERT models; adds an INN-stem + NCIt lexicon pass when the lexicon is present)"),
     dict(name="roman", script="roman.py", args=[], dbs=["hgnc"], gpu=False, models=[],
          desc="GENETIC surfaces -> HGNC (roman key); writes clean_genetic_ne.tsv + greek_clean_genetic_ne.tsv"),
     dict(name="greek", script="greek.py", args=[], dbs=["hgnc"], gpu=False, models=[],
@@ -200,7 +223,8 @@ STEPS = [
     dict(name="phenotypes", script="phenotypes.py", args=[], dbs=[], gpu=False, models=[],
          desc="flag phenotype/process DISEASE surfaces (phenotype: yes/no)"),
     dict(name="chemical", script="chemical.py", args=[], dbs=["chebi"], gpu=False, models=[],
-         desc="CHEMICAL surfaces -> ChEBI"),
+         support=["drug_lexicon.py"],
+         desc="CHEMICAL surfaces -> ChEBI, then NCIt for the biologics ChEBI cannot represent"),
     dict(name="nonchemical", script="nonchemical.py", args=[], dbs=["hgnc"], gpu=False, models=[],
          desc="flag non-chemical CHEMICAL surfaces (non_chemical: yes/no)"),
     dict(name="target_pharm", script="target_pharm.py", args=[], dbs=["chebi", "hgnc"], gpu=False, models=[],
@@ -221,11 +245,14 @@ STEPS = [
     dict(name="zip", script="zip_work.py", args=[], dbs=[], gpu=False, models=[],
          desc="bundle the whole working dir into a downloadable kaggle_working.zip (final step)"),
 ]
-DB_FILES = {
+DB_FILES = {                    # hard requirements: a selected step aborts if one is missing
     "hgnc": "hgnc_complete_set_2026-05-01.json",
     "mondo": "mondo-clingen.json",
     "chebi": "chebi.json",
 }
+# Produced by a step and read by later ones, so NOT in DB_FILES: gating on it would abort every
+# run that has not built it, when the steps that use it degrade to the INN-stem regex instead.
+OPTIONAL_DBS = {"ncit": "ncit_drugs.json"}
 RAW_DIR = "experimental_ner"   # sentences.py input (XML); sentences/ is generated from it
 OUT_DIRS = ["GENETIC", "DISEASE", "CHEMICAL", "TRIPLES"]
 MODEL_ENV = {"ppi-biobert-re": "RE_MODEL_PPI",   # model dir -> env var the RE step reads
@@ -407,7 +434,11 @@ def preflight(input_root: Path, steps):
     if any(st["name"] == "sentences" for st in steps):
         if not (input_root / RAW_DIR).is_dir():
             missing.append(RAW_DIR + "/  (XML input for sentences.py)")
-    elif not (input_root / "sentences").is_dir():
+    # Only demand sentences/ for steps that actually read it. drug_lexicon downloads a
+    # vocabulary and touches no corpus, so requiring the corpus to build it is a false gate --
+    # and building it BEFORE a first run, when sentences/ does not exist yet, is the normal case.
+    elif (any(st.get("reads_sentences", True) for st in steps)
+          and not (input_root / "sentences").is_dir()):
         missing.append("sentences/  (or include the 'sentences' step to generate it)")
     for db in sorted({db for st in steps for db in st["dbs"]}):
         if not (input_root / "databases" / DB_FILES[db]).exists():

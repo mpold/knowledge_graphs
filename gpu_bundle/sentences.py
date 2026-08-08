@@ -262,6 +262,10 @@ _NER_DEFAULT = (
 NER_MODELS = [m.strip() for m in
               os.environ.get("BIOBERT_NER_MODELS", _NER_DEFAULT).split(",") if m.strip()]
 NER_ENABLED = os.environ.get("BIOBERT_NER", "1").strip().lower() not in ("0", "false", "no")
+# A lexicon pass runs after the models: INN stems plus the NCI Thesaurus drug names, to recover
+# the biologics a BC5CDR-style chemical model does not know (see drug_lexicon.py). Set
+# DRUG_LEXICON=0 to run the models alone.
+LEXICON_ENABLED = os.environ.get("DRUG_LEXICON", "1").strip().lower() not in ("0", "false", "no")
 # Drop low-confidence entity spans below this aggregated score.
 NER_MIN_SCORE = float(os.environ.get("BIOBERT_NER_MIN_SCORE", "0.5"))
 NER_BATCH = int(os.environ.get("BIOBERT_NER_BATCH", "16"))
@@ -404,6 +408,14 @@ class BioBERTNER:
         self.batch_size = batch_size
         self.pipes = []           # list of (domain, model_id, pipeline)
         self.load_errors = []     # list of (model_id, error string)
+        self.lexicon = None       # drug names the chemical model does not know
+        if LEXICON_ENABLED:
+            try:
+                from drug_lexicon import DrugLexicon
+                lex = DrugLexicon()
+                self.lexicon = lex if lex.ready else None
+            except Exception as exc:                       # pragma: no cover
+                self.load_errors.append(("drug_lexicon", f"{type(exc).__name__}: {exc}"))
         self.device, _, pipe_dev = _pick_device(torch)
         tok_kwargs = {"token": token} if token else {}
 
@@ -463,6 +475,10 @@ class BioBERTNER:
                             "end": end,
                         }
 
+        if self.lexicon is not None:
+            for idx, bucket in enumerate(per_sentence):
+                self._add_lexicon(bucket, sentences[idx])
+
         out = []
         for bucket in per_sentence:
             ents = sorted(bucket.values(),
@@ -470,6 +486,55 @@ class BioBERTNER:
                                          d["end"] if d["end"] is not None else 0))
             out.append(ents)
         return out
+
+    def _add_lexicon(self, bucket, text):
+        """Fold INN-stem and NCIt matches into one sentence's spans.
+
+        Three cases, and the middle one is the point of the exercise:
+
+          * a CHEMICAL span already covers the match -> leave it; the model found it, and the
+            model's offsets are the ones the RE stage has been reading all along
+          * a NON-chemical span covers it -> RELABEL to CHEMICAL. This is the "anti-PD-1"
+            failure: 18 of 181 antibody mentions in the lung corpus came back GENETIC because
+            antibodies are named after their target. A drug dictionary is better evidence of
+            drug-hood than a gene tagger's guess
+          * nothing covers it -> add it, at score 1.0, since a dictionary hit is not a
+            probability
+
+        Every entity the lexicon touches carries `source` and, when known, `ncit` -- so the
+        addition is auditable, and a later normalisation step can use the code instead of
+        discarding the mention for lacking a ChEBI id.
+        """
+        for a, b, surface, code, origin in self.lexicon.find(text):
+            covering = [k for k in bucket
+                        if k[0] is not None and k[0] < b and k[1] > a]      # any overlap
+            chem = [k for k in covering if bucket[k]["domain"] == "chemical"]
+            if chem:
+                for k in chem:                       # keep the span, record what backed it
+                    bucket[k].setdefault("source", origin)
+                    if code:
+                        bucket[k].setdefault("ncit", code)
+                continue
+            # Only an INN stem may overrule another label. A dictionary hit is not enough:
+            # NCIt lists cytokines and receptors as substances, so relabelling on dictionary
+            # evidence turned IL-6, CTLA4, CXCL8 and CCL20 into chemicals -- genes the gene
+            # model had got right. A "-mab" suffix is a fact about the name itself.
+            if covering and origin != "inn":
+                continue
+            if covering:                             # tagged, but as the wrong kind of thing
+                for k in covering:
+                    ent = bucket.pop(k)
+                    ent.update(label="CHEMICAL", domain="chemical",
+                               source=origin + "-relabel", was=ent.get("label"))
+                    if code:
+                        ent["ncit"] = code
+                    bucket[(ent["start"], ent["end"], "CHEMICAL", "chemical")] = ent
+                continue
+            ent = {"text": normalize_ws(surface), "label": "CHEMICAL", "domain": "chemical",
+                   "score": 1.0, "start": a, "end": b, "source": origin}
+            if code:
+                ent["ncit"] = code
+            bucket[(a, b, "CHEMICAL", "chemical")] = ent
 
 
 # --- section-type canonicalization ----------------------------------------

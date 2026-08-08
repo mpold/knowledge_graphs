@@ -184,13 +184,22 @@ def normalize_disease(triple, disease_map):
 
 
 def build_chemical_map():
-    """Case-sensitive map chemical*.json KEY -> chebi_label (CHEMICAL/ libraries)."""
+    """Case-sensitive map chemical*.json KEY -> (label, ontology).
+
+    chemical_ncit.json holds the surfaces ChEBI cannot represent -- the biologics -- so it is
+    read last and its label is tagged as NCIt. The two never collide: a surface only reaches
+    that file because the ChEBI cascade found nothing for it.
+    """
     cmap = {}
     for f in ("chemical.json", "chemical_ambiguous.json"):
         p = CHE_DIR / f
         if p.exists():
             for key, e in json.loads(p.read_text(encoding="utf-8")).items():
-                cmap[key] = e.get("chebi_label")
+                cmap[key] = (e.get("chebi_label"), "chebi")
+    p = CHE_DIR / "chemical_ncit.json"
+    if p.exists():
+        for key, e in json.loads(p.read_text(encoding="utf-8")).items():
+            cmap.setdefault(key, (e.get("ncit_label"), "ncit:" + str(e.get("ncit_id"))))
     return cmap
 
 
@@ -203,9 +212,14 @@ def normalize_chemical(triple, chemical_map):
         el = out[role]
         if el["type"] != "CHEMICAL":
             continue
-        val, via = _lib_lookup(el["text"], chemical_map)
-        el["chebi_label"] = val
-        el["chebi_via"] = f"chemical {via}" if via else None
+        hit, via = _lib_lookup(el["text"], chemical_map)
+        label, onto = hit if isinstance(hit, tuple) else (hit, "chebi")
+        # An NCIt match is NOT a ChEBI id, so it is never written into chebi_label: the field
+        # name asserts an ontology and downstream readers trust it. It gets its own field, and
+        # chebi_via records which vocabulary answered.
+        el["chebi_label"] = label if onto == "chebi" else None
+        el["ncit_label"] = label if onto != "chebi" else None
+        el["chebi_via"] = (f"chemical {via}" + ("" if onto == "chebi" else f" [{onto}]")) if via else None
     return out
 
 

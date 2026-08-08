@@ -355,10 +355,16 @@ draws an edge only when <em>both</em> endpoints carry a single HGNC symbol, so e
 beyond gene&ndash;gene is discarded &mdash; on the reference run, <strong>649 of its 655 solo
 pairs</strong> (466 gene&ndash;disease, 117 chemical&ndash;gene, 29 chemical&ndash;disease, 24
 chemical&ndash;chemical). With <code>--nodes all</code>, DISEASE and CHEMICAL endpoints become nodes
-too, identified by their normalized id (<code>mondo_label</code> / <code>chebi_label</code>) so one
-entity is one node across documents. Node hygiene reuses the pipeline's own annotations &mdash;
+too, identified by their normalized id (<code>mondo_label</code> / <code>chebi_label</code>, or
+<code>ncit_label</code> where ChEBI has no term for the substance) so one entity is one node
+across documents. Node hygiene reuses the pipeline's own annotations &mdash;
 <code>control</code> for genes, <code>phenotype</code> from <code>DISEASE/disease.json</code>,
-<code>non_chemical</code> from <code>CHEMICAL/chemical.json</code> &mdash; plus two small curated tables.
+<code>non_chemical</code> from <code>CHEMICAL/chemical.json</code> &mdash; plus two small curated tables and one exclusion list of its own.
+<code>CHEMICAL_IGNORE</code> keeps out substances ChEBI resolves correctly but that are not
+compounds under study: <code>tyrosine</code>, whose mentions are the residue being named
+(&ldquo;phosphorylation at tyrosine 759&rdquo;), and <code>glucose</code>, whose mentions are
+culture conditions (&ldquo;under low glucose&rdquo;). The match is exact, so
+<code>tyrosine kinase inhibitor</code> and <code>2-deoxy-D-glucose</code> survive.
 <code>DISEASE_IGNORE</code> drops terms too generic to be a useful node, matched against
 <em>both</em> the surface text and the MONDO label: <code>neoplasm</code> (the label
 &ldquo;tumor&rdquo;/&ldquo;tumors&rdquo;/&ldquo;tumour&rdquo; normalize onto &mdash; 167 endpoint
@@ -455,6 +461,16 @@ rule. Only one file is required.</p>
       really a gene or a process), from <code>nonchemical.py</code>.</td>
 </tr>
 <tr>
+  <td><code>CHEMICAL/chemical_ncit.json</code></td>
+  <td>optional</td>
+  <td><strong>New.</strong> The NCIt fallback library <code>chemical.py</code> writes for the
+      surfaces ChEBI cannot represent &mdash; antibodies, antibody&ndash;drug conjugates,
+      recombinant proteins. <code>triples.py</code> stamps their <code>ncit_label</code> on the
+      endpoint, and <code>node_of</code> accepts it when <code>chebi_label</code> is absent, so a
+      biologic becomes a node instead of being dropped. Absent &rarr; those endpoints are dropped
+      exactly as before.</td>
+</tr>
+<tr>
   <td><code>CHEMICAL/chemical_to_target.json</code></td>
   <td><span class='pill opt'>optional</span></td>
   <td>Drug-target shading and the drug search/filter: corpus genes flagged
@@ -480,6 +496,22 @@ rule. Only one file is required.</p>
 </tr>
 </tbody>
 </table>
+
+<h3>Chemical identity: ChEBI first, then NCIt</h3>
+<p>ChEBI is a small-molecule ontology, so it has no term for a monoclonal antibody however
+cleanly the NER tagged it &mdash; and the corpus is full of them. Step&nbsp;2's
+<code>chemical.py</code> therefore runs an NCIt pass after its ChEBI cascade and writes the
+leftovers to <code>CHEMICAL/chemical_ncit.json</code>; <code>triples.py</code> puts an
+<code>ncit_label</code> on the endpoint, never a <code>chebi_label</code>, so the two ontologies
+stay distinguishable; and <code>node_of</code> here accepts either. On this corpus that recovers
+<strong>313 surfaces / 1,979 mentions</strong> that were previously discarded &mdash; icotinib,
+anlotinib (&rarr; Catequentinib), inetetamab, BCT-100, OBI-992 &mdash; and the drop bucket is
+renamed <code>chemical: no ChEBI or NCIt id</code> to say what was actually tried.</p>
+<p>Recognition was the other half of the same gap: the BioBERT chemical model tagged only
+<strong>24%</strong> of named-antibody mentions, so step&nbsp;2's NER now runs an INN-stem and
+NCIt lexicon pass (<code>drug_lexicon.py</code>, built by pipeline step&nbsp;3), which takes that
+to <strong>100%</strong>. Neither half helps alone: recognition without normalisation is dropped
+at the ChEBI gate, and normalisation without recognition never sees the mention.</p>
 
 <h3>Outputs <span class='dim'>(suffix follows <code>--nodes</code>: <code>_G</code> gene-only, <code>_M</code> multi-type)</span></h3>
 <table>
@@ -539,6 +571,13 @@ rule. Only one file is required.</p>
 the same data root; their outputs do not overlap.</p>
 
 <h2>9. A worked <code>--nodes all</code> run <span class='dim'>&mdash; this corpus, 2026-08-01</span></h2>
+<p style="background:#fff8e6;border-left:4px solid #d9a441;padding:.6rem .9rem;margin:.8rem 0">
+<strong>Dated snapshot.</strong> This run is from <strong>2026-08-01</strong> on the small
+<code>biored_end2end</code> data root, and its console output is quoted verbatim, so it predates
+two later changes and still shows their earlier form: the drop bucket now reads
+<code>chemical: no ChEBI or NCIt id</code> (the NCIt fallback below), and
+<code>CHEMICAL_IGNORE</code> did not yet exist. The figures are kept as they were rather than
+restated, because a quoted run that has been edited is no longer evidence of anything.</p>
 <p class='meta'>What the multi-type view actually produced on the <code>biored_end2end</code> data root, as a
 concrete companion to the reference figures in section&nbsp;8 (which come from a different run and are
 left as they are). Command: <code>python high_confidence_g.py --nodes all</code> &mdash; every other
