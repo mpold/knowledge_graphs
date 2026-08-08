@@ -99,21 +99,21 @@ Dependency / strategy notes:
     models (dmis-lab/biobert-v1.1 + alvaroalon2/biobert_{diseases,genetic,chemical}_ner),
     fetched on first use (internet) or cached.
   * Steps 4-12 build the GENETIC/DISEASE/CHEMICAL normalization libraries.
-  * triples.py (13) reads those libraries; relationships.py (14) reads triples.py's
-    output; pub_years.py (15) reads relationships.py's genetic_genetic.json.
-  * relation_extraction.py (16) is a GPU step (BioBERT inference, auto CUDA) that loads
+  * triples.py (14) reads those libraries; relationships.py (15) reads triples.py's
+    output; pub_years.py (16) reads relationships.py's genetic_genetic.json.
+  * relation_extraction.py (17) is a GPU step (BioBERT inference, auto CUDA) that loads
     the step-1 model via RE_MODEL_PPI and, when step 2 produced it, the step-2 model
     via RE_MODEL_BIORED; --route-mode additive makes BOTH score every pair they cover,
     each triple tagged with predicate.model and a shared pair_id. Its --normalize pass
     imports triples.py to reuse the normalization chain. NOTE: with two models the
     file holds up to two triples per entity pair -- filter by predicate.model before
     building a graph from it.
-  * compare_re.py (17) joins those two verdicts on pair_id and writes
+  * compare_re.py (18) joins those two verdicts on pair_id and writes
     summaries/compare_re.html: coverage, label agreement, how many edges gained a sign,
     and samples to hand-read. This is the evidence for the replace-or-not decision.
-  * Steps 2, 14, 15 and 17 are OPTIONAL: if any fails (internet off, missing input,
+  * Steps 2, 3, 15, 16 and 18 are OPTIONAL: if any fails (internet off, missing input,
     only one model trained) the orchestrator warns and CONTINUES.
-  * zip_work.py (18, LAST) packs the whole working dir into kaggle_working.zip so the
+  * zip_work.py (19, LAST) packs the whole working dir into kaggle_working.zip so the
     entire run is one download; it must run after every other step has written its output.
 
 Why an orchestrator (not one merged file): the scripts are standalone but resolve
@@ -169,7 +169,9 @@ LIBRARIES
 
 OPTIONS / ENV
   --list / --dry-run        show the plan (roots, inputs, accelerator, steps) --
-                            including the training gate's verdict and its reason
+                            including the training gate's verdict and its reason, and
+                            one OK/BUILD/ABSENT line per optional cache the plan reads
+                            (ncit_drugs.json, pmc_years.json): ABSENT names what is lost
   --steps a,b,c             run only these step names (also env NORM_STEPS)
   --retrain                 train even when the gate finds the artifacts complete
                             (also env NORM_RETRAIN=1)
@@ -250,9 +252,19 @@ DB_FILES = {                    # hard requirements: a selected step aborts if o
     "mondo": "mondo-clingen.json",
     "chebi": "chebi.json",
 }
-# Produced by a step and read by later ones, so NOT in DB_FILES: gating on it would abort every
-# run that has not built it, when the steps that use it degrade to the INN-stem regex instead.
-OPTIONAL_DBS = {"ncit": "ncit_drugs.json"}
+# Caches produced by a step here and read by later ones, so NOT in DB_FILES: gating on one
+# would abort every run that has not built it yet, when the steps that read it degrade instead
+# of failing. They are reported in the header (see optional_db_report) so a degraded run says
+# so up front -- absent is a quieter result, not a broken one.
+# read_by: steps that consume the file; built_by: the step that writes it; without: what is lost.
+OPTIONAL_DBS = {
+    "ncit_drugs": dict(file="ncit_drugs.json", built_by="drug_lexicon",
+                       read_by=("sentences", "chemical"),
+                       without="INN-stem regex only -- no brand/code names, and chemical.py "
+                               "cannot normalize the biologics"),
+    "pmc_years": dict(file="pmc_years.json", built_by="pub_years", read_by=("pub_years",),
+                      without="every PMC id is re-fetched from NCBI (needs internet)"),
+}
 RAW_DIR = "experimental_ner"   # sentences.py input (XML); sentences/ is generated from it
 OUT_DIRS = ["GENETIC", "DISEASE", "CHEMICAL", "TRIPLES"]
 MODEL_ENV = {"ppi-biobert-re": "RE_MODEL_PPI",   # model dir -> env var the RE step reads
@@ -422,6 +434,30 @@ def apply_training_gate(steps, input_root: Path, forced_by: str):
                   "              both checkpoints are reused as-is (--retrain to train anyway)"]
 
 
+def optional_db_report(input_root: Path, steps):
+    """Header lines for the optional caches -- advisory, never fatal.
+
+    One line per OPTIONAL_DBS entry a selected step actually reads, so a plan that
+    cannot use a cache does not report on it. Three verdicts: OK (uploaded with the
+    dataset), BUILD (absent, but the step that writes it is in the plan -- needs
+    internet), ABSENT (absent and nothing will build it, so say what the run loses).
+    """
+    names = {st["name"] for st in steps}
+    lines = []
+    for key, spec in OPTIONAL_DBS.items():
+        if not names.intersection(spec["read_by"]):
+            continue
+        where = f"databases/{spec['file']}"
+        if (input_root / "databases" / spec["file"]).exists():
+            lines.append(f" {key:<11}: OK     {where}")
+        elif spec["built_by"] in names:
+            lines.append(f" {key:<11}: BUILD  {where} -- step '{spec['built_by']}' writes it "
+                         f"(needs internet)")
+        else:
+            lines.append(f" {key:<11}: ABSENT {where} -- {spec['without']}")
+    return lines
+
+
 def preflight(input_root: Path, steps):
     missing = []
     produced = produced_models(steps)
@@ -557,6 +593,8 @@ def main():
     print(src_line)
     print(f" accelerator: {report_accelerator()}")
     for line in gate_report:
+        print(line)
+    for line in optional_db_report(input_root, steps):
         print(line)
     print(f" steps      : {', '.join(s['name'] for s in steps)}")
     if args.re_args:

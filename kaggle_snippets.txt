@@ -11,6 +11,10 @@ print("INPUT_ROOT =", INPUT_ROOT)
 for need in ("roman.py", "experimental_ner", "databases/hgnc_complete_set_2026-05-01.json",
              "databases/mondo-clingen.json", "databases/chebi.json"):
     print(("  OK   " if os.path.exists(f"{INPUT_ROOT}/{need}") else "  MISSING "), need)
+# optional, not a hard requirement -- step 3 builds it (internet ON); without it sentences.py
+# falls back to the INN-stem regex and chemical.py cannot normalize the biologics
+for opt in ("databases/ncit_drugs.json", "databases/pmc_years.json"):
+    print(("  OK   " if os.path.exists(f"{INPUT_ROOT}/{opt}") else "  ABSENT "), opt, "[optional]")
 # the training gate: all four dirs complete -> steps 1-2 are skipped and the uploaded
 # checkpoints are reused as-is. All four or none -- one TRAINS line retrains both models.
 ckpt = ("config.json", "tokenizer.json", "tokenizer_config.json",
