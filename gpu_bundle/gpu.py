@@ -25,7 +25,7 @@ Orchestrates nineteen steps in dependency order:
     13 target_pharm.py   chemical<->gene-target cross-links          CPU
     14 triples.py        base triples + normalized variants          CPU
     15 relationships.py  gene-gene slice (genetic_genetic.json)      CPU  [optional]
-    16 pub_years.py      PMC->year via NCBI (pmc_years.json)         CPU  [optional, internet]
+    16 pub_years.py      PMC->year, table first (pmc_years.json)     CPU  [optional, internet if no table]
     17 relation_extraction.py --normalize --route-mode additive
                          BioBERT-scored triples, every applicable model  GPU
     18 compare_re.py     PPI vs BioRED on the same pairs             CPU  [optional]
@@ -162,8 +162,9 @@ LIBRARIES
                   script also imports `bioc`, which the image does not carry:
                       !pip install -q 'datasets<4' bioc
                   (`bioc` is needed only for step 2; bioinfer does not use it.)
-  Steps 4-15,17 : Python standard library only; step 15 (pub_years.py) needs
-                  internet (NCBI E-utilities).
+  Steps 4-15,17 : Python standard library only; pub_years.py needs internet
+                  (NCBI E-utilities) ONLY for accessions pmids/pmid_pmc_ids.tsv
+                  does not cover -- ship that table beside the run and it is offline.
   Steps 3 & 16  : torch + transformers (+ lxml for step 3); preinstalled on Kaggle
                   GPU images. Step 3 also pulls BioBERT models from Hugging Face.
 
@@ -236,7 +237,8 @@ STEPS = [
     dict(name="relationships", script="relationships.py", args=[], dbs=[], gpu=False, models=[], optional=True,
          desc="gene-gene slice in disease/chemical sentences (genetic_genetic.json) [optional]"),
     dict(name="pub_years", script="pub_years.py", args=[], dbs=[], gpu=False, models=[], optional=True,
-         desc="[internet] PMC->publication year via NCBI; caches databases/pmc_years.json [optional]"),
+         desc="PMC->publication year from pmids/pmid_pmc_ids.tsv, NCBI only for what it lacks; "
+              "caches databases/pmc_years.json [optional]"),
     dict(name="relation_extraction", script="relation_extraction.py",
          args=["--normalize", "--route-mode", "additive"],
          dbs=[], gpu=True, models=["ppi-biobert-re", "biored-biobert-re"],

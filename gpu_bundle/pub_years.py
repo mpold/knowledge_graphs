@@ -2,12 +2,31 @@
 # -*- coding: utf-8 -*-
 """pub_years.py -- resolve the publication year of every article the pipeline cites.
 
-The local corpus stores only the PMC accession ("pmid", e.g. "PMC10006201"); it has no
-publication date. This script resolves each unique accession to a year through NCBI's
-public E-utilities (esummary, db=pmc) and caches the lookups in databases/pmc_years.json,
-which is the real product: relationships.py and high_confidence_g.py both read the cache
-offline. It also writes a "year" field (int, or null when NCBI returns no date) onto every
-triple of the files given to --annotate.
+The product is databases/pmc_years.json, a PMC accession -> year map that relationships.py
+and high_confidence_g.py both read offline. It is built from two sources, in this order:
+
+  1. pmids/pmid_pmc_ids.tsv -- the stage-1 PubMed table, which already carries a `year`
+     column beside each `pmc_id`. Local, free, and on the reference corpus it covers
+     100% of the articles the graph cites.
+  2. NCBI E-utilities (esummary, db=pmc) -- a network top-up for whatever the table is
+     missing. Skip it with --no-fetch to build the cache entirely offline.
+
+An earlier version of this file opened by asserting that "the local corpus stores only the
+PMC accession; it has no publication date", and went to NCBI for every article on that
+basis. That was wrong twice over: the stage-1 table above has the years, and 14,825 of the
+16,778 corpus documents are PMC JATS XML carrying <article-meta><pub-date> directly. (The
+other 1,953 are GROBID TEI converted from PDFs, which genuinely have neither -- that is
+presumably where the claim came from.) The cost of believing it was that the cache only
+ever held whatever the SOURCES list happened to reach, and on this corpus that left 3,974
+of 7,764 graph publications undated.
+
+It also writes a "year" field (int, or null when no source has a date) onto every triple
+of the files given to --annotate.
+
+NB the two sources can legitimately disagree by a year, on 1.6% of the reference corpus:
+a paper e-published in December 2023 inside the 2024 print collection has two publication
+years, and PubMed and esummary do not always pick the same one. The table wins by default
+because it is the one the rest of stage 1 already reported against.
 
 SOURCES -- why this reads more than genetic_genetic.json
 --------------------------------------------------------
@@ -24,9 +43,11 @@ fetches what is new.
 Run::  python pub_years.py                       # all triples files under <root>/TRIPLES
        python pub_years.py --triples a.json ...  # explicit sources
        python pub_years.py --no-annotate         # only refresh the cache
+       python pub_years.py --no-fetch --no-annotate   # build the cache offline, table only
 """
 
 import argparse
+import csv
 import json
 import re
 import time
@@ -50,6 +71,10 @@ SOURCES = ["TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json",
 ANNOTATE = ["TRIPLES/genetic_genetic.json"]
 GG = ROOT / "TRIPLES" / "genetic_genetic.json"
 CACHE = ROOT / "databases" / "pmc_years.json"
+# stage-1 PubMed table (pmid, pmc_id, source_publication, issn, journal_impact_factor, year).
+# It sits at the PROJECT root, not under the data root -- which is exactly why stage 3, whose
+# every path resolves under --data-root, could not see it and went to the network instead.
+PMID_TSV = "pmids/pmid_pmc_ids.tsv"
 
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 BATCH = 200           # accessions per esummary request
@@ -65,6 +90,35 @@ RETRY_STATUS = {429, 500, 502, 503, 504}
 def accession(pmid):
     """Bare PMC accession, dropping any '.grobid.tei' / '.xml' suffix."""
     return pmid.split(".")[0]
+
+
+def find_tsv(explicit, root):
+    """Locate the stage-1 PubMed table, or None.
+
+    It lives beside the pipeline rather than inside the data root, so try the obvious
+    places: the data root itself, its parent (the project dir), and the same two relative
+    to this script -- which covers both the gpu_bundle/ and kaggle_working/ layouts."""
+    if explicit:
+        p = Path(explicit)
+        return p if p.exists() else None
+    for base in (root, root.parent, ROOT, ROOT.parent):
+        p = base / PMID_TSV
+        if p.exists():
+            return p
+    return None
+
+
+def tsv_years(path):
+    """PMC accession -> year from the stage-1 table; rows without both are skipped."""
+    out = {}
+    with path.open(encoding="utf-8", newline="") as fh:
+        for row in csv.DictReader(fh, delimiter="\t"):
+            pmc = (row.get("pmc_id") or "").strip()
+            yr = (row.get("year") or "").strip()
+            if not pmc or not yr.isdigit():
+                continue
+            out[pmc if pmc.upper().startswith("PMC") else "PMC" + pmc] = int(yr)
+    return out
 
 
 def year_from(rec):
@@ -172,6 +226,13 @@ def main():
     ap.add_argument("--annotate", nargs="*", default=None,
                     help=f"files to write the per-triple year field onto (default: {' '.join(ANNOTATE)})")
     ap.add_argument("--no-annotate", action="store_true", help="only refresh the cache")
+    ap.add_argument("--pmid-tsv", default=None,
+                    help=f"stage-1 PubMed table supplying the years (default: {PMID_TSV} "
+                         f"found near the data root or this script)")
+    ap.add_argument("--no-tsv", action="store_true",
+                    help="ignore the stage-1 table and resolve everything through NCBI")
+    ap.add_argument("--no-fetch", action="store_true",
+                    help="never call NCBI; build the cache from the table alone (offline)")
     args = ap.parse_args()
 
     root = Path(args.root).resolve()
@@ -198,17 +259,37 @@ def main():
               f"({len(acc - set(cache)):,} not yet cached)")
         needed |= acc
 
-    missing = sorted(needed - set(cache))
-    print(f"{ntrip:,} triples; {len(needed):,} unique articles; "
-          f"{len(missing):,} to fetch ({len(needed) - len(missing):,} cached)")
+    print(f"{ntrip:,} triples; {len(needed):,} unique articles")
 
-    if missing:
+    # 1) the stage-1 table, free and offline. It fills only accessions the cache has no year
+    # for -- an absent key, or a null left by an earlier run where NCBI had no date. Existing
+    # years are never overwritten, so a rebuild cannot silently move dates under the graph.
+    tsv_path = None if args.no_tsv else find_tsv(args.pmid_tsv, root)
+    if tsv_path:
+        table = tsv_years(tsv_path)
+        filled = [a for a in needed if cache.get(a) is None and a in table]
+        for a in filled:
+            cache[a] = table[a]
+        print(f"  {tsv_path.name}: {len(table):,} accessions with a year; "
+              f"filled {len(filled):,} the cache was missing")
+        if filled:
+            CACHE.parent.mkdir(parents=True, exist_ok=True)
+            CACHE.write_text(json.dumps(cache, indent=0) + "\n", encoding="utf-8")
+    elif not args.no_tsv:
+        print(f"  (no {PMID_TSV} found -- falling back to NCBI for everything)")
+
+    # 2) NCBI, for whatever the table could not supply
+    missing = sorted(a for a in needed if a not in cache)
+    if missing and args.no_fetch:
+        print(f"  --no-fetch: leaving {len(missing):,} accessions unresolved")
+    elif missing:
+        print(f"  {len(missing):,} still unresolved -> NCBI")
         fetch_years(missing, cache)        # updates + flushes `cache` to disk per batch
         print(f"cache -> {CACHE} ({len(cache):,} accessions)")
 
     covered = sum(1 for a in needed if cache.get(a))
     print(f"years known for {covered:,}/{len(needed):,} articles "
-          f"({len(needed) - covered:,} without a date at NCBI)")
+          f"({len(needed) - covered:,} with no date in either source)")
 
     targets = ([] if args.no_annotate else
                [Path(p) for p in args.annotate] if args.annotate is not None
