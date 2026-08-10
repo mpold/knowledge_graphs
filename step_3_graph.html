@@ -63,18 +63,18 @@ by filtering the &ldquo;G&rdquo; output rather than reviving this file.</div>
 <p class='meta'>Inputs and outputs of the step-3 analysis that reads the triples the GPU bundle
 (step&nbsp;2) produced and draws the interactive graph. <strong><code>high_confidence_g.py</code>
 (section&nbsp;8) is the maintained script</strong> &mdash; one command in, one JSON export plus one
-self-contained HTML graph out, standalone (not orchestrated by <code>gpu.py</code>). It offers two
-views: <code>--nodes gene</code> (default), the gene&ndash;gene graph with <code>_G</code> outputs, and
-<code>--nodes all</code>, which additionally draws DISEASE and CHEMICAL nodes and writes
-<code>_M</code> outputs. <strong><code>high_confidence.py</code></strong>, the older
+self-contained HTML graph out, standalone (not orchestrated by <code>gpu.py</code>). It draws one
+graph &mdash; over gene, DISEASE and CHEMICAL nodes &mdash; and writes <code>_M</code> outputs; the
+gene&ndash;gene-only view, and its <code>_G</code> outputs, has been retired.
+<strong><code>high_confidence.py</code></strong>, the older
 &ldquo;G_D_C&rdquo; variant that required a disease/chemical sentence context, is <strong>deprecated</strong>;
-sections&nbsp;1&ndash;7 document it for reference and its file names still appear there. All three output
+sections&nbsp;1&ndash;7 document it for reference and its file names still appear there. The two output
 sets are suffixed differently, so nothing clobbers anything in a shared data root.</p>
 
 <div class='stat-grid'>
   <div class='stat'><div class='v'>1 + 1</div><div class='k'>maintained + deprecated script</div></div>
   <div class='stat'><div class='v'>1 + 7</div><div class='k'>required + optional inputs</div></div>
-  <div class='stat'><div class='v'>_G / _M</div><div class='k'>output sets (<code>--nodes</code>)</div></div>
+  <div class='stat'><div class='v'>_M</div><div class='k'>output set</div></div>
   <div class='stat'><div class='v'>kaggle_working/</div><div class='k'>default <code>--data-root</code></div></div>
 </div>
 
@@ -83,11 +83,11 @@ run directory the GPU bundle produced (<code>kaggle_working/</code> next to the 
 override with <code>--data-root</code>). <code>high_confidence_g.py</code> merges the per-pair verdicts
 of however many RE checkpoints step&nbsp;2 ran (<code>--merge</code>), applies the <strong>&ldquo;G&rdquo;
 qualifying filter</strong> to the scored triples, writes the survivors to
-<code>TRIPLES/high_confidence_G.json</code>, and renders the graph to
-<code>summaries/high_confidence_G.html</code> with an in-browser score slider, relation-type filters
+<code>TRIPLES/high_confidence_M.json</code>, and renders the graph to
+<code>summaries/high_confidence_M.html</code> with an in-browser score slider, relation-type filters
 and a copy in the bundle root. Run it after the bundle:
 <code>python high_confidence_g.py</code> (optionally <code>--data-root</code>, <code>--score</code>,
-<code>--merge</code>, <code>--nodes</code>, <code>--no-graph</code>).</div>
+<code>--merge</code>, <code>--no-graph</code>).</div>
 
 <h2>1. Data flow (inputs &rarr; script &rarr; outputs) <span class='dim'>&mdash; deprecated <code>high_confidence.py</code></span></h2>
 <div class='flow'>
@@ -228,8 +228,8 @@ absent, that facet is simply empty (no year slider, no drug-target colouring, et
   <td><code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD.html</code></td>
   <td>A copy of that graph in the script's own directory, named after that directory plus today's date
       (e.g. <code>lung_large_2026_07_19.html</code>). Always written alongside the graph; re-running on the
-      same day overwrites it. The gene-only script's copy carries a <code>_G</code> suffix, so the two never
-      collide. <strong>Skipped with <code>--no-graph</code>.</strong></td>
+      same day overwrites it. The maintained script's copy carries an <code>_M</code> suffix, so the two
+      never collide. <strong>Skipped with <code>--no-graph</code>.</strong></td>
 </tr>
 <tr>
   <td><span class='dim'>console (stdout)</span></td>
@@ -285,9 +285,10 @@ just enrich the graph's filters; the graph still renders without them. Building 
 
 <h2>8. The maintained step&nbsp;3 &mdash; <code>high_confidence_g.py</code> <span class='dim'>(the &ldquo;G&rdquo; step)</span></h2>
 <p class='meta'>Originally the gene-only sibling of the script above, now the <strong>maintained</strong>
-step-3 entry point. It applies the gene-only <strong>&ldquo;G&rdquo; filter</strong> instead of the
+step-3 entry point &mdash; and no longer gene-only: the multi-type graph is the only one it draws.
+Its <strong>&ldquo;G&rdquo; filter</strong> replaced the
 &ldquo;G_D_C&rdquo; filter, and it is the only one of the two that consumes what the BioRED model adds.
-Its output filenames all carry a <code>_G</code> suffix, so it never clobbers the deprecated script's
+Its output filenames all carry an <code>_M</code> suffix, so it never clobbers the deprecated script's
 outputs.</p>
 
 <div class='key'><strong>Two things it does that <code>high_confidence.py</code> does not.</strong>
@@ -350,11 +351,11 @@ additive RE run writes per pair (binary PPI + typed BioRED, joined on <code>pair
 </table>
 Each merged triple carries <code>models</code>, <code>corroborated</code> and
 <code>score_by_model</code>; <code>score</code> is the max across the models that contributed it.
-<br><br><strong>3. <code>--nodes all</code> &mdash; the multi-type graph.</strong> The gene-only view
+<br><br><strong>3. The multi-type graph.</strong> A gene-only view
 draws an edge only when <em>both</em> endpoints carry a single HGNC symbol, so everything BioRED adds
 beyond gene&ndash;gene is discarded &mdash; on the reference run, <strong>649 of its 655 solo
 pairs</strong> (466 gene&ndash;disease, 117 chemical&ndash;gene, 29 chemical&ndash;disease, 24
-chemical&ndash;chemical). With <code>--nodes all</code>, DISEASE and CHEMICAL endpoints become nodes
+chemical&ndash;chemical). That is why it was retired. Here DISEASE and CHEMICAL endpoints are nodes
 too, identified by their normalized id (<code>mondo_label</code> / <code>chebi_label</code>, or
 <code>ncit_label</code> where ChEBI has no term for the substance) so one entity is one node
 across documents. Node hygiene reuses the pipeline's own annotations &mdash;
@@ -394,17 +395,17 @@ chemical name is long, repeats across many edges and would bury the gene symbols
 drawn unlabelled and their names appear on <em>hover</em> (node tooltip, and in every edge tooltip)
 or on click. The set of labelled kinds is one constant, <code>LABEL_KINDS</code>. Outputs take an <code>_M</code> suffix
 (<code>high_confidence_M.json</code>, <code>summaries/high_confidence_M.html</code>,
-<code>&lt;dir&gt;_&lt;date&gt;_M.html</code>), so all three views can coexist in one data root.
+<code>&lt;dir&gt;_&lt;date&gt;_M.html</code>), so they never collide with the deprecated script's.
 <table>
 <thead><tr><th>view</th><th>nodes</th><th>edges</th><th>edges by node-type pair</th></tr></thead>
 <tbody>
-<tr><td><code>--nodes gene</code> <span class='dim'>(default)</span></td><td>62 gene</td><td>55</td><td>gene&ndash;gene 55</td></tr>
-<tr class='changed'><td><code>--nodes all</code></td><td>151 &mdash; 105 gene, 27 chemical, 19 disease</td><td>205</td>
+<tr><td>gene-only <span class='dim'>(retired)</span></td><td>62 gene</td><td>55</td><td>gene&ndash;gene 55</td></tr>
+<tr class='changed'><td>this graph</td><td>151 &mdash; 105 gene, 27 chemical, 19 disease</td><td>205</td>
     <td>disease&ndash;gene 82, gene&ndash;gene 55, chemical&ndash;gene 46, chemical&ndash;chemical 11, chemical&ndash;disease 11</td></tr>
 </tbody>
 </table>
 <span class='dim'>(Reference run, universe at &ge;0.5, <code>--merge union</code>. The gene&ndash;gene
-count is identical in both views, as it should be.)</span>
+count was identical in both views, as it should be.)</span>
 With a single checkpoint in the file every policy is a no-op. Override the model roles with
 <code>--typed-model</code> / <code>--gate-model</code> (the typed one is otherwise recognized by
 &ldquo;biored&rdquo; in its name, matching <code>compare_re.py</code>).</div>
@@ -416,9 +417,12 @@ control&nbsp;=&nbsp;yes, no MKI67). This yields a <em>larger</em> universe: ever
 gene&ndash;gene relation, whether or not its sentence is in a disease/chemical context.</div>
 
 <h3>The &ldquo;G&rdquo; qualifying filter</h3>
-<p class='meta'>A scored RE triple is kept when <strong>all four</strong> conditions hold
+<p class='meta'>The &ldquo;G&rdquo; rule set is <strong>all four</strong> of the conditions below
 (<code>qualifies()</code> in <code>high_confidence_g.py</code>) &mdash; rules&nbsp;1&ndash;4 of the G_D_C
-filter, without rule&nbsp;5:</p>
+filter, without rule&nbsp;5. Since the gene-only view was retired it no longer gates the export or
+the graph &mdash; <code>qualifies_multi()</code> does &mdash; and now defines only the
+gene&ndash;gene slice reported per threshold as the <strong>G</strong> column of the console
+summary:</p>
 <ol class='filt'>
   <li><code>score &ge; --score</code> &mdash; model relation score at or above the threshold (export default <strong>0.8</strong>).</li>
   <li><strong>control&nbsp;=&nbsp;no</strong> &mdash; at least one GENETIC endpoint is annotated <code>control:&nbsp;"no"</code>.</li>
@@ -426,7 +430,8 @@ filter, without rule&nbsp;5:</p>
   <li><strong>no MKI67</strong> &mdash; neither endpoint's <code>hgnc_symbol</code> is <code>MKI67</code>.</li>
   <li class='dim'><s>disease/chemical context</s> &mdash; <strong>not applied</strong> in this variant (this is the only difference from the G_D_C filter).</li>
 </ol>
-<p class='meta'>Under <code>--nodes all</code> the filter is <code>qualifies_multi()</code> instead: the
+<p class='meta'>The filter that actually gates the export and the graph is
+<code>qualifies_multi()</code>: the
 same score rule, both endpoints must resolve to distinct <em>nodes</em> (a normalized id, surviving the
 hygiene tables), and rules&nbsp;2&ndash;4 &mdash; which are about GENETIC endpoints &mdash; apply only when
 a gene is actually involved. Requiring &ldquo;at least one endpoint annotated <code>control: no</code>&rdquo;
@@ -450,8 +455,8 @@ rule. Only one file is required.</p>
   <td><code>DISEASE/disease.json</code></td>
   <td><span class='pill opt'>optional</span></td>
   <td><strong>New.</strong> The <code>phenotype</code> yes/no flag <code>phenotypes.py</code> annotated
-      in place; joined on the surface text because that flag never reaches the RE triples. Used by
-      <code>--nodes all</code> to keep process/finding surfaces out of the disease nodes. Absent &rarr;
+      in place; joined on the surface text because that flag never reaches the RE triples. Used to
+      keep process/finding surfaces out of the disease nodes. Absent &rarr;
       nothing is filtered on it.</td>
 </tr>
 <tr>
@@ -513,41 +518,39 @@ NCIt lexicon pass (<code>drug_lexicon.py</code>, built by pipeline step&nbsp;3),
 to <strong>100%</strong>. Neither half helps alone: recognition without normalisation is dropped
 at the ChEBI gate, and normalisation without recognition never sees the mention.</p>
 
-<h3>Outputs <span class='dim'>(suffix follows <code>--nodes</code>: <code>_G</code> gene-only, <code>_M</code> multi-type)</span></h3>
+<h3>Outputs <span class='dim'>(all carry the <code>_M</code> suffix)</span></h3>
 <table>
 <thead><tr><th>path</th><th>what it is</th></tr></thead>
 <tbody>
 <tr>
-  <td><code>&lt;data-root&gt;/TRIPLES/high_confidence_<strong>G</strong>.json</code><br>
-      <code>&lt;data-root&gt;/TRIPLES/high_confidence_<strong>M</strong>.json</code> <span class='dim'>(--nodes all)</span></td>
+  <td><code>&lt;data-root&gt;/TRIPLES/high_confidence_<strong>M</strong>.json</code></td>
   <td>The merged triples at <code>--score</code> (default 0.8) that pass the qualifying filter, as a JSON
       list. After the merge each carries <code>models</code>, <code>corroborated</code> and
       <code>score_by_model</code> alongside the usual fields. <strong>Always produced.</strong></td>
 </tr>
 <tr>
-  <td><code>&lt;data-root&gt;/summaries/high_confidence_<strong>G</strong>.html</code><br>
-      <code>&lt;data-root&gt;/summaries/high_confidence_<strong>M</strong>.html</code> <span class='dim'>(--nodes all)</span></td>
+  <td><code>&lt;data-root&gt;/summaries/high_confidence_<strong>M</strong>.html</code></td>
   <td>The self-contained interactive graph (vis-network inlined when it can be fetched, else CDN).
       Edges are coloured by <strong>relation type</strong> with live per-type counts and dashed negation;
-      the <code>_M</code> variant adds typed nodes, a Node-type filter and opens at &ge;0.8 instead of
-      &ge;0.99. <strong>Skipped with <code>--no-graph</code>.</strong></td>
+      nodes are typed, a Node-type filter is offered, and the score slider opens at &ge;0.8.
+      <strong>Skipped with <code>--no-graph</code>.</strong></td>
 </tr>
 <tr>
-  <td><code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD_<strong>G</strong>.html</code><br>
-      <code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD_<strong>M</strong>.html</code> <span class='dim'>(--nodes all)</span></td>
+  <td><code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD_<strong>M</strong>.html</code></td>
   <td>A copy of that graph in the script's own directory, named after the directory plus today's date
       (e.g. <code>lung_large_2026_08_01_M.html</code>). Written whenever the graph is. The suffix keeps
-      the two views &mdash; and the deprecated script's unsuffixed
-      <code>&lt;current_dir&gt;_YYYY_MM_DD.html</code> &mdash; distinct.</td>
+      it distinct from the deprecated script's unsuffixed
+      <code>&lt;current_dir&gt;_YYYY_MM_DD.html</code>.</td>
 </tr>
 <tr>
   <td><span class='dim'>console (stdout)</span></td>
   <td>The merge line (models found, pairs kept, how many were corroborated, how many took the typed
       label), the export count, the graph's node/edge counts, the <strong>edge-relation breakdown with a
-      signed-edge count</strong>, and &mdash; under <code>--nodes all</code> &mdash; the node-filter report
+      signed-edge count</strong>, the node-filter report
       (kept per type, <code>DISEASE_SURFACE</code> overrides, <code>DISEASE_MERGE</code> folds, endpoints
       dropped with reasons, and the top un-normalized surfaces) plus edges by node-type pair. Finally the
-      per-threshold rows, labelled <strong>G</strong> (and <strong>M</strong> under <code>--nodes all</code>).</td>
+      per-threshold rows, labelled <strong>G</strong> (the gene&ndash;gene slice) and
+      <strong>M</strong> (what the graph actually keeps).</td>
 </tr>
 </tbody>
 </table>
@@ -562,31 +565,32 @@ at the ChEBI gate, and normalisation without recognition never sees the mention.
 <tr><td><code>--no-graph</code></td><td>off</td><td>Export the JSON only; skip the HTML and its root copy.</td></tr>
 <tr><td><code>--merge {union,gate,typed,none}</code></td><td><code>union</code></td><td>How to combine several RE checkpoints scoring the same pair (table above). No-op with a single checkpoint in the file.</td></tr>
 <tr><td><code>--typed-model NAME</code> / <code>--gate-model NAME</code></td><td>auto</td><td>Override which checkpoint supplies the typed labels and which acts as the existence gate. By default the typed one is recognized by &ldquo;biored&rdquo; in its name, matching <code>compare_re.py</code>.</td></tr>
-<tr><td><code>--nodes {gene,all}</code></td><td><code>gene</code></td><td><code>all</code> adds DISEASE and CHEMICAL nodes and switches the outputs to the <code>_M</code> names.</td></tr>
 </tbody>
 </table>
 <p class='meta'>Ordering is the same as section&nbsp;6: run it after the GPU bundle, against an unzipped
-<code>kaggle_working.zip</code> &mdash; <code>python high_confidence_g.py</code>, or
-<code>python high_confidence_g.py --nodes all</code> for the multi-type view. Both can be run against
-the same data root; their outputs do not overlap.</p>
+<code>kaggle_working.zip</code> &mdash; <code>python high_confidence_g.py</code>. It and the
+deprecated script can be run against the same data root; their outputs do not overlap.</p>
 
-<h2>9. A worked <code>--nodes all</code> run <span class='dim'>&mdash; this corpus, 2026-08-01</span></h2>
+<h2>9. A worked run <span class='dim'>&mdash; this corpus, 2026-08-01</span></h2>
 <p style="background:#fff8e6;border-left:4px solid #d9a441;padding:.6rem .9rem;margin:.8rem 0">
 <strong>Dated snapshot.</strong> This run is from <strong>2026-08-01</strong> on the small
 <code>biored_end2end</code> data root, and its console output is quoted verbatim, so it predates
-two later changes and still shows their earlier form: the drop bucket now reads
-<code>chemical: no ChEBI or NCIt id</code> (the NCIt fallback below), and
-<code>CHEMICAL_IGNORE</code> did not yet exist. The figures are kept as they were rather than
+three later changes and still shows their earlier form: the drop bucket now reads
+<code>chemical: no ChEBI or NCIt id</code> (the NCIt fallback below),
+<code>CHEMICAL_IGNORE</code> did not yet exist, and the multi-type graph still had to be asked for
+with <code>--nodes all</code> &mdash; that flag is gone, along with the gene-only view it selected
+between. The figures are kept as they were rather than
 restated, because a quoted run that has been edited is no longer evidence of anything.</p>
 <p class='meta'>What the multi-type view actually produced on the <code>biored_end2end</code> data root, as a
 concrete companion to the reference figures in section&nbsp;8 (which come from a different run and are
-left as they are). Command: <code>python high_confidence_g.py --nodes all</code> &mdash; every other
+left as they are). Command, as run at the time: <code>python high_confidence_g.py --nodes all</code>
+&mdash; every other
 option at its default (<code>--score 0.8</code>, <code>--merge union</code>, graph universe at
 <code>GRAPH_BASE = 0.5</code>).</p>
 
 <div class='key'><strong>The multi-type view is not a garnish on the gene&ndash;gene graph &mdash; it is
-most of the graph.</strong> Only <strong>60 of 235 edges</strong> are gene&ndash;gene, so the default
-<code>--nodes gene</code> view discards roughly three quarters of what the BioRED checkpoint found on
+most of the graph.</strong> Only <strong>60 of 235 edges</strong> are gene&ndash;gene, so the former
+gene-only view discarded roughly three quarters of what the BioRED checkpoint found on
 this corpus. Disease&ndash;gene alone (105) outnumbers gene&ndash;gene nearly two to one.</div>
 
 <div class='stat-grid'>
@@ -607,18 +611,18 @@ this corpus. Disease&ndash;gene alone (105) outnumbers gene&ndash;gene nearly tw
         &ge;0.99 sentence.</td></tr>
 <tr><td><code>biored_end2end_2026_08_01_M.html</code></td>
     <td>The root copy, named after the working directory plus the date. This is the file the
-        <code>_G</code> default run never writes.</td></tr>
+        then-default <code>_G</code> run never wrote.</td></tr>
 </tbody>
 </table>
 <p class='meta'>The <code>_G</code> outputs from the earlier default run were left untouched, as the
-suffix scheme intends.</p>
+suffix scheme intended at the time. Those outputs are no longer produced at all.</p>
 
 <h3>Edges by node-type pair</h3>
 <table>
 <thead><tr><th>pair</th><th class='num'>edges</th><th></th></tr></thead>
 <tbody>
-<tr><td>disease&ndash;gene</td><td class='num'>105</td><td class='dim'>the largest single category &mdash; entirely absent from the <code>_G</code> view</td></tr>
-<tr><td>gene&ndash;gene</td><td class='num'>60</td><td class='dim'>the only category the gene-only view keeps</td></tr>
+<tr><td>disease&ndash;gene</td><td class='num'>105</td><td class='dim'>the largest single category &mdash; entirely absent from the retired gene-only view</td></tr>
+<tr><td>gene&ndash;gene</td><td class='num'>60</td><td class='dim'>the only category that view kept</td></tr>
 <tr><td>chemical&ndash;gene</td><td class='num'>49</td><td class='dim'>drug/compound &rarr; target</td></tr>
 <tr><td>chemical&ndash;disease</td><td class='num'>13</td><td></td></tr>
 <tr><td>chemical&ndash;chemical</td><td class='num'>8</td><td></td></tr>

@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
 high_confidence_g.py -- extract the high-confidence Gene-context relation triples from
-the scored RE output, summarize the threshold statistics, and draw the brain-cancer
-gene-gene relationship graph.
+the scored RE output, summarize the threshold statistics, and draw the gene / disease /
+chemical relationship graph.
 
 This is the "G" (gene-only) variant of high_confidence.py -- and, since high_confidence.py
 was DEPRECATED, the maintained step-3 entry point. Where high_confidence.py applies the
 "G_D_C" filter (gene-gene IN a disease/chemical context), this step applies the "G" filter
-(gene-gene, context-agnostic). Its "_G" output names never clobber the other's, so both can
+(gene-gene, context-agnostic). Its "_M" output names never clobber the other's, so both can
 still target the same data root.
+
+The "G" filter still defines the gene-gene slice reported per threshold in the console
+summary, but it no longer has a graph of its own: the gene-only view ("_G" outputs) was
+retired, and the multi-type graph below is the only one drawn.
 
 TYPED, SIGNED EDGES + MULTI-MODEL MERGE (the two things high_confidence.py does not do)
   * The graph categorizes each edge by the RELATION the model predicted -- activates /
@@ -45,35 +49,33 @@ which defaults to ``kaggle_working/`` next to this script; override with ``--dat
 
 Inputs  : <data-root>/TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json  (scored + normalized)
           <data-root>/{CHEMICAL,databases,sentences}/...                             (drug targets + year + corpus size)
-          <data-root>/DISEASE/disease.json, <data-root>/CHEMICAL/chemical.json  (--nodes all: phenotype / non_chemical flags)
-Outputs : <data-root>/TRIPLES/high_confidence_G.json     qualifying triples at --score (default 0.8)
-          (--nodes all writes the same three outputs with an "_M" suffix instead)
-          <data-root>/summaries/high_confidence_G.html    gene-gene graph with a 0.5..0.99 in-browser score slider
+          <data-root>/DISEASE/disease.json, <data-root>/CHEMICAL/chemical.json  (phenotype / non_chemical flags)
+Outputs : <data-root>/TRIPLES/high_confidence_M.json     qualifying triples at --score (default 0.8)
+          <data-root>/summaries/high_confidence_M.html    the graph, with a 0.5..0.99 in-browser score slider
                                                           and a "match text in sentence" filter (substring, or /regex/)
-          <root>/<current_dir>_YYYY_MM_DD_G.html          a copy of that graph, named after the directory
+          <root>/<current_dir>_YYYY_MM_DD_M.html          a copy of that graph, named after the directory
                                                            holding this script plus today's date;
-                                                           e.g. lung_large_2026_07_19_G.html
+                                                           e.g. lung_large_2026_07_19_M.html
 
 The output filenames all differ from those written by high_confidence.py (which uses the
 "_G_D_C" JSON, "high_confidence.html" graph, and unsuffixed "<dir>_<date>.html" copy) so the
 two scripts can be run against the same data root without clobbering each other's outputs.
 
-  * `--nodes all` widens the graph beyond gene-gene. The gene-only view draws an edge only
+  * The graph spans gene, DISEASE and CHEMICAL nodes. A gene-only view draws an edge only
     when BOTH endpoints carry a single HGNC symbol, which discards everything BioRED adds
-    beyond gene-gene -- on the reference run, 649 of its 655 solo pairs. With --nodes all,
-    DISEASE and CHEMICAL endpoints become nodes too, identified by their normalized id
-    (mondo_label / chebi_label), giving gene-disease / chemical-gene / chemical-disease /
-    chemical-chemical edges. Node hygiene reuses the pipeline's own annotations: control
-    (genes), phenotype (DISEASE/disease.json) and non_chemical (CHEMICAL/chemical.json),
-    plus DISEASE_IGNORE for labels too generic to be a useful node and CHEMICAL_IGNORE for
-    chemicals that are not compounds under study. Outputs take an "_M"
-    suffix so they never clobber the "_G" ones, node shape encodes the type (gene dot /
-    disease diamond / chemical square), a "Node type" filter appears in the panel, and the
-    score slider opens at >=0.8 (most gene-disease edges sit in 0.5-0.8, so the gene-only
-    default of >=0.99 would show an almost empty canvas).
+    beyond gene-gene -- on the reference run, 649 of its 655 solo pairs -- and that is why
+    it was retired. DISEASE and CHEMICAL endpoints are nodes too, identified by their
+    normalized id (mondo_label / chebi_label), giving gene-disease / chemical-gene /
+    chemical-disease / chemical-chemical edges. Node hygiene reuses the pipeline's own
+    annotations: control (genes), phenotype (DISEASE/disease.json) and non_chemical
+    (CHEMICAL/chemical.json), plus DISEASE_IGNORE for labels too generic to be a useful
+    node and CHEMICAL_IGNORE for chemicals that are not compounds under study. Outputs
+    take an "_M" suffix so they never clobber high_confidence.py's, node shape encodes the
+    type (gene dot / disease diamond / chemical square), a "Node type" filter appears in
+    the panel, and the score slider opens at >=0.8 (most gene-disease edges sit in 0.5-0.8,
+    so the old gene-only default of >=0.99 would show an almost empty canvas).
 
 Run::  python high_confidence_g.py [--data-root kaggle_working] [--score 0.8] [--thresholds 0.8,0.95,0.99] [--no-graph]
-       python high_confidence_g.py --nodes all          # + disease and chemical nodes ("_M" outputs)
        python high_confidence_g.py --merge gate         # drop pairs only BioRED claimed
        python high_confidence_g.py --merge none         # pre-merge behaviour (duplicates survive)
 """
@@ -113,12 +115,12 @@ def set_data_root(data_root):
     RE_FILE = OUT_DIR / "triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"
     PMC_YEARS = DATA_ROOT / "databases" / "pmc_years.json"
     TARGET_FILE = DATA_ROOT / "CHEMICAL" / "chemical_to_target.json"   # gene -> corpus chemicals (in_corpus_GENETIC flag)
-    # normalization libraries carrying the in-place phenotype / non_chemical flags (--nodes all)
+    # normalization libraries carrying the in-place phenotype / non_chemical flags
     DISEASE_LIB = DATA_ROOT / "DISEASE" / "disease.json"
     CHEM_LIB = DATA_ROOT / "CHEMICAL" / "chemical.json"
-    # "_G" (gene-only) output names, distinct from high_confidence.py's "_G_D_C"/"high_confidence.html".
-    JSON_OUT = OUT_DIR / "high_confidence_G.json"
-    GRAPH_OUT = DATA_ROOT / "summaries" / "high_confidence_G.html"
+    # "_M" output names, distinct from high_confidence.py's "_G_D_C"/"high_confidence.html".
+    JSON_OUT = OUT_DIR / "high_confidence_M.json"
+    GRAPH_OUT = DATA_ROOT / "summaries" / "high_confidence_M.html"
 
 
 set_data_root(DATA_ROOT)
@@ -140,10 +142,10 @@ RBASE = {"activates": "#2e9e5b", "inhibits": "#e0533d", "binds": "#3b7dd8",
 RCOLOR = {**RBASE, **{f"not {k}": "#d59a2e" for k in RBASE}}
 
 
-# ----- multi-type nodes (--nodes all) ----------------------------------------
-# The gene-only graph draws an edge only when BOTH endpoints carry a single HGNC symbol,
+# ----- multi-type nodes -------------------------------------------------------
+# A gene-only graph draws an edge only when BOTH endpoints carry a single HGNC symbol,
 # which silently discards everything the BioRED checkpoint adds beyond gene-gene:
-# gene-disease, chemical-gene, chemical-disease, chemical-chemical. --nodes all keeps
+# gene-disease, chemical-gene, chemical-disease, chemical-chemical. This graph keeps
 # them, with each endpoint identified by its NORMALIZED id (hgnc_symbol / mondo_label /
 # chebi_label) so the same entity under different surfaces is one node.
 NODE_STYLE = {                                   # kind -> vis shape + default colours
@@ -236,7 +238,7 @@ def rel_cat(t):
 #                  more conservative judge of WHETHER an edge exists; use this if
 #                  BioRED-only edges prove noisy (its annotation is document-level).
 #   typed          the typed model alone
-#   none           no merge -- duplicates survive into graph_payload(), which then
+#   none           no merge -- duplicates survive into graph_payload_multi(), which then
 #                  collapses them per (pair, sentence) by max score
 #
 # With only one checkpoint in the file every policy is a no-op.
@@ -554,7 +556,7 @@ def stats(d, T):
             "filt": len(f), "filt_sentences": len({t.get("sentence") for t in f})}
 
 
-# ----- brain-cancer gene-gene graph ------------------------------------------
+# ----- the graph -------------------------------------------------------------
 def single(v):
     return v.strip() if isinstance(v, str) and v.strip() else None
 
@@ -587,63 +589,15 @@ def _drug_targets():
     return tgt, chems_by_gene, tsrc, tcat
 
 
-def graph_payload(triples):
-    """Gene-gene (single HGNC symbol, non-self) graph; per-sentence scores so the
-    in-browser confidence toggle can re-filter to >=0.99."""
-    try:
-        years = json.loads(PMC_YEARS.read_text(encoding="utf-8"))
-    except Exception:
-        years = {}
-    tgt, chems_by_gene, tsrc, tcat = _drug_targets()
-    # Edges are categorized by the RELATION the model predicted (activates / inhibits /
-    # binds / interacts / associated, "not X" when negated), not merely by polarity: with
-    # the BioRED checkpoint in the routing that label is signed, and dropping it here would
-    # throw away the entire reason for training it.
-    dir_sent = collections.defaultdict(set)           # (s,o,cat) -> sentences (direction + relation)
-    pair_sent = collections.defaultdict(dict)          # pair -> {sentence: [maxscore, pmid, cat, spec, src]}
-    pair_src = collections.defaultdict(set)            # pair -> model roles behind ANY of its triples
-    node_sent = collections.defaultdict(dict)          # node -> {sentence: maxscore}
-    for t in triples:
-        s, o = single(t["subject"].get("hgnc_symbol")), single(t["object"].get("hgnc_symbol"))
-        if not (s and o) or s == o:
-            continue
-        sc = float(t.get("score") or 0.0)
-        cat = rel_cat(t)
-        spec = t.get("modality") == "speculated"
-        roles = model_roles(t)
-        sent = t.get("sentence", "")
-        pm = (t.get("pmid") or "?").replace(".grobid.tei", "")
-        dir_sent[(s, o, cat)].add(sent)
-        pair_src[frozenset((s, o))] |= roles
-        cur = pair_sent[frozenset((s, o))].get(sent)
-        if cur is None or sc > cur[0]:
-            pair_sent[frozenset((s, o))][sent] = [sc, pm, cat, spec, src_tag(roles)]
-        for nd in (s, o):
-            if node_sent[nd].get(sent, -1) < sc:
-                node_sent[nd][sent] = sc
-    edges = []
-    for pr, sd in pair_sent.items():
-        cands = [(len(ss), f, to, cat) for (f, to, cat), ss in dir_sent.items() if frozenset((f, to)) == pr]
-        cands.sort(reverse=True)
-        _, ff, ft, fcat = cands[0]           # best-supported (direction, relation) wins the edge
-        sents = [{"pmid": pm, "text": sent[:300], "sc": round(sc, 4), "yr": years.get(pm),
-                  "rc": cat, "sp": sp, "sr": sr}
-                 for sent, (sc, pm, cat, sp, sr) in sd.items()]
-        sents.sort(key=lambda z: (-z["sc"], z["pmid"]))
-        edges.append({"from": ff, "to": ft, "cat": fcat, "color": RCOLOR.get(fcat, "#888"),
-                      "neg": fcat.startswith("not "), "src": src_tag(pair_src[pr]), "sents": sents})
-    nodes = [{"id": nd, "label": nd, "kind": "gene", "shape": NODE_STYLE["gene"]["shape"],
-              "bg": NODE_STYLE["gene"]["bg"], "border": NODE_STYLE["gene"]["border"],
-              "sent95": len(sd), "sent99": sum(1 for v in sd.values() if v >= 0.99),
-              "target": tgt.get(nd, 0), "chems": chems_by_gene.get(nd, []), "tsource": tsrc.get(nd, ""), "tcat": tcat.get(nd, "other")}
-             for nd, sd in node_sent.items()]
-    return {"nodes": nodes, "edges": edges}
-
-
 def graph_payload_multi(triples, flags):
-    """Gene + disease + chemical graph (--nodes all). Same edge model as the gene-only
-    payload -- one edge per unordered node pair, best-supported (direction, relation) wins,
-    one record per sentence -- but nodes are typed and identified by their normalized id."""
+    """Gene + disease + chemical graph. One edge per unordered node pair, best-supported
+    (direction, relation) wins, one record per sentence; nodes are typed and identified by
+    their normalized id.
+
+    Edges are categorized by the RELATION the model predicted (activates / inhibits /
+    binds / interacts / associated, "not X" when negated), not merely by polarity: with
+    the BioRED checkpoint in the routing that label is signed, and dropping it here would
+    throw away the entire reason for training it."""
     try:
         years = json.loads(PMC_YEARS.read_text(encoding="utf-8"))
     except Exception:
@@ -792,7 +746,7 @@ def background_index(triples, flags):
     The population is "documents with an extracted candidate pair", not "documents mentioning
     the entity": a gene named only in a methods section never enters either column of the
     table. That is what a p-value from this index is about."""
-    flags = flags or {"phenotype": {}, "non_chemical": {}}   # gene-only runs load no type flags
+    flags = flags or {"phenotype": {}, "non_chemical": {}}   # tolerate a caller with no flags
     pm, ents = set(), set()
     doc = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
     par = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
@@ -2030,7 +1984,7 @@ KIND_ROW = (' <div class="row">Node type <button class="ihelp" data-help="kind" 
             'sized by that evidence and pooled by tissue.</div>')
 
 
-def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query="", multi=False, background=None):
+def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query="", background=None):
     # nxml is kept for the caller's signature; the panel no longer prints a corpus-coverage line
     if lib:
         libtag = "<script>\n" + lib.replace("</script>", "<\\/script>") + "\n</script>"
@@ -2043,15 +1997,14 @@ def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query="", multi=Fal
             f'<button class="ihelp" aria-label="Show the PubMed query" aria-expanded="false">i</button>'
             f'<div class="mut help" style="word-break:break-word">{html.escape(pubmed_query)}</div></div>'
             if pubmed_query else "")
-    title = html.escape(pubmed_query) if pubmed_query else (
-        "High-confidence gene / disease / chemical relations" if multi
-        else "High-confidence brain-cancer gene-gene interactions (gene-only filter)")
-    # the wider view's edges sit mostly in 0.5-0.8 (BioRED gene-disease relations), so opening
-    # it at the gene-only default of >=0.99 would show an almost empty canvas
+    title = (html.escape(pubmed_query) if pubmed_query
+             else "High-confidence gene / disease / chemical relations")
+    # these edges sit mostly in 0.5-0.8 (BioRED gene-disease relations), so opening the
+    # slider at the old gene-only default of >=0.99 would show an almost empty canvas
     return (GRAPH_TEMPLATE.replace("__LIBTAG__", libtag)
             .replace("__TITLE__", title)
-            .replace("__KINDROW__", KIND_ROW if multi else "")
-            .replace("__CONFDEF__", "6" if multi else "13")
+            .replace("__KINDROW__", KIND_ROW)
+            .replace("__CONFDEF__", "6")
             .replace("__PUBMED_QUERY__", qrow)
             .replace("__PAYLOAD__", json.dumps(payload, ensure_ascii=False))
             .replace("__BACKGROUND__", json.dumps(background or {"n": 0, "ne": 0, "doc": {}, "par": {}}))
@@ -2084,20 +2037,12 @@ def main():
                          "whose name contains 'biored')")
     ap.add_argument("--gate-model", default=None,
                     help="checkpoint name used as the existence gate (default: the other one)")
-    ap.add_argument("--nodes", choices=["gene", "all"], default="gene",
-                    help="gene (default): the gene-gene graph, '_G' outputs. all: also draw "
-                         "DISEASE and CHEMICAL nodes -- the gene-disease / chemical-gene / "
-                         "chemical-disease / chemical-chemical edges the BioRED model adds, "
-                         "which the gene-only view discards; writes '_M' outputs instead")
     args = ap.parse_args()
 
     set_data_root(args.data_root)
-    multi = args.nodes == "all"
-    if multi:                        # '_M' names: never clobber the gene-only outputs
-        globals()["JSON_OUT"] = OUT_DIR / "high_confidence_M.json"
-        globals()["GRAPH_OUT"] = DATA_ROOT / "summaries" / "high_confidence_M.html"
-    flags = load_type_flags() if multi else None
-    keep_fn = (lambda t, T: qualifies_multi(t, T, flags)) if multi else qualifies
+    flags = load_type_flags()
+    def keep_fn(t, T):
+        return qualifies_multi(t, T, flags)
     if not RE_FILE.exists():
         raise SystemExit(f"ERROR: {RE_FILE} not found under data root {DATA_ROOT} "
                          f"(run the gpu_bundle pipeline first, or pass --data-root).")
@@ -2131,7 +2076,7 @@ def main():
               f"from {', '.join(bg['src'])}"
               + (f"; not yet run: {', '.join(bg['missing'])}" if bg['missing'] else ""))
         universe = kept if args.score <= GRAPH_BASE else [t for t in d if keep_fn(t, GRAPH_BASE)]
-        payload = graph_payload_multi(universe, flags) if multi else graph_payload(universe)
+        payload = graph_payload_multi(universe, flags)
         yrs = [s["yr"] for e in payload["edges"] for s in e["sents"] if s.get("yr")]
         miny, maxy = (min(yrs), max(yrs)) if yrs else (2000, 2026)
         lib = get_vis_lib()
@@ -2140,14 +2085,12 @@ def main():
         nxml = len(list(XML_DIR.glob("*.xml"))) or len(list(SENT_DIR.glob("*.json")))
         GRAPH_OUT.parent.mkdir(parents=True, exist_ok=True)
         pubmed_query = read_pubmed_query()
-        GRAPH_OUT.write_text(render_graph(payload, lib, miny, maxy, nxml, pubmed_query, multi,
-                                          bg),
+        GRAPH_OUT.write_text(render_graph(payload, lib, miny, maxy, nxml, pubmed_query, bg),
                              encoding="utf-8")
         n99 = sum(1 for e in payload["edges"] if any(s["sc"] >= 0.99 for s in e["sents"]))
         npubs = len({s["pmid"] for e in payload["edges"] for s in e["sents"]})
         kinds = collections.Counter(n.get("kind", "gene") for n in payload["nodes"])
-        what = ", ".join(f"{c:,} {k}" for k, c in kinds.most_common()) if multi else \
-               f"{len(payload['nodes']):,} genes"
+        what = ", ".join(f"{c:,} {k}" for k, c in kinds.most_common())
         print(f"wrote graph -> {GRAPH_OUT}  ({what}; {len(payload['edges']):,} edges; "
               f"{n99:,} edges have a >=0.99 sentence; {npubs:,} of {nxml:,} input XMLs produced triples)")
         cats = collections.Counter(e["cat"] for e in payload["edges"])
@@ -2155,31 +2098,30 @@ def main():
                      if (k[4:] if k.startswith("not ") else k) in ("activates", "inhibits"))
         print(f"  edge relations: {', '.join(f'{k} {c:,}' for k, c in cats.most_common())}"
               f"  ({signed:,} signed)")
-        if multi:
-            # report over everything at the graph threshold, NOT `universe`: the latter only
-            # contains triples whose endpoints already resolved, so it can never show a drop
-            for line in node_drop_report(
-                    [t for t in d if isinstance(t.get("score"), (int, float))
-                     and t["score"] >= GRAPH_BASE], flags):
-                print(line)
-            kind_of = {n["id"]: n.get("kind", "gene") for n in payload["nodes"]}
-            tp = collections.Counter(tuple(sorted((kind_of[e["from"]], kind_of[e["to"]])))
-                                     for e in payload["edges"])
-            print(f"  edges by node-type pair: "
-                  f"{', '.join(f'{a}-{b} {c:,}' for (a, b), c in tp.most_common())}")
+        # report over everything at the graph threshold, NOT `universe`: the latter only
+        # contains triples whose endpoints already resolved, so it can never show a drop
+        for line in node_drop_report(
+                [t for t in d if isinstance(t.get("score"), (int, float))
+                 and t["score"] >= GRAPH_BASE], flags):
+            print(line)
+        kind_of = {n["id"]: n.get("kind", "gene") for n in payload["nodes"]}
+        tp = collections.Counter(tuple(sorted((kind_of[e["from"]], kind_of[e["to"]])))
+                                 for e in payload["edges"])
+        print(f"  edges by node-type pair: "
+              f"{', '.join(f'{a}-{b} {c:,}' for (a, b), c in tp.most_common())}")
 
-        # also drop a copy in the root dir, named "<current directory>_YYYY_MM_DD_<G|M>.html"
+        # also drop a copy in the root dir, named "<current directory>_YYYY_MM_DD_M.html"
         # (illegal filename characters underscored so the name is always valid).
         dirname = re.sub(r'[\\/:*?"<>|\s]+', "_", ROOT.name)
         today = datetime.date.today().strftime("%Y_%m_%d")
-        dest = ROOT / f"{dirname}_{today}_{'M' if multi else 'G'}.html"
+        dest = ROOT / f"{dirname}_{today}_M.html"
         shutil.copy2(GRAPH_OUT, dest)
         print(f"copied graph -> {dest}")
 
     for r in rows:
         print(f"  score>={r['T']}: {r['triples']:,} triples / {r['sentences']:,} sent; "
               f"G {r['filt']:,} triples / {r['filt_sentences']:,} sent"
-              + (f"; M {sum(1 for t in d if keep_fn(t, r['T'])):,} triples" if multi else ""))
+              f"; M {sum(1 for t in d if keep_fn(t, r['T'])):,} triples")
 
 
 if __name__ == "__main__":

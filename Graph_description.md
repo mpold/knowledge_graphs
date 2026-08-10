@@ -258,8 +258,7 @@ The page and its payload are baked at generation time — editing the script cha
 it is re-run:
 
 ```bash
-python high_confidence_g.py --data-root kaggle_working --nodes all   # gene + disease + chemical
-python high_confidence_g.py --data-root kaggle_working               # gene-only
+python high_confidence_g.py --data-root kaggle_working   # gene + disease + chemical
 ```
 
 Publication years come from `databases/pmc_years.json`, built by `pub_years.py`; run that first
