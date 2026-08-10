@@ -37,9 +37,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 # every triples file the downstream steps read, widest first; absent ones are skipped
+# relation_extraction.py writes the single "triples_re_" normalized file; the other two
+# normalized splits come from triples.py and carry no "_re_" (they are pre-scoring). Naming
+# all three "triples_re_" meant two never matched a real file, were dropped by the exists()
+# filter below, and their accessions went unfetched.
 SOURCES = ["TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json",
-           "TRIPLES/triples_re_GENETIC_DISEASE_normalized.json",
-           "TRIPLES/triples_re_GENETIC_normalized.json",
+           "TRIPLES/triples_GENETIC_DISEASE_normalized.json",
+           "TRIPLES/triples_GENETIC_normalized.json",
            "TRIPLES/triples_re.json",
            "TRIPLES/genetic_genetic.json"]
 # annotated in place (the others are inputs to later steps that stamp their own year field)
