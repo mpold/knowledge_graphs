@@ -117,10 +117,48 @@ def fetch_years(accessions, cache=None):
     return out
 
 
-def load_triples(path):
-    """Triple list from a pipeline JSON (a bare list, or {'triples': [...]})."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return data if isinstance(data, list) else data.get("triples", [])
+def load_triples(path, chunk=1 << 20):
+    """Yield each triple from a pipeline JSON (a bare list, or {'triples': [...]}).
+
+    A generator, not a list: SOURCES resolves to files of 300 MB and more, and parsing one
+    of those whole costs several GB of resident dicts -- enough to thrash a 16 GB box, which
+    is the whole reason the harvest below only ever needed the pmids. A bare top-level list
+    (what every pipeline file actually is) is walked one element at a time with raw_decode(),
+    so peak memory is one triple plus the read buffer. This is safe only because the elements
+    are objects: a half-read object can never parse as a complete shorter one, so a failed
+    decode always means "read more", never "silently truncated". The documented
+    {'triples': [...]} wrapper cannot be walked this way and falls back to a whole-file parse.
+    """
+    with path.open(encoding="utf-8") as fh:
+        buf = fh.read(chunk)
+        if buf.lstrip()[:1] != "[":                      # wrapped form -- parse it whole
+            data = json.loads(buf + fh.read())
+            yield from (data if isinstance(data, list) else data.get("triples", []))
+            return
+        buf = buf.lstrip()[1:]
+        dec, eof = json.JSONDecoder(), False
+        while True:
+            buf = buf.lstrip()
+            if not buf and not eof:
+                more = fh.read(chunk)
+                eof, buf = not more, buf + more
+                continue
+            if not buf or buf[0] == "]":                 # end of the array (or of the file)
+                return
+            if buf[0] == ",":
+                buf = buf[1:]
+                continue
+            while True:
+                try:
+                    obj, end = dec.raw_decode(buf)
+                    break
+                except ValueError:                       # partial element -- refill and retry
+                    if eof:
+                        raise
+                    more = fh.read(chunk)
+                    eof, buf = not more, buf + more
+            yield obj
+            buf = buf[end:]
 
 
 def main():
@@ -150,10 +188,13 @@ def main():
     cache = json.loads(CACHE.read_text(encoding="utf-8")) if CACHE.exists() else {}
     needed, ntrip = set(), 0
     for p in present:
-        rows = load_triples(p)
-        acc = {accession(t["pmid"]) for t in rows if t.get("pmid")}
-        ntrip += len(rows)
-        print(f"  {p.name}: {len(rows):,} triples, {len(acc):,} articles "
+        acc, nrows = set(), 0                  # counted while streaming; the file is never held
+        for t in load_triples(p):
+            nrows += 1
+            if t.get("pmid"):
+                acc.add(accession(t["pmid"]))
+        ntrip += nrows
+        print(f"  {p.name}: {nrows:,} triples, {len(acc):,} articles "
               f"({len(acc - set(cache)):,} not yet cached)")
         needed |= acc
 
@@ -176,7 +217,7 @@ def main():
         if not path.exists():
             print(f"  (skipping absent {path.name})")
             continue
-        data = load_triples(path)
+        data = list(load_triples(path))    # annotate rewrites the file, so this one is held
         resolved = 0
         for t in data:
             t["year"] = cache.get(accession(t["pmid"])) if t.get("pmid") else None
