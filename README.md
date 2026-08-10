@@ -7,7 +7,7 @@ A biomedical relation-extraction pipeline: from a single **PubMed query** to an 
 |------:|------|---------------|-------------|
 | **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (10 stages over 9 root scripts) |
 | **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (19-step chain) |
-| **3** | Triples → high-confidence gene–gene **graph** | local | `high_confidence_g.py` |
+| **3** | Triples → high-confidence gene / disease / chemical **graph** | local | `high_confidence_g.py` |
 
 Each stage hands off to the next **by files**. Rendered walk-throughs of every stage ship with
 this bundle: [`step_1_publications.html`](step_1_publications.html),
@@ -263,13 +263,14 @@ All four dirs are git-ignored — they are inputs as often as they are outputs, 
 > also supports `--task chemprot / gad / ddi`.
 
 ### Stage 3 — graph (local)
-`high_confidence_g.py` filters the scored triples to the high-confidence gene–gene set and
-renders the interactive graph. Edges are typed by the **relation** the model predicted
-(activates / inhibits / binds / interacts / associated, dashed when negated), and `--merge`
-collapses the two verdicts an additive stage-2 run writes per pair (PPI + BioRED) into one —
-default `union`: every pair either model kept (BioRED-only edges included), with the typed
-label preferred wherever BioRED fired and the higher of the two scores. `--merge gate` is the
-stricter variant that keeps only pairs the binary PPI model also claimed.
+`high_confidence_g.py` filters the scored triples to the high-confidence set and renders the
+interactive graph over gene, disease and chemical nodes. Edges are typed by the **relation**
+the model predicted (activates / inhibits / binds / interacts / associated, dashed when
+negated), and `--merge` collapses the two verdicts an additive stage-2 run writes per pair
+(PPI + BioRED) into one — default `union`: every pair either model kept (BioRED-only edges
+included), with the typed label preferred wherever BioRED fired and the higher of the two
+scores. `--merge gate` is the stricter variant that keeps only pairs the binary PPI model
+also claimed.
 
 > **NB!** If stage 2 ran on Kaggle, **download `kaggle_working.zip` and unzip it here first** —
 > stage 3 reads its inputs from that unzipped run directory.
@@ -277,19 +278,18 @@ stricter variant that keeps only pairs the binary PPI model also claimed.
 ```bash
 # after unzipping kaggle_working.zip into ./kaggle_working
 python high_confidence_g.py --data-root kaggle_working
-python high_confidence_g.py --data-root kaggle_working --nodes all     # + disease/chemical nodes
 python high_confidence_g.py --data-root kaggle_working --merge gate    # or typed / none
 ```
 
-`--nodes all` widens the graph past gene–gene: DISEASE and CHEMICAL endpoints become nodes
-(identified by MONDO / ChEBI label — or NCIt label, for the biologics ChEBI has no term for —
-shaped ◆ and ■), so the gene–disease and chemical–gene
-edges BioRED contributes are drawn instead of discarded — on the reference run, 129 nodes /
-151 edges versus 62 / 55 gene-only. Outputs take an `_M` suffix.
+The graph spans gene, DISEASE and CHEMICAL nodes (diseases and chemicals identified by MONDO /
+ChEBI label — or NCIt label, for the biologics ChEBI has no term for — shaped ◆ and ■), so the
+gene–disease and chemical–gene edges BioRED contributes are drawn instead of discarded — on the
+reference run, 129 nodes / 151 edges against 62 / 55 for a gene-only view. That gene-only view
+and its `_G` outputs have been retired; the `_M` outputs below are the only ones written.
 
-Output: `<data-root>/summaries/high_confidence_G.html`, `<data-root>/TRIPLES/high_confidence_G.json`,
+Output: `<data-root>/summaries/high_confidence_M.html`, `<data-root>/TRIPLES/high_confidence_M.json`,
 and a copy of the graph in the bundle root named after the current directory plus today's date
-(e.g. `lung_large_2026_07_19_G.html`).
+(e.g. `lung_large_2026_07_19_M.html`).
 
 **Reading the graph.** The page is self-contained — payload, library and all — and every edge
 traces back to the sentences behind it, with clickable PMIDs. Beyond filtering, it ranks the

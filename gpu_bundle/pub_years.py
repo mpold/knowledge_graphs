@@ -2,12 +2,31 @@
 # -*- coding: utf-8 -*-
 """pub_years.py -- resolve the publication year of every article the pipeline cites.
 
-The local corpus stores only the PMC accession ("pmid", e.g. "PMC10006201"); it has no
-publication date. This script resolves each unique accession to a year through NCBI's
-public E-utilities (esummary, db=pmc) and caches the lookups in databases/pmc_years.json,
-which is the real product: relationships.py and high_confidence_g.py both read the cache
-offline. It also writes a "year" field (int, or null when NCBI returns no date) onto every
-triple of the files given to --annotate.
+The product is databases/pmc_years.json, a PMC accession -> year map that relationships.py
+and high_confidence_g.py both read offline. It is built from two sources, in this order:
+
+  1. pmids/pmid_pmc_ids.tsv -- the stage-1 PubMed table, which already carries a `year`
+     column beside each `pmc_id`. Local, free, and on the reference corpus it covers
+     100% of the articles the graph cites.
+  2. NCBI E-utilities (esummary, db=pmc) -- a network top-up for whatever the table is
+     missing. Skip it with --no-fetch to build the cache entirely offline.
+
+An earlier version of this file opened by asserting that "the local corpus stores only the
+PMC accession; it has no publication date", and went to NCBI for every article on that
+basis. That was wrong twice over: the stage-1 table above has the years, and 14,825 of the
+16,778 corpus documents are PMC JATS XML carrying <article-meta><pub-date> directly. (The
+other 1,953 are GROBID TEI converted from PDFs, which genuinely have neither -- that is
+presumably where the claim came from.) The cost of believing it was that the cache only
+ever held whatever the SOURCES list happened to reach, and on this corpus that left 3,974
+of 7,764 graph publications undated.
+
+It also writes a "year" field (int, or null when no source has a date) onto every triple
+of the files given to --annotate.
+
+NB the two sources can legitimately disagree by a year, on 1.6% of the reference corpus:
+a paper e-published in December 2023 inside the 2024 print collection has two publication
+years, and PubMed and esummary do not always pick the same one. The table wins by default
+because it is the one the rest of stage 1 already reported against.
 
 SOURCES -- why this reads more than genetic_genetic.json
 --------------------------------------------------------
@@ -24,10 +43,17 @@ fetches what is new.
 Run::  python pub_years.py                       # all triples files under <root>/TRIPLES
        python pub_years.py --triples a.json ...  # explicit sources
        python pub_years.py --no-annotate         # only refresh the cache
+       python pub_years.py --no-fetch --no-annotate   # build the cache offline, table only
+
+Set NCBI_EMAIL (or pass --email) before any run that reaches NCBI: E-utilities asks callers
+to identify themselves so it can make contact before throttling. It is read from the
+environment rather than stored here because this tree is public.
 """
 
 import argparse
+import csv
 import json
+import os
 import re
 import time
 import urllib.error
@@ -50,11 +76,20 @@ SOURCES = ["TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json",
 ANNOTATE = ["TRIPLES/genetic_genetic.json"]
 GG = ROOT / "TRIPLES" / "genetic_genetic.json"
 CACHE = ROOT / "databases" / "pmc_years.json"
+# stage-1 PubMed table (pmid, pmc_id, source_publication, issn, journal_impact_factor, year).
+# It sits at the PROJECT root, not under the data root -- which is exactly why stage 3, whose
+# every path resolves under --data-root, could not see it and went to the network instead.
+PMID_TSV = "pmids/pmid_pmc_ids.tsv"
 
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 BATCH = 200           # accessions per esummary request
 PAUSE = 0.34          # seconds between requests (NCBI: <= 3/sec without an API key)
-TOOL, EMAIL = "normalization", "your-email@example.com"
+TOOL = "normalization"
+# NCBI asks every E-utilities caller to identify itself, so it can get in touch before it
+# throttles or blocks you. Deliberately NOT committed: this is a public tree, and an address
+# in a public repo gets harvested. Set NCBI_EMAIL in the environment or pass --email. Empty
+# means anonymous traffic -- which NCBI serves, but it cannot warn you first if you run hot.
+EMAIL = os.environ.get("NCBI_EMAIL", "")
 
 # NCBI E-utilities intermittently returns transient 5xx/429 errors under load; retry those
 # (and network blips) with exponential backoff rather than aborting the whole run.
@@ -67,6 +102,35 @@ def accession(pmid):
     return pmid.split(".")[0]
 
 
+def find_tsv(explicit, root):
+    """Locate the stage-1 PubMed table, or None.
+
+    It lives beside the pipeline rather than inside the data root, so try the obvious
+    places: the data root itself, its parent (the project dir), and the same two relative
+    to this script -- which covers both the gpu_bundle/ and kaggle_working/ layouts."""
+    if explicit:
+        p = Path(explicit)
+        return p if p.exists() else None
+    for base in (root, root.parent, ROOT, ROOT.parent):
+        p = base / PMID_TSV
+        if p.exists():
+            return p
+    return None
+
+
+def tsv_years(path):
+    """PMC accession -> year from the stage-1 table; rows without both are skipped."""
+    out = {}
+    with path.open(encoding="utf-8", newline="") as fh:
+        for row in csv.DictReader(fh, delimiter="\t"):
+            pmc = (row.get("pmc_id") or "").strip()
+            yr = (row.get("year") or "").strip()
+            if not pmc or not yr.isdigit():
+                continue
+            out[pmc if pmc.upper().startswith("PMC") else "PMC" + pmc] = int(yr)
+    return out
+
+
 def year_from(rec):
     for key in ("pubdate", "epubdate", "printpubdate"):
         m = re.search(r"\b(\d{4})\b", rec.get(key, "") or "")
@@ -77,9 +141,10 @@ def year_from(rec):
 
 def esummary(ids):
     """POST one esummary request, retrying transient NCBI failures with backoff."""
-    data = urllib.parse.urlencode(
-        {"db": "pmc", "id": ids, "retmode": "json",
-         "tool": TOOL, "email": EMAIL}).encode()
+    params = {"db": "pmc", "id": ids, "retmode": "json", "tool": TOOL}
+    if EMAIL:                          # omit entirely rather than send an empty contact
+        params["email"] = EMAIL
+    data = urllib.parse.urlencode(params).encode()
     for attempt in range(1, RETRIES + 1):
         try:
             with urllib.request.urlopen(EUTILS, data=data, timeout=60) as r:
@@ -117,14 +182,52 @@ def fetch_years(accessions, cache=None):
     return out
 
 
-def load_triples(path):
-    """Triple list from a pipeline JSON (a bare list, or {'triples': [...]})."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return data if isinstance(data, list) else data.get("triples", [])
+def load_triples(path, chunk=1 << 20):
+    """Yield each triple from a pipeline JSON (a bare list, or {'triples': [...]}).
+
+    A generator, not a list: SOURCES resolves to files of 300 MB and more, and parsing one
+    of those whole costs several GB of resident dicts -- enough to thrash a 16 GB box, which
+    is the whole reason the harvest below only ever needed the pmids. A bare top-level list
+    (what every pipeline file actually is) is walked one element at a time with raw_decode(),
+    so peak memory is one triple plus the read buffer. This is safe only because the elements
+    are objects: a half-read object can never parse as a complete shorter one, so a failed
+    decode always means "read more", never "silently truncated". The documented
+    {'triples': [...]} wrapper cannot be walked this way and falls back to a whole-file parse.
+    """
+    with path.open(encoding="utf-8") as fh:
+        buf = fh.read(chunk)
+        if buf.lstrip()[:1] != "[":                      # wrapped form -- parse it whole
+            data = json.loads(buf + fh.read())
+            yield from (data if isinstance(data, list) else data.get("triples", []))
+            return
+        buf = buf.lstrip()[1:]
+        dec, eof = json.JSONDecoder(), False
+        while True:
+            buf = buf.lstrip()
+            if not buf and not eof:
+                more = fh.read(chunk)
+                eof, buf = not more, buf + more
+                continue
+            if not buf or buf[0] == "]":                 # end of the array (or of the file)
+                return
+            if buf[0] == ",":
+                buf = buf[1:]
+                continue
+            while True:
+                try:
+                    obj, end = dec.raw_decode(buf)
+                    break
+                except ValueError:                       # partial element -- refill and retry
+                    if eof:
+                        raise
+                    more = fh.read(chunk)
+                    eof, buf = not more, buf + more
+            yield obj
+            buf = buf[end:]
 
 
 def main():
-    global CACHE
+    global CACHE, EMAIL
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", default=str(ROOT),
@@ -134,10 +237,23 @@ def main():
     ap.add_argument("--annotate", nargs="*", default=None,
                     help=f"files to write the per-triple year field onto (default: {' '.join(ANNOTATE)})")
     ap.add_argument("--no-annotate", action="store_true", help="only refresh the cache")
+    ap.add_argument("--pmid-tsv", default=None,
+                    help=f"stage-1 PubMed table supplying the years (default: {PMID_TSV} "
+                         f"found near the data root or this script)")
+    ap.add_argument("--no-tsv", action="store_true",
+                    help="ignore the stage-1 table and resolve everything through NCBI")
+    ap.add_argument("--no-fetch", action="store_true",
+                    help="never call NCBI; build the cache from the table alone (offline)")
+    ap.add_argument("--email", default=None,
+                    help="contact address sent to NCBI E-utilities (default: $NCBI_EMAIL). "
+                         "NCBI asks callers to identify themselves so it can reach you "
+                         "before throttling; unset means anonymous traffic")
     args = ap.parse_args()
 
     root = Path(args.root).resolve()
     CACHE = root / "databases" / "pmc_years.json"
+    if args.email:
+        EMAIL = args.email
     srcs = ([Path(p) for p in args.triples] if args.triples is not None
             else [root / s for s in SOURCES])
     present = [p for p in srcs if p.exists()]
@@ -150,24 +266,50 @@ def main():
     cache = json.loads(CACHE.read_text(encoding="utf-8")) if CACHE.exists() else {}
     needed, ntrip = set(), 0
     for p in present:
-        rows = load_triples(p)
-        acc = {accession(t["pmid"]) for t in rows if t.get("pmid")}
-        ntrip += len(rows)
-        print(f"  {p.name}: {len(rows):,} triples, {len(acc):,} articles "
+        acc, nrows = set(), 0                  # counted while streaming; the file is never held
+        for t in load_triples(p):
+            nrows += 1
+            if t.get("pmid"):
+                acc.add(accession(t["pmid"]))
+        ntrip += nrows
+        print(f"  {p.name}: {nrows:,} triples, {len(acc):,} articles "
               f"({len(acc - set(cache)):,} not yet cached)")
         needed |= acc
 
-    missing = sorted(needed - set(cache))
-    print(f"{ntrip:,} triples; {len(needed):,} unique articles; "
-          f"{len(missing):,} to fetch ({len(needed) - len(missing):,} cached)")
+    print(f"{ntrip:,} triples; {len(needed):,} unique articles")
 
-    if missing:
+    # 1) the stage-1 table, free and offline. It fills only accessions the cache has no year
+    # for -- an absent key, or a null left by an earlier run where NCBI had no date. Existing
+    # years are never overwritten, so a rebuild cannot silently move dates under the graph.
+    tsv_path = None if args.no_tsv else find_tsv(args.pmid_tsv, root)
+    if tsv_path:
+        table = tsv_years(tsv_path)
+        filled = [a for a in needed if cache.get(a) is None and a in table]
+        for a in filled:
+            cache[a] = table[a]
+        print(f"  {tsv_path.name}: {len(table):,} accessions with a year; "
+              f"filled {len(filled):,} the cache was missing")
+        if filled:
+            CACHE.parent.mkdir(parents=True, exist_ok=True)
+            CACHE.write_text(json.dumps(cache, indent=0) + "\n", encoding="utf-8")
+    elif not args.no_tsv:
+        print(f"  (no {PMID_TSV} found -- falling back to NCBI for everything)")
+
+    # 2) NCBI, for whatever the table could not supply
+    missing = sorted(a for a in needed if a not in cache)
+    if missing and args.no_fetch:
+        print(f"  --no-fetch: leaving {len(missing):,} accessions unresolved")
+    elif missing:
+        print(f"  {len(missing):,} still unresolved -> NCBI")
+        if not EMAIL:                      # only worth saying when we actually go out
+            print("  (no contact address: set NCBI_EMAIL or pass --email so NCBI can "
+                  "reach you before it throttles)")
         fetch_years(missing, cache)        # updates + flushes `cache` to disk per batch
         print(f"cache -> {CACHE} ({len(cache):,} accessions)")
 
     covered = sum(1 for a in needed if cache.get(a))
     print(f"years known for {covered:,}/{len(needed):,} articles "
-          f"({len(needed) - covered:,} without a date at NCBI)")
+          f"({len(needed) - covered:,} with no date in either source)")
 
     targets = ([] if args.no_annotate else
                [Path(p) for p in args.annotate] if args.annotate is not None
@@ -176,7 +318,7 @@ def main():
         if not path.exists():
             print(f"  (skipping absent {path.name})")
             continue
-        data = load_triples(path)
+        data = list(load_triples(path))    # annotate rewrites the file, so this one is held
         resolved = 0
         for t in data:
             t["year"] = cache.get(accession(t["pmid"])) if t.get("pmid") else None

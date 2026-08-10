@@ -258,12 +258,14 @@ The page and its payload are baked at generation time — editing the script cha
 it is re-run:
 
 ```bash
-python high_confidence_g.py --data-root kaggle_working --nodes all   # gene + disease + chemical
-python high_confidence_g.py --data-root kaggle_working               # gene-only
+python high_confidence_g.py --data-root kaggle_working   # gene + disease + chemical
 ```
 
 Publication years come from `databases/pmc_years.json`, built by `pub_years.py`; run that first
-if the corpus has grown, or the year slider will silently drop undated evidence.
+if the corpus has grown, or the year slider will silently drop undated evidence. It reads the
+years out of `pmids/pmid_pmc_ids.tsv` — the stage-1 PubMed table, which on this corpus covers
+every article the graph cites — and only calls NCBI for what that table lacks, so
+`pub_years.py --no-fetch` builds the cache with no network at all.
 
 The enrichment denominator is shared across projects, so a run also writes its own slice to
 `databases/corpus_contrib.json` and merges whatever slices the sibling `lung_*` projects have
