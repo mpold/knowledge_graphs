@@ -44,11 +44,16 @@ Run::  python pub_years.py                       # all triples files under <root
        python pub_years.py --triples a.json ...  # explicit sources
        python pub_years.py --no-annotate         # only refresh the cache
        python pub_years.py --no-fetch --no-annotate   # build the cache offline, table only
+
+Set NCBI_EMAIL (or pass --email) before any run that reaches NCBI: E-utilities asks callers
+to identify themselves so it can make contact before throttling. It is read from the
+environment rather than stored here because this tree is public.
 """
 
 import argparse
 import csv
 import json
+import os
 import re
 import time
 import urllib.error
@@ -79,7 +84,12 @@ PMID_TSV = "pmids/pmid_pmc_ids.tsv"
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 BATCH = 200           # accessions per esummary request
 PAUSE = 0.34          # seconds between requests (NCBI: <= 3/sec without an API key)
-TOOL, EMAIL = "normalization", "your-email@example.com"
+TOOL = "normalization"
+# NCBI asks every E-utilities caller to identify itself, so it can get in touch before it
+# throttles or blocks you. Deliberately NOT committed: this is a public tree, and an address
+# in a public repo gets harvested. Set NCBI_EMAIL in the environment or pass --email. Empty
+# means anonymous traffic -- which NCBI serves, but it cannot warn you first if you run hot.
+EMAIL = os.environ.get("NCBI_EMAIL", "")
 
 # NCBI E-utilities intermittently returns transient 5xx/429 errors under load; retry those
 # (and network blips) with exponential backoff rather than aborting the whole run.
@@ -131,9 +141,10 @@ def year_from(rec):
 
 def esummary(ids):
     """POST one esummary request, retrying transient NCBI failures with backoff."""
-    data = urllib.parse.urlencode(
-        {"db": "pmc", "id": ids, "retmode": "json",
-         "tool": TOOL, "email": EMAIL}).encode()
+    params = {"db": "pmc", "id": ids, "retmode": "json", "tool": TOOL}
+    if EMAIL:                          # omit entirely rather than send an empty contact
+        params["email"] = EMAIL
+    data = urllib.parse.urlencode(params).encode()
     for attempt in range(1, RETRIES + 1):
         try:
             with urllib.request.urlopen(EUTILS, data=data, timeout=60) as r:
@@ -216,7 +227,7 @@ def load_triples(path, chunk=1 << 20):
 
 
 def main():
-    global CACHE
+    global CACHE, EMAIL
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", default=str(ROOT),
@@ -233,10 +244,16 @@ def main():
                     help="ignore the stage-1 table and resolve everything through NCBI")
     ap.add_argument("--no-fetch", action="store_true",
                     help="never call NCBI; build the cache from the table alone (offline)")
+    ap.add_argument("--email", default=None,
+                    help="contact address sent to NCBI E-utilities (default: $NCBI_EMAIL). "
+                         "NCBI asks callers to identify themselves so it can reach you "
+                         "before throttling; unset means anonymous traffic")
     args = ap.parse_args()
 
     root = Path(args.root).resolve()
     CACHE = root / "databases" / "pmc_years.json"
+    if args.email:
+        EMAIL = args.email
     srcs = ([Path(p) for p in args.triples] if args.triples is not None
             else [root / s for s in SOURCES])
     present = [p for p in srcs if p.exists()]
@@ -284,6 +301,9 @@ def main():
         print(f"  --no-fetch: leaving {len(missing):,} accessions unresolved")
     elif missing:
         print(f"  {len(missing):,} still unresolved -> NCBI")
+        if not EMAIL:                      # only worth saying when we actually go out
+            print("  (no contact address: set NCBI_EMAIL or pass --email so NCBI can "
+                  "reach you before it throttles)")
         fetch_years(missing, cache)        # updates + flushes `cache` to disk per batch
         print(f"cache -> {CACHE} ({len(cache):,} accessions)")
 
