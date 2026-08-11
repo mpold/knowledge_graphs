@@ -872,6 +872,9 @@ __LIBTAG__
  #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#orbtns button:hover,#orbtns2 button:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button,#orbtns button{margin-bottom:4px}
  #orbtns{margin-top:5px}
+ #disfilters{max-height:148px;overflow-y:auto;margin-top:4px}
+ #disfilters label{display:block}
+ #disclear:hover{color:#0969da}
  #orbtns2 button{margin-left:6px;margin-right:0}
  /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
     carry a trailing margin -- 6px of it would push Fit onto a second line */
@@ -899,7 +902,7 @@ __LIBTAG__
  __PUBMED_QUERY__
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
  <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease">Disease names</button><button class="lblb" data-kind="chemical">Drug names</button></span>
-  <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. Applies in place; the layout is not recomputed.</div></div>
+  <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed.</div></div>
  <div class="row">Shrink periphery: <b id="shv">0%</b> <button class="ihelp" aria-label="About shrink periphery" aria-expanded="false">i</button><br><input id="shrink" type="range" min="0" max="90" step="5" value="0" aria-label="Shrink periphery">
   <div class="mut help">Pulls everything past the middle distance inward, so the small clusters physics flung to the edges come back where you can read them without zooming out. The centre is left alone.</div></div>
  <div class="row">Expand center: <b id="exv">0%</b> <button class="ihelp" aria-label="About expand center" aria-expanded="false">i</button><br><input id="expand" type="range" min="0" max="100" step="5" value="0" aria-label="Expand center">
@@ -908,10 +911,14 @@ __LIBTAG__
   <div class="mut help">Drops the disease nodes naming one tissue onto a single spot, overlapping, so <em>lung cancer</em>, <em>lung adenocarcinoma</em> and <em>non-small cell lung carcinoma</em> read as one place on the canvas instead of three. They stay separate nodes with their own edges and tooltips &mdash; only their positions are pooled, after the layout settles. Tissue is read from the name (<span id="tissuen"></span>).</div></div>
  <div class="row" id="cmrow">Co-mention links: <button class="ihelp" aria-label="About co-mention links" aria-expanded="false">i</button><br><select id="comention"><option value="">(off)</option></select>
   <div class="mut help">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
+ <div class="row" id="disrow">Keep diseases: <button class="ihelp" aria-label="About the disease keep-list" aria-expanded="false">i</button>
+  <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
+  <div class="legend" id="disfilters"></div>
+  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied, the same rule the significance cut follows: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row" id="qrow">Significance: <b id="qsv">off (show all)</b> <button class="ihelp" aria-label="About the significance cutoff" aria-expanded="false">i</button><br><input id="qsig" type="range" min="0" max="9" step="1" value="0" aria-label="Significance cutoff">
   <div id="orbtns"><button class="orb" data-or="gt1">OR&gt;1</button><button class="orb" data-or="lt1">OR&lt;1</button></div>
-  <div class="mut help" id="qhelp">Hides genes and drugs whose enrichment misses the cutoff. The buttons keep one side of it &mdash; over-represented in this view (OR&gt;1) or under-represented (OR&lt;1) &mdash; and press the lit one again to clear. The depleted side is a finding too: in an adenocarcinoma view the small-cell markers DLL3 and ASCL1 land there. Diseases stay throughout: they carry no ranking of their own.</div></div>
+  <div class="mut help" id="qhelp">Hides genes and drugs whose enrichment was <em>tested and missed</em> the cutoff. Entities the test could not reach &mdash; fewer than five corpus papers, or nothing outside the view to contrast against &mdash; are <b>kept</b>: they were never judged, so they cannot have failed, and on this corpus they are over half the ranked genes. The buttons ask a different question &mdash; which side of 1 &mdash; so they <em>do</em> drop the untested, which sit on neither: over-represented in this view (OR&gt;1) or under-represented (OR&lt;1). Each toggles on its own and press a lit one again to clear it. <b>Both lit is not the same as neither</b>: it keeps every entity the test placed on a side and drops the ones it could not place &mdash; the &ldquo;only what was actually measured&rdquo; view. The depleted side is a finding too: in an adenocarcinoma view the small-cell markers DLL3 and ASCL1 land there. Diseases stay throughout: they carry no ranking of their own. <b>A high q is not a small node.</b> The cut asks whether an entity is over-represented <em>against the pooled six-corpus lung background</em>, not whether it matters here: EGFR carries this view at rank 2 by publications, yet sits at OR&nbsp;1.05, q&nbsp;0.88, because it is just as common in the squamous and small-cell papers. Read the ranking for what the view is made of, and this for what is distinctive about it.</div></div>
  <div class="row" id="sigrow">Significance in view <button class="ihelp" aria-label="About significance in view" aria-expanded="false">i</button><br>
   <select id="sigkind"><option value="gene">genes</option><option value="chemical">drugs</option></select>
   <select id="sigmeasure"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
@@ -1122,6 +1129,37 @@ function cmTip(link,dis){
  d.innerHTML=h;return d;
 }
 function activeComention(){return (document.getElementById('comention')||{}).value||'';}
+// --- the disease keep-list ------------------------------------------------------------------
+// A WHITELIST over disease nodes: empty means no constraint (the default), and any tick means
+// "these diseases only". It touches nothing else -- a gene-gene edge has no disease endpoint and
+// cannot be cut by it -- so this narrows which diseases the picture is allowed to contain,
+// rather than narrowing the picture.
+const DIS_KEEP=new Set();
+function disPass(id){return !DIS_KEEP.size||KIND[id]!=='disease'||DIS_KEEP.has(id);}
+// Rebuilt on every redraw from the edges the rest of the controls left, so the menu is always
+// the diseases actually in front of you. Two things it must not do: it must not be built from
+// its OWN leavings, or ticking one disease would empty the list you are ticking from (so the
+// caller passes the pre-filter edges, the same order the q cut uses); and it must not drop a
+// ticked disease that the current filters have starved, or that tick could never be undone --
+// those stay listed at (0).
+function buildDiseaseFilter(edges){
+ const box=document.getElementById('disfilters'); if(!box)return;
+ const seen={};
+ edges.forEach(o=>[o.e.from,o.e.to].forEach(nd=>{if(KIND[nd]==='disease')seen[nd]=(seen[nd]||0)+1;}));
+ const ids=Object.keys(seen);
+ DIS_KEEP.forEach(id=>{if(seen[id]===undefined)ids.push(id);});
+ const lab=id=>String(labelById[id]||id);
+ ids.sort((a,b)=>(seen[b]||0)-(seen[a]||0)||lab(a).localeCompare(lab(b)));
+ box.innerHTML=ids.length
+   ? ids.map(id=>{const n=seen[id]||0;
+       return '<label><input type=checkbox class=disf value="'+esc(id)+'"'+(DIS_KEEP.has(id)?' checked':'')
+         +'> '+esc(lab(id))+' <span class=cnt'+(n?'':' style="color:#b3243b"')+'>('+n+')</span></label>';}).join('')
+   : '<span class="mut">no diseases in view</span>';
+ box.querySelectorAll('.disf').forEach(c=>c.addEventListener('change',()=>{
+   if(c.checked)DIS_KEEP.add(c.value);else DIS_KEEP.delete(c.value);
+   build(+document.getElementById('thr').value);
+ }));
+}
 // --- same-tissue disease stacking ------------------------------------------------------
 // One tissue is spread over many disease nodes -- 22 of them name the lung here, carrying 4196
 // connections between them -- because the corpus says "lung cancer" where it means NSCLC and
@@ -1218,10 +1256,33 @@ function scaledFont(b){return Math.max(4,Math.round(b*FSCALE));}
 // (or click) away. The two buttons put them back: the set is live, so toggling relabels the
 // nodes already on screen (a rebuild would re-run the layout for a question about text).
 const LABEL_KINDS=new Set(['gene']);
-function nodeLabel(n){return LABEL_KINDS.has(n.kind||'gene')?n.label:'';}
+// Gene symbols are short and are the thing you read positionally; disease and chemical names are
+// long prose that competes with them for the same canvas. So when those names are switched on
+// they are set in a CONDENSED face at 80% of the size a gene of the same weight would take, and
+// drugs are additionally italic -- three cues (shape, width, slope) doing what size alone had to.
+// The ratio is applied to the BASE size, not the rendered one, so the font slider and the
+// per-node "busier is bigger" ranking both survive untouched.
+const NARROW_FACE='Arial Narrow,Liberation Sans Narrow,Segoe UI Semilight,Arial,sans-serif';
+const KIND_FS={gene:1,disease:0.8,chemical:0.8};
+// Italic has no plain switch in vis-network: the slanted face lives in the multi-font "ital"
+// slot, which only applies to text the label marks up. So a drug label carries <i>...</i> and
+// the node opts into multi:'html'. Anything that builds a label has to go through labelFor(),
+// or a drug would render its own markup as literal text.
+function labelFor(id,kind,text){
+ if(!LABEL_KINDS.has(kind||'gene'))return '';
+ const t=text===undefined?(labelById[id]||''):text;
+ return (kind==='chemical')?'<i>'+esc(t)+'</i>':t;
+}
+function nodeFont(kind,base){
+ const f={size:scaledFont(base)};
+ if(kind==='disease')f.face=NARROW_FACE;
+ if(kind==='chemical'){f.face=NARROW_FACE;f.multi='html';f.ital={face:NARROW_FACE,mod:'italic'};}
+ return f;
+}
+function nodeLabel(n){return labelFor(n.id,n.kind||'gene',n.label);}
 function applyLabelKinds(){
  if(!NODEDS)return;
- NODEDS.update(NODEDS.get().map(n=>({id:n.id,label:LABEL_KINDS.has(KIND[n.id]||'gene')?(labelById[n.id]||''):''})));
+ NODEDS.update(NODEDS.get().map(n=>{const k=KIND[n.id]||'gene';return {id:n.id,label:labelFor(n.id,k)};}));
 }
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?2:v;}
 function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?2:v;}
@@ -1316,14 +1377,17 @@ function build(thr){
  ENRICH=enrichCompute(VIEW_PUBS,VIEW_ENTS);
  QMAP=qMapFor(VIEW_PUBS,VIEW_ENTS);    // q for genes AND drugs, so the cut can judge both
  const qcut=activeQ();
- if(qcut!==null||OR_MODE){
+ if(qcut!==null||OR_MODE.size){
   // a node survives if it was tested, reached the threshold and points the way the buttons ask;
   // diseases carry no ranking of their own, so they stay as context rather than being cut on
   // evidence they never had
-  const ok=id=>KIND[id]==='disease'
-    ||((qcut===null||(QMAP[id]!==undefined&&QMAP[id]<=qcut))&&orPass(id));
+  const ok=id=>KIND[id]==='disease'||(qPass(id)&&orPass(id));
   edges=edges.filter(o=>ok(o.e.from)&&ok(o.e.to));
  }
+ // the disease keep-list, built from what the controls above left and applied after it, so the
+ // menu never filters itself out of existence (see buildDiseaseFilter)
+ buildDiseaseFilter(edges);
+ if(DIS_KEEP.size)edges=edges.filter(o=>disPass(o.e.from)&&disPass(o.e.to));
  sigRender();
  if(SIGTAB_OPEN)sigTable();
  updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text, q)
@@ -1353,7 +1417,9 @@ function build(thr){
    if(t.size){isoSz[nd]=t.size;keep.add(nd);p.forEach(x=>isoPub.add(x));}});
  const nIso=Object.keys(isoSz).length;
  const nsz=id=>(nss[id]?nss[id].size:(isoSz[id]||0));
- const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>({id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),_fs:fontSize(nsz(n.id)),font:{size:scaledFont(fontSize(nsz(n.id)))}}));
+ const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
+  const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
+  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs)};});
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:true,scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
  // undirected and unarrowed: a shared sentence has no subject and object
@@ -1413,7 +1479,9 @@ const mpb=document.getElementById('minpub');
 mpb.addEventListener('input',()=>{document.getElementById('mpv').textContent=mpb.value;build(+thr.value);});
 const fsc=document.getElementById('fscale');
 fsc.addEventListener('input',()=>{FSCALE=activeFontScale();document.getElementById('fsv').textContent=fsc.value+'%';
- if(NODEDS)NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:{size:scaledFont(n._fs||13)}})));});
+ // rebuild the WHOLE font object per node, not just its size: passing {size} alone would drop
+ // the condensed face and the italic slot the disease and drug labels carry
+ if(NODEDS)NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:nodeFont(KIND[n.id]||'gene',n._fs||13)})));});
 // Each "i" reveals its own section's prose. Most sections keep their help inside the row, but
 // a few explain a control from BELOW it -- the relation counts, the training-set hint -- and
 // those are tagged data-help="<group>" so one button can open every part of its section at once.
@@ -1439,13 +1507,15 @@ function qChanged(fromTable){
 ['qsig','qsig2'].forEach((id,i)=>{const el=document.getElementById(id);
  if(el)el.addEventListener('input',()=>qChanged(i===1));});
 function orPaint(){document.querySelectorAll('.orb,.orb2').forEach(b=>
-  b.classList.toggle('on',b.getAttribute('data-or')===OR_MODE));}
+  b.classList.toggle('on',OR_MODE.has(b.getAttribute('data-or'))));}
 document.querySelectorAll('.orb,.orb2').forEach(b=>b.addEventListener('click',()=>{
  const m=b.getAttribute('data-or');
- OR_MODE=(OR_MODE===m)?null:m;        // pressing the lit one clears it
+ if(OR_MODE.has(m))OR_MODE.delete(m);else OR_MODE.add(m);   // each button toggles on its own
  orPaint();
  build(+thr.value);
 }));
+(function(){const c=document.getElementById('disclear');
+ if(c)c.addEventListener('click',()=>{if(!DIS_KEEP.size)return;DIS_KEEP.clear();build(+thr.value);});})();
 const shr=document.getElementById('shrink'), exp=document.getElementById('expand');
 shr.addEventListener('input',()=>{document.getElementById('shv').textContent=shr.value+'%';applyLayoutShape();});
 exp.addEventListener('input',()=>{document.getElementById('exv').textContent=exp.value+'%';applyLayoutShape();});
@@ -1616,12 +1686,29 @@ let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0, VIEW_ENTS=0, QMAP={}, O
 // DLL3 and ASCL1 land there at q well under 0.05. Untested entities have no OR and are hidden by
 // either button, the same rule the q slider follows; diseases carry no ranking and are exempt.
 const OR_TESTS={gt1:{fn:v=>v>1},lt1:{fn:v=>v<1}};
-let OR_MODE=null;
+// A SET, not one mode: the two directions are independent filters, so both can be lit at once.
+// Both on is not the same as neither on -- it keeps every entity the test placed on a side and
+// drops the ones it could not place, which is the "show me only what was actually measured"
+// view. (An odds ratio of exactly 1 is on neither side and falls out too; with the Haldane
+// correction that is a near-empty case, but it is the honest reading of "over" and "under".)
+const OR_MODE=new Set();
 function orPass(id){
- if(!OR_MODE)return true;
+ if(!OR_MODE.size)return true;
  const v=ORMAP[id];
- return v!==undefined&&OR_TESTS[OR_MODE].fn(v);
+ if(v===undefined)return false;      // untested: on neither side of 1, so no button keeps it
+ for(const m of OR_MODE)if(OR_TESTS[m].fn(v))return true;
+ return false;
 }
+// The q cut hides what the test JUDGED and rejected. An entity that could not be tested at all --
+// corpus count below ENRICH_MIN, or nothing outside the view to contrast against -- was never
+// judged, so it is not "below the cutoff": it has no cutoff to be below. Treating the two alike
+// deleted 1,502 of this corpus' 2,904 ranked genes at q<=0.05 -- more than half the graph, and
+// the whole long tail of it -- on evidence that was never gathered. So the slider keeps the
+// untested and cuts only the judged.
+// The OR buttons ask a DIFFERENT question -- which side of 1 the entity sits on -- and an
+// untested entity sits on neither, so orPass() above still hides it. That asymmetry is the point:
+// "not shown to be enriched" and "shown not to be enriched" are not the same claim.
+function qPass(id){const q=activeQ();return q===null||QMAP[id]===undefined||QMAP[id]<=q;}
 // q for BOTH rankable kinds, so the slider can cut genes and drugs in one pass. The table shows
 // one kind at a time; the graph has to judge whatever it draws.
 function qMapFor(viewPubs,viewEnts){
@@ -1795,10 +1882,9 @@ function sigKind(){return (document.getElementById('sigkind')||{}).value||'gene'
 function sigMeas(){return (document.getElementById('sigmeasure')||{}).value||'pub';}
 function sigTable(){
  const kind=sigKind(), meas=SIGTAB_SORT||sigMeas();
- // the same cut the graph applies, so the two views never disagree about what is significant
- const qcut=activeQ();
+ // the same two predicates the graph applies, so the views can never disagree about what survives
  SIGTAB_ROWS=SIG.filter(s=>s.kind===kind)
-   .filter(s=>(qcut===null||(QMAP[s.id]!==undefined&&QMAP[s.id]<=qcut))&&orPass(s.id))
+   .filter(s=>qPass(s.id)&&orPass(s.id))
    .sort((a,b)=>{
    if(meas==='nm')return a.label.localeCompare(b.label);
    if(meas==='pct'||meas==='z')return (b[meas][sigMeas()]-a[meas][sigMeas()])||a.label.localeCompare(b.label);
