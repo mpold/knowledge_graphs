@@ -439,6 +439,57 @@ def nuclear_strip_hsfold(s):
     return hsfold(s[8:] if s.startswith("nuclear ") else s)
 
 
+# RNAi / knockout constructs naming their target gene: shMAPK15, sh-TEX41,
+# siEGFR, si-TP53, Setd2KO, TP53-KO, MYC-KD. The construct is a reagent *against*
+# the gene (like 'anti-'), so it links to the gene under its own match_mode.
+# The prefix needs a following upper-case letter or digit so ordinary words
+# ('short', 'signal', 'ship') are untouched; the suffix needs a preceding
+# alphanumeric so a bare 'KO' does not become the empty string.
+_RNAI_RE = re.compile(r"^(?:sh|si)-?(?=[A-Z0-9])|(?<=[A-Za-z0-9])[- ]?(?:KO|KD)$")
+
+
+def rnai_strip_hsfold(s):
+    """Strip an RNAi/knockout construct marker, then hsfold (shMAPK15 -> MAPK15,
+    sh-TEX41 -> TEX41, Setd2KO -> Setd2).
+
+    'shX' / 'siX' / 'X-KO' name a construct that knocks X down or out, so the
+    surface identifies gene X while the match_mode records that it is a reagent
+    against the gene rather than the gene product itself. Query-only; the HGNC
+    index keeps its surfaces intact.
+    """
+    return hsfold(_RNAI_RE.sub("", s))
+
+
+# an 'endogenous ' / 'exogenous ' / 'total ' expression-context prefix
+# (endogenous FBP1 -> FBP1). These qualify where the gene product came from,
+# not which gene it is.
+_EXPRCTX_RE = re.compile(r"(?i)^(?:endogenous|exogenous|total|soluble|secreted) ")
+
+
+def exprctx_strip_hsfold(s):
+    """Strip an 'endogenous '/'exogenous '/'total ' context prefix, then hsfold.
+
+    The qualifier describes the source or fraction of the product, so it folds
+    onto the gene (endogenous FBP1 -> FBP1). Query-only.
+    """
+    return hsfold(_EXPRCTX_RE.sub("", s))
+
+
+# a figure/panel label glued to the front of a surface by sentence segmentation:
+# 'E) PPP1R14B', 'E. TEX41', '(C) MYC'. One letter, optional bracket, then a
+# delimiter -- narrow on purpose, since real symbols never take this shape.
+_PANEL_RE = re.compile(r"^\(?[A-Za-z][.)]\s+")
+
+
+def panel_strip_hsfold(s):
+    """Strip a leading figure-panel label, then hsfold (E) PPP1R14B -> PPP1R14B).
+
+    Not a biological descriptor -- an artefact of a sentence that began mid
+    figure caption. Stripping it recovers the gene the panel is about. Query-only.
+    """
+    return hsfold(_PANEL_RE.sub("", s))
+
+
 # 'X target genes' -- the genes REGULATED BY X, not X itself
 _TARGETGENES_RE = re.compile(r"(?i) target genes$")
 
@@ -1424,10 +1475,25 @@ def main():
     vr = match_pass(tr["unmatched_rows"], ALL_FIELDS, variant_strip_hsfold, None,
                     "VARIANT - ' variant(s)'/' mutant(s)'/' mutation(s)' stripped, symbol+name fields",
                     mode_override="variant/mutant stripped", index_keyfn=hsfold)
+    # RNAI: strip an sh/si prefix or a -KO/-KD suffix. The construct is a reagent
+    # against the gene (like 'anti-'), so the mode records it as such.
+    rn = match_pass(vr["unmatched_rows"], ALL_FIELDS, rnai_strip_hsfold, None,
+                    "RNAI - sh/si prefix or KO/KD suffix stripped, symbol+name fields",
+                    mode_override="RNAi/KO construct stripped", index_keyfn=hsfold)
+    # EXPRCTX: strip an 'endogenous '/'total ' expression-context prefix. Says
+    # where the product came from, not which gene it is.
+    ec = match_pass(rn["unmatched_rows"], ALL_FIELDS, exprctx_strip_hsfold, None,
+                    "EXPRCTX - 'endogenous'/'total' context prefix stripped, symbol+name fields",
+                    mode_override="expression context stripped", index_keyfn=hsfold)
+    # PANEL: strip a figure-panel label glued on by sentence segmentation
+    # ('E) PPP1R14B'). An artefact, not biology.
+    pn = match_pass(ec["unmatched_rows"], ALL_FIELDS, panel_strip_hsfold, None,
+                    "PANEL - leading figure-panel label stripped, symbol+name fields",
+                    mode_override="panel label stripped", index_keyfn=hsfold)
     # MISSENSE: <approved symbol> + a valid-AA missense [AA]<pos>[AA] folds onto
     # the gene (IDH1R132H -> IDH1). Approved 'symbol' field only, case-sensitive
     # (type-1); small-molecule compounds excluded. Final exact stage.
-    ms = match_pass(vr["unmatched_rows"], ["symbol"], missense_strip, None,
+    ms = match_pass(pn["unmatched_rows"], ["symbol"], missense_strip, None,
                     "MISSENSE - <approved symbol>+[AA]<pos>[AA] stripped, symbol field",
                     mode_override="missense stripped", index_keyfn=identity)
     # MISSENSE-SP: the space-delimited form '<approved symbol> [AA]<pos>[AA]'
@@ -1519,7 +1585,7 @@ def main():
     # (COMPLEX first, then the cascade). Entities are unique across passes, so the
     # merges are collision-free; match_field/match_mode record how each linked.
     roman_lib, roman_amb = {}, {}
-    for st in (cx, t1, t2, nm, ph, an, cl, pr, tr, vr, ms, ms2, ih, mr, pm, dh, pp, wt, nu, tg, hs, co, gx, gx2, ds, ds2):
+    for st in (cx, t1, t2, nm, ph, an, cl, pr, tr, vr, rn, ec, pn, ms, ms2, ih, mr, pm, dh, pp, wt, nu, tg, hs, co, gx, gx2, ds, ds2):
         roman_lib.update(st["matched_lib"])
         roman_amb.update(st["ambiguous_lib"])
 
