@@ -202,6 +202,54 @@ No other change is needed in this file: the label space is built from whatever
 `NEG` appended last), so multi-class flows through unchanged — exactly as it
 already does for ChemProt and DDI.
 
+### What the registry entry actually changes in the network
+
+Worth being precise about, because it is the only architectural consequence of
+adding a task: **the width of one dense layer.**
+
+`train_re.py` never builds a model by hand — there is no hand-written dense layer
+anywhere in the pipeline. It loads `AutoModelForSequenceClassification`, falling
+back to the explicit `BertForSequenceClassification` because some BioBERT
+checkpoints (`dmis-lab/biobert-base-cased-v1.1` among them) ship a minimal
+`config.json` with no `"model_type"` for the `Auto*` loaders to dispatch on. So
+the layers trained during the epochs are HuggingFace's stock BERT
+sequence-classification stack:
+
+| component    | shape                     | provenance                          |
+|--------------|---------------------------|-------------------------------------|
+| encoder      | 12 × BERT block           | pretrained (BioBERT)                |
+| **pooler**   | `Linear(768 → 768)` + tanh over `[CLS]` | pretrained (ships in the checkpoint) |
+| dropout      | —                         | —                                   |
+| **classifier** | `Linear(768 → num_labels)` | **freshly initialized**           |
+
+`num_labels` is `len(labels)`, derived from the task's `label_names` map: 2 for
+`ppi` / `gad`, 5 for `ddi`, 6 for `chemprot` — and **9** for the `biored` entry
+above (8 relation types + `false`), or **5** if section 6's collapse-to-4
+recommendation is taken. That count is the whole architectural delta.
+
+`ignore_mismatched_sizes=True` on `from_pretrained()` is what forces that
+classifier to be discarded and reinitialized rather than reused when fine-tuning
+*from* an already-fine-tuned checkpoint — without it, loading the PPI checkpoint
+to train BioRED would fail on the 2-vs-9 shape clash instead of starting clean.
+
+This is also why `set_seed(args.seed)` runs **before** the model is constructed,
+not just inside `Trainer`: the head is initialized at `from_pretrained()` time
+and is the main source of run-to-run variation, so seeding after construction
+would leave the largest nondeterminism unseeded.
+
+Nothing is frozen. The epochs update the entire encoder plus both dense layers at
+`lr=2e-5`, `weight_decay=0.01`, `warmup_ratio=0.1` (`build_training_args`), for
+the per-task count in `EPOCH_DEFAULTS` — 2 for `ppi`, 3 for `biored`. This is
+also the mechanical basis for section 6's "fine-tuning is not training from
+scratch" argument: only the last row of the table above starts from noise.
+
+One distinction that matters for reading section 6: the **Platt calibrator** fit
+afterwards on the dev split is *not* part of this network. It is a two-parameter
+logistic fit on the logits, applied post-hoc so scores from different checkpoints
+share one scale for the `max()` that `relation_extraction.py --route-mode
+additive` takes across models. It is not trained during the epochs and adds no
+layer.
+
 ---
 
 ## 4. Downstream — what needs nothing
@@ -218,10 +266,13 @@ python run_re_pipeline.py --task biored --dataset bigbio/biored \
     --data biored_data --model biored-biobert-re
 ```
 
-BioRED ships its own train/dev/test split, so `--val-frac` should be **0** here
-(unlike the BioInfer path, which carves 10% because BioInfer has no dev split —
-see `kaggle_working/ppi_data/dev_test_train_explained.md`). Confirm with the split names printed by the
-converter; `SPLIT_FILE` already maps `validation` / `valid` / `dev` → `dev.tsv`.
+BioRED ships its own train/dev/test split, so `--val-frac` must be **0** here —
+carving another dev set out of train would be wrong. `--task biored` already
+flips it to 0 as a task default, so the flag above does not need passing; the
+0.1 default applies to the BioInfer path, which has no dev split of its own. See
+the TASK DEFAULTS block in `run_re_pipeline.py`'s module docstring. Confirm with
+the split names printed by the converter; `SPLIT_FILE` already maps
+`validation` / `valid` / `dev` → `dev.tsv`.
 
 ---
 
@@ -284,9 +335,10 @@ extra rows are redundant rather than independent — but the model does not star
 
 ### Fine-tuning is not training from scratch
 
-Same reason the 3-epoch default works (see
-`kaggle_working/ppi_data/dev_test_train_explained.md`): only the classification
-head is fresh, and the encoder already knows biomedical language. Thousands of
+Same reason a handful of epochs is enough — `EPOCH_DEFAULTS` in `train_re.py` is
+3 for `biored`, and was cut to 2 for `ppi` once epoch 3 showed rising eval loss
+for +0.0024 dev F1: only the classification head is fresh (section 3), and the
+encoder already knows biomedical language. Thousands of
 labelled examples is the normal operating range for BERT fine-tuning, not the
 edge of it — several GLUE tasks BERT handles fine (RTE ~2.5k, MRPC ~3.7k) are
 smaller than what BioRED converts to. Low-thousands corpus size is a legitimate
