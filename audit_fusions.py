@@ -22,10 +22,11 @@ WHAT IT CHECKS (1-5 fail the run, 6-7 are drift reports)
                       write-up calls pocketless AND junctionless; if ChimerKB starts listing
                       them, the argument in candidate_targets.md section 4a changes and should
                       be re-read rather than silently drifting.
-  4. seq never flags  ChimerSeq is algorithmic -- TP53 in 65 rows, CTNNB1 in 50, USP39 in 40 --
+  4. seq never flags  The flagged set must come from ChimerKB or from the small curated
+                      FUSION_SUPPLEMENT, never from ChimerSeq, which is algorithmic -- TP53 in
+                      65 rows, CTNNB1 in 50, USP39 in 40 --
                       and no recurrence threshold rescues it: >=3 samples still admits USP39
-                      while losing PAX3, FOXO1, YAP1 and MYB. The flagged set must therefore
-                      equal the ChimerKB set, never more.
+                      while losing PAX3, FOXO1, YAP1 and MYB.
   5. payload          Every gene node carries the four fields; every non-gene node carries them
                       empty. A missing field is how a template edit breaks the HTML silently.
   6. curation drift   Genes candidate_targets.md section 6a lists that ChimerKB does not, and
@@ -132,8 +133,11 @@ def audit(data_root, graph, quiet=False):
             for g in ((r.get("H_gene") or "").strip(), (r.get("T_gene") or "").strip()):
                 if g:
                     kb_genes.add(g)
-    extra = sorted(set(fusion) - kb_genes)
-    print(f"[4] flags come from ChimerKB only ...... {'yes' if not extra else 'NO: ' + str(extra[:8])}")
+    # the curated supplement is allowed to add genes ChimerKB lacks; ChimerSeq is not
+    supp_genes = {g for pair in HC.FUSION_SUPPLEMENT for g in pair[:2]}
+    extra = sorted(set(fusion) - kb_genes - supp_genes)
+    print(f"[4] flags come from ChimerKB or the curated supplement "
+          f"({len(supp_genes)} genes) ... {'yes' if not extra else 'NO: ' + str(extra[:8])}")
     fails += bool(extra)
 
     # -- 5. payload integrity ---------------------------------------------------------------
@@ -154,8 +158,11 @@ def audit(data_root, graph, quiet=False):
 
     # -- 6. drift against the hand curation --------------------------------------------------
     absent = [g for g in CURATED_6A if g not in fusion]
-    print(f"\n[6] curated in section 6a but not in ChimerKB: {len(absent)}"
-          + (f"\n      {', '.join(absent)}" if absent else ""))
+    print()
+    print(f"[6] curated in section 6a, carried by neither ChimerKB nor the supplement: "
+          f"{len(absent)}")
+    if absent:
+        print("      " + ", ".join(absent))
     if genes and not quiet:
         extra_flagged = sorted(n["id"] for n in flagged if n["id"] not in CURATED_6A)
         print(f"    flagged in the graph but not in section 6a: {len(extra_flagged)}")
