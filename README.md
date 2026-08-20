@@ -347,6 +347,11 @@ under `gpu_bundle/databases/` before running stage 2 (see
 - `interactions.tsv` — DGIdb open drug–gene interactions. *Optional*, read by `chemical.py` for
   the drug–gene target layer. Absent, it degrades silently to an empty drug set — no error, just
   fewer CHEMICAL surfaces
+- `ChimerKB4.xlsx` / `ChimerSeq4.xlsx` — ChimerDB 4.0 fusion catalogue, *optional*, **stage 3**
+  and so staged under the data root (`kaggle_working/databases/`). Convert once with
+  `python chimerdb_to_tsv.py`. ChimerKB is curated (3,138 rows); ChimerSeq is called from TCGA
+  RNA-seq (132,979 rows, 122 cancer types) and algorithmic — it lists TP53 and CTNNB1 as fusion
+  partners, so gate on ChimerKB and use ChimerSeq only with a frame/read-count threshold
 - `ncit_drugs.json` — NCI Thesaurus drug names. *Optional but recommended*, and **generated**:
   `python gpu_bundle/drug_lexicon.py --build` (or stage-2 step 3) downloads NCIt and distils it.
   Two steps read it — `sentences.py` tags the drugs the BioBERT chemical model misses, and
@@ -383,6 +388,7 @@ it is modified. Without one, stage 1 simply downloads everything.
 ├── high_confidence_g.py       # stage 3: the graph (typed edges + --merge)
 ├── audit_drug_targets.py      # stage 3: regression test for false drug targets
 ├── pubmed_fusions.py          # stage 3: does a gene form fusions? (PubMed screen)
+├── chimerdb_to_tsv.py         # stage 3: ChimerDB .xlsx -> .tsv (stdlib, one-off)
 ├── gpu_bundle/                # stage 2: the GPU pipeline
 │   ├── gpu.py                 #   orchestrator (19 steps)
 │   ├── drug_lexicon.py        #   NCIt drug lexicon: builder + matcher (step 3)
