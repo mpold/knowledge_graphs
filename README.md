@@ -301,6 +301,17 @@ python pubmed_fusions.py --pair PAX3 FOXO1 --titles    # verdict on one pair
 python pubmed_fusions.py --from-graph oncogene_addiction_2026_08_20_M.html --blue --max 40
 ```
 
+Fusion status itself comes from **ChimerDB 4.0** once staged, and rides on every gene node as
+`fus` / `fpart` / `fn` / `fseq` — which side of the junction the gene sits on, who with, and how
+much In-Frame TCGA RNA-seq backs it. `audit_fusions.py` is its regression test, in the same spirit
+as `audit_drug_targets.py`: it fails if a re-release renames a column, flips an anchor's side
+(TMPRSS2 must stay 5′-only), starts flagging the negative controls, or lets the algorithmic
+ChimerSeq set a flag it should never set.
+
+```bash
+python audit_fusions.py --data-root kaggle_working     # exit 0 = clean
+```
+
 The graph spans gene, DISEASE and CHEMICAL nodes (diseases and chemicals identified by MONDO /
 ChEBI label — or NCIt label, for the biologics ChEBI has no term for — shaped ◆ and ■), so the
 gene–disease and chemical–gene edges BioRED contributes are drawn instead of discarded — on the
@@ -389,6 +400,7 @@ it is modified. Without one, stage 1 simply downloads everything.
 ├── audit_drug_targets.py      # stage 3: regression test for false drug targets
 ├── pubmed_fusions.py          # stage 3: does a gene form fusions? (PubMed screen)
 ├── chimerdb_to_tsv.py         # stage 3: ChimerDB .xlsx -> .tsv (stdlib, one-off)
+├── audit_fusions.py           # stage 3: regression test for the fusion attribute
 ├── gpu_bundle/                # stage 2: the GPU pipeline
 │   ├── gpu.py                 #   orchestrator (19 steps)
 │   ├── drug_lexicon.py        #   NCIt drug lexicon: builder + matcher (step 3)
