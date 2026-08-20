@@ -561,6 +561,76 @@ def single(v):
     return v.strip() if isinstance(v, str) and v.strip() else None
 
 
+# ----- addiction class (manual curation, NOT derived from the corpus) ---------------
+# The graph already says which genes are DRUGGED (tcat, from DGIdb/ChEBI). It said nothing
+# about the question the corpus is actually about: which genes a tumour is ADDICTED to. That
+# is a literature judgement, not a database lookup -- no resource ships it as a field -- so it
+# is curated here, kept in one place, and stamped onto the node payload as `acat`/`agrp` so the
+# HTML can show it without re-deriving anything.
+#
+# Two distinct things, deliberately not merged into one flag:
+#   driver  ONCOGENE addiction: an ACTIVATING lesion (mutation, amplification, fusion,
+#           overexpression) the tumour cannot survive losing. EGFR-mutant lung, BCR-ABL CML,
+#           MYC in the tet-off models that named the phenomenon.
+#   noa     NON-ONCOGENE addiction (Luo/Solimini/Elledge): a dependency the transformed STATE
+#           creates without any lesion in the gene itself -- chaperone load, mitotic and
+#           replicative stress, metabolic rewiring, apoptotic priming. Real vulnerabilities,
+#           different biology, and the pair is routinely conflated in target lists.
+# Loss-of-function tumour suppressors are in NEITHER: their loss opens synthetic-lethal
+# vulnerabilities elsewhere, which is not the same claim. TP53 is the second-largest gene node
+# in the reference run and is deliberately unclassified here.
+#
+# `_BORDERLINE` marks calls a careful reader could reasonably move to the other side or drop:
+# pathway-level members (SHH, GLI2), amplicon passengers (PVT1, MIR106A/B), fusion PARTNERS
+# that are not oncogenes themselves (TMPRSS2 donates only a promoter). The HTML shows them as
+# "(borderline)" rather than hiding the uncertainty behind a clean label.
+#
+# On the reference oncogene_addiction run this classifies 177 of 424 gene nodes: 72 drivers
+# (31 of them green -- the kinase/RAS branch is almost fully drugged, while the 12 TF-class and
+# 8 oncomiR drivers are entirely undrugged) and 105 non-oncogene dependencies.
+_DRIVER_GROUPS = {
+    "RTK / kinase driver": "EGFR ERBB2 ERBB3 ALK ROS1 RET MET KIT FLT3 PDGFRA PDGFRB "
+                           "FGFR1 FGFR2 FGFR3 FGFR4 ABL1 JAK2",
+    "RAS-RAF-PI3K axis": "KRAS NRAS HRAS BRAF RAF1 PIK3CA AKT1 MTOR PIK3CB",
+    "transcription factor / MYC-class": "MYC MYCN MYB SOX2 BCL6 CTNNB1 NOTCH1 YAP1 LMO1 "
+                                        "GLI2 WNT1 SHH",
+    "cell-cycle / p53-axis amplicon": "CCND1 CCND3 CDK4 MDM2 MDM4",
+    "chromatin gain-of-function": "EZH2",
+    "cytokine receptor / ligand": "CRLF2 NRG1",
+    "oncomiR": "MIR155 MIR155HG MIR21 MIR17HG MIR19A MIR106A MIR106B PVT1",
+    "apoptotic driver (translocation)": "BCL2",
+    "fusion partner": "BCR EML4 NPM1 EWSR1 FLI1 ERG PML RELA PAX3 FOXO1 RUNX1 HOXA9 MEIS1 "
+                      "BRD4 PPARG TMPRSS2 HMGA2",
+}
+_NOA_GROUPS = {
+    "proteotoxic / chaperone / UPR": "HSP90AA1 HSP90B1 HSPA5 HSPB1 HSPD1 HSF1 XBP1 ATF4 ATF6 "
+                                     "EIF2AK3 EIF2S1 DDIT3 DNAJC1 DNAJC17 DNAJC5B ERP44 "
+                                     "PSMD11 SQSTM1 UBE2I UBA52 RPS27A URI1",
+    "mitotic / replicative stress": "PLK1 CDK1 CDK2 CCNB1 MASTL PTTG1 PRC1 CENPF AURKA CDC6 "
+                                    "PCNA RRM2 CHEK1 RAD51 H2AX ZRANB3 TP53BP1",
+    "transcriptional CDK / coactivator": "CDK7 CDK9 CDK12 CDK13 CSNK2A1 EP300 CREBBP",
+    "metabolic": "GLS SLC1A1 SLC2A1 SLC25A5 PKM HK1 G6PD FASN ACACA SOAT1 NAMPT PDK1 DHTKD1 "
+                 "PRKAA2 MLXIPL SLC7A8 UPP1 ATP5F1A",
+    "apoptotic priming": "MCL1 BCL2L1 BCL2L2 BIRC5 XIAP BIRC2 CFLAR DIABLO",
+    "redox / autophagy": "NUDT1 SOD1 SESN1 ATG5 ATG16L1 ULK1",
+    "signalling / adhesion dependency": "TBK1 CIB1 PTK2 RICTOR STK38",
+    "epigenetic dependency": "DNMT1 UHRF1 KDM4A KDM4B BMI1 SIRT1 SIRT3 SIRT6 HDAC6 HDAC9 "
+                             "TET1 TET3",
+    "SWI-SNF loss -> synthetic lethality": "SMARCA4 SMARCB1",
+    "splice / RNA / translation": "USP39 EXOSC10 DDX5 DDX17 MARS1 RACK1 RPS3A RPS6",
+}
+# EZH2 is the one gene that honestly belongs to both: Y641 gain-of-function in follicular
+# lymphoma is oncogene addiction, while the EZH2 dependency of SMARCB1/SMARCA4-null tumours is
+# synthetic lethality. `driver` wins here because the lesion is in EZH2 itself.
+ADDICTION = {g: ("driver", grp) for grp, gs in _DRIVER_GROUPS.items() for g in gs.split()}
+ADDICTION.update({g: ("noa", grp) for grp, gs in _NOA_GROUPS.items() for g in gs.split()
+                  if g not in ADDICTION})
+_BORDERLINE = set("ERBB3 FGFR4 RAF1 MTOR PIK3CB GLI2 SHH MDM4 MIR19A MIR106A MIR106B PVT1 "
+                  "RUNX1 HOXA9 MEIS1 PPARG TMPRSS2 HMGA2 AURKA PTK2 STK38 KDM4A KDM4B TET1 "
+                  "TET3".split())
+ACAT_LABEL = {"driver": "oncogene addiction", "noa": "non-oncogene addiction"}
+
+
 def _drug_targets():
     """(n_chemicals, chemicals, source, colour-class) per gene, from chemical_to_target.json:
     corpus genes flagged in_corpus_GENETIC, used to shade drug-target nodes."""
@@ -654,7 +724,12 @@ def graph_payload_multi(triples, flags):
                       "target": tgt.get(nd, 0) if k == "gene" else 0,
                       "chems": chems_by_gene.get(nd, []) if k == "gene" else [],
                       "tsource": tsrc.get(nd, "") if k == "gene" else "",
-                      "tcat": tcat.get(nd, "other")})
+                      "tcat": tcat.get(nd, "other"),
+                      # curated addiction class (see ADDICTION): "" for genes nobody has
+                      # placed and for every non-gene node, so the HTML can test it directly
+                      "acat": ADDICTION.get(nd, ("", ""))[0] if k == "gene" else "",
+                      "agrp": ADDICTION.get(nd, ("", ""))[1] if k == "gene" else "",
+                      "abord": 1 if (k == "gene" and nd in _BORDERLINE) else 0})
     return {"nodes": nodes, "edges": edges}
 
 
@@ -950,6 +1025,9 @@ __LIBTAG__
  <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
   <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
 __KINDROW__
+ <div class="row" id="acathdr">Addiction class <button class="ihelp" data-help="acat" aria-label="About the addiction class" aria-expanded="false">i</button></div>
+ <div class="row legend" id="acatfilters"></div>
+ <div class="row mut help" id="acathelp" data-help="acat">A <b>hand curation</b>, not a corpus or database read-out &mdash; the only claim in this graph nothing upstream produced. <b>Oncogene addiction</b>: an activating lesion (mutation, amplification, fusion) the tumour cannot survive losing. <b>Non-oncogene addiction</b>: a dependency the transformed state creates with no lesion in the gene itself &mdash; chaperone load, mitotic and replicative stress, metabolic rewiring, apoptotic priming. Loss-of-function tumour suppressors are in <em>neither</em> and sit under <b>unclassified</b>: their loss opens synthetic-lethal vulnerabilities elsewhere, which is a different claim. Hover a node for its group, marked <em>(borderline)</em> where the call could reasonably go the other way. Counts are gene nodes in the whole file, not in the view. An edge survives only when BOTH its gene endpoints are ticked, so unticking <b>unclassified</b> leaves the curated subnetwork alone; disease and chemical nodes are never filtered here.</div>
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
  <div class="row mut help" data-help="rel">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels. Thickness and arrowhead size follow the number of <b>independent publications</b> behind the edge, not its sentence count &mdash; one paper repeating itself never thickens a line.</div>
@@ -987,7 +1065,15 @@ const MAXTGT=Math.max(1,...DATA.nodes.map(n=>n.target||0));
 // and chemical nodes take their type colour, and every node its type SHAPE, so the three
 // kinds stay distinguishable without relying on colour alone.
 function nodeColor(n){if(n.kind&&n.kind!=='gene')return {background:n.bg,border:n.border};if(!n.target)return {background:n.bg||'#cfe3ff',border:n.border||'#2b6cb0'};const t=n.target/MAXTGT,L=(a,b)=>Math.round(a+(b-a)*t);if(n.tcat==='green')return {background:'rgb('+L(200,27)+','+L(230,120)+','+L(201,55)+')',border:'#145a28'};if(n.tcat==='amber')return {background:'rgb('+L(255,224)+','+L(231,134)+','+L(179,0)+')',border:'#9a6700'};return {background:'rgb('+L(255,194)+','+L(217,24)+','+L(232,91)+')',border:'#7a0f3a'};}
+// Curated ADDICTION class (payload acat/agrp/abord). This is the one claim in the graph that
+// comes from neither the corpus nor a database -- a human placed each gene -- so every place it
+// is shown says which of the two addictions it means, and marks the shaky calls "borderline"
+// instead of letting a clean label imply a certainty the curation does not have.
+const ACAT_LAB={driver:'oncogene addiction',noa:'non-oncogene addiction'};
+function addTip(n){return n.acat?(' · '+(ACAT_LAB[n.acat]||n.acat)+': '+n.agrp+(n.abord?' (borderline)':'')):'';}
 const KIND={};DATA.nodes.forEach(n=>{KIND[n.id]=n.kind||'gene';});
+// '' (nobody placed this gene) becomes 'none' so it can be a tick box like the other two
+const ACAT={};DATA.nodes.forEach(n=>{ACAT[n.id]=n.acat||'none';});
 // --- training-set provenance ---------------------------------------------------------
 // Every SENTENCE records which corpus produced it: 'ppi' (BioInfer only), 'biored' (BioRED
 // only, i.e. a reading the binary model never claimed) or 'both' (the merge corroborated it).
@@ -1014,6 +1100,10 @@ function buildSrcButtons(){
    +'run step&nbsp;2 with both models (<code>--route-mode additive</code>) to split them.';
 }
 function activeKinds(){const b=[...document.querySelectorAll('.kindf')];return b.length?new Set(b.filter(c=>c.checked).map(c=>c.value)):null;}
+// null when every box is ticked: the filter then costs nothing per edge, and a run whose
+// curation placed no gene at all never renders the row to begin with
+function activeAcats(){const b=[...document.querySelectorAll('.acatf')];if(!b.length)return null;
+ const on=b.filter(c=>c.checked);return on.length===b.length?null:new Set(on.map(c=>c.value));}
 const net=document.getElementById('net'); let network=null, NODEDS=null;
 // the layout exactly as physics left it, plus the tissue groups of what is on screen; every
 // position control replays from these, so they compose and none of them accumulates drift
@@ -1306,7 +1396,7 @@ function focusKeep(edges,seeds,hops){
 function build(thr){
  const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
  const txt=activeText(), tm=textMatcher(txt); TM=tm;
- const kinds=activeKinds();
+ const kinds=activeKinds(), acats=activeAcats();
  let edges=[];
  // The text query is a LENS, not a threshold input: an edge's support is what survives the
  // score, year, relation and source settings, and the thresholds below judge THAT. Feeding the
@@ -1326,6 +1416,12 @@ function build(thr){
  DATA.edges.forEach(e=>{
    const kf=!kinds||(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to]));
    if(kf)kindOK=true;
+   // The curated class judges GENE endpoints only -- a chemical has no addiction class, and
+   // making it fail the test would delete every drug edge the moment you narrowed to drivers.
+   // Unlike the node-type filter this drops the edge outright rather than feeding the orphan
+   // path: that path exists for node TYPES the corpus never relates to each other, which is a
+   // statement about the data; an unticked class is a statement about what you asked to see.
+   if(acats&&[e.from,e.to].some(nd=>KIND[nd]==='gene'&&!acats.has(ACAT[nd])))return;
    const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
    const np=new Set(sup.map(s=>s.pmid)).size;
    if(mp>1&&np<mp)return;
@@ -1424,7 +1520,7 @@ function build(thr){
  const nsz=id=>(nss[id]?nss[id].size:(isoSz[id]||0));
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
   const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
-  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs)};});
+  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+addTip(n),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs)};});
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:true,scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
  // undirected and unarrowed: a shared sentence has no subject and object
@@ -1455,7 +1551,8 @@ function build(thr){
  fitLeftPanel();    // self-correcting: a panel narrowed by anything recovers on the next redraw
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
-   if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
+   if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)'
+     +(n.acat?'<div class=mut>'+ACAT_LAB[n.acat]+' &mdash; '+esc(n.agrp)+(n.abord?' (borderline)':'')+'; curated by hand, not read off the corpus or a database</div>':'');}
    else if(p.edges.length&&_cm[p.edges[0]]){const L=_cm[p.edges[0]];info.innerHTML=INFO_HEAD+cmTip(L,cmDis).innerHTML;}
    else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=INFO_HEAD+edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
 }
@@ -1466,6 +1563,19 @@ let CATTOT={};
 // than the edge count -- they answer "how many edges can show me this label", which is the
 // question the tick boxes and the "in view" half answer too.
 function catsOf(e){const c={};e.sents.forEach(s=>c[sentCat(e,s)]=1);return Object.keys(c);}
+// The class row is drawn from the payload, so a run whose ADDICTION table places nothing
+// (a corpus of genes nobody curated) shows no row at all rather than three empty boxes.
+const ACAT_BOX=[['driver','oncogene addiction'],['noa','non-oncogene addiction'],['none','unclassified']];
+function buildAcatFilters(){
+ const n={};DATA.nodes.forEach(x=>{if((x.kind||'gene')==='gene')n[x.acat||'none']=(n[x.acat||'none']||0)+1;});
+ const box=ACAT_BOX.filter(([k])=>n[k]);
+ const row=document.getElementById('acatfilters');
+ // one class (or none) is not a filter -- hide the whole block, heading and help with it
+ if(box.length<2){['acatfilters','acathdr','acathelp'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});return;}
+ row.innerHTML=box.map(([k,lab])=>'<label><input type=checkbox class=acatf value="'+k+'" checked> '
+   +lab+' <span class=cnt>('+n[k]+')</span></label>').join(' ');
+ document.querySelectorAll('.acatf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
+}
 function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>CATTOT[c]=(CATTOT[c]||0)+1));const cats=Object.keys(CATTOT).sort((a,b)=>CATTOT[b]-CATTOT[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+esc(c)+'" checked> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+esc(c)+' <span class=cnt data-cat="'+esc(c)+'">('+CATTOT[c]+')</span></label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
 // Counts are LIVE: "(total · N in view)" is recomputed from the sentences actually drawn, so
 // "N in view" is exactly the number of drawn edges that can show you a sentence tagged with
@@ -2049,7 +2159,7 @@ document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>b
 (function(){const lp=document.getElementById('lpanel');
  const kids=lp?Array.prototype.slice.call(lp.children||[]):[];   // HTMLCollection, not an array
  if(kids.length&&!kids.some(c=>!c.style||c.style.display!=='none'))lp.style.display='none';})();
-buildCatFilters();buildSrcButtons();build(1);
+buildAcatFilters();buildCatFilters();buildSrcButtons();build(1);
 </script></body></html>"""
 
 
