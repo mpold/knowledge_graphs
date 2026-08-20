@@ -298,7 +298,7 @@ the gene is — TP53 scores 1766 with no fusions at all):
 ```bash
 python pubmed_fusions.py HMGA2 MEIS1 HOXA9 PAX3        # screen: share above ~15% means look
 python pubmed_fusions.py --pair PAX3 FOXO1 --titles    # verdict on one pair
-python pubmed_fusions.py --from-graph oncogene_addiction_2026_08_19_M.html --blue --max 40
+python pubmed_fusions.py --from-graph oncogene_addiction_2026_08_20_M.html --blue --max 40
 ```
 
 The graph spans gene, DISEASE and CHEMICAL nodes (diseases and chemicals identified by MONDO /
