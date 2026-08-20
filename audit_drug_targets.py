@@ -157,6 +157,13 @@ def corpus_surfaces(data_root):
             cid = e["chebi_id"]
             for c in ([cid] if isinstance(cid, str) else cid):
                 out[c].add(surface)
+    # NCIt-only chemicals carry targets too (target_pharm folds them in under "NCIT:<code>"),
+    # so the provenance map has to know their surfaces or their mappings look unexplained
+    p = Path(data_root) / "CHEMICAL" / "chemical_ncit.json"
+    if p.exists():
+        for surface, e in json.loads(p.read_text(encoding="utf-8")).items():
+            if e.get("ncit_id"):
+                out["NCIT:" + str(e["ncit_id"])].add(surface)
     return out
 
 

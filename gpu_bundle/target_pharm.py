@@ -22,6 +22,7 @@ Inputs
   databases/chebi.json                         ChEBI (OBO-Graph JSON)
   databases/hgnc_complete_set_2026-05-01.json  HGNC (protein-name -> gene)
   CHEMICAL/chemical.json, chemical_ambiguous.json   corpus chemical surfaces/ids
+  CHEMICAL/chemical_ncit.json                  corpus chemicals ChEBI cannot represent
   GENETIC/roman.json, roman_ambiguous.json, greek.json,
   GENETIC/greek_ambiguous.json, greek_complex.json  corpus GENETIC genes/surfaces
 
@@ -323,8 +324,23 @@ def main():
                     idx_ci[s.casefold()].add(sym)
                     idx_del[delsep(s)].add(sym)
 
+    # An APPROVED SYMBOL outranks an alias. Both indexes above are flat -- symbol, alias_symbol,
+    # prev_symbol, name, alias_name all fold into one bucket -- so a claim that IS a current
+    # symbol also picks up every gene that once used it. IL6 still carries "HGF" (hybridoma
+    # growth factor) in alias_symbol, so a DGIdb claim of HGF resolved to {HGF, IL6} and every
+    # anti-HGF antibody in the corpus handed IL6 a drug target it has no claim to. Exact
+    # current-symbol matches therefore win outright, and the alias folds stay as the fallback
+    # for claims that are not symbols at all ("epidermal growth factor receptor").
+    symbol_exact = {}
+    for d in docs:
+        sym = d.get("symbol")
+        if sym:
+            symbol_exact.setdefault(sym.casefold(), set()).add(sym)
+
     def map_gene(name):
-        return idx_ci.get(name.casefold()) or idx_del.get(delsep(name)) or set()
+        cf = name.casefold()
+        return (symbol_exact.get(cf) or idx_ci.get(cf)
+                or idx_del.get(delsep(name)) or set())
 
     # symbol -> NCBI gene id, for the DGIdb namespace check in load_dgidb
     entrez = {d["symbol"]: str(d["entrez_id"]) for d in docs
@@ -359,10 +375,29 @@ def main():
     for surface, e in load(CHEM / "chemical_ambiguous.json").items():
         for cid in e["chebi_id"]:
             chebi_surf[cid].add(surface)
+    # NCIt-only chemicals belong in this set too. ChEBI is a small-molecule ontology, so the
+    # biologics and the newer code-named agents resolve through NCIt instead (chemical.py's
+    # fallback) -- and building the surface map from the ChEBI libraries alone shut that whole
+    # class out of the DGIdb pass below, which is the one place they could still acquire a gene
+    # target. The cost was silent and specific: DGIdb carries DEFACTINIB -> PTK2 as a ChEMBL
+    # binding row, the corpus says "Defactinib inhibits FAK" at 0.82, and PTK2 was still drawn
+    # as an undrugged gene because defactinib entered the corpus as the code name VS-6063 and
+    # resolved through NCIt. Keyed "NCIT:<code>" so no reader mistakes one for a ChEBI id;
+    # ncit_label is registered in `clabel` below so the DGIdb pass can match on the drug's
+    # preferred name as well as its corpus surfaces.
+    ncit_label = {}
+    for surface, e in load(CHEM / "chemical_ncit.json").items():
+        nid = "NCIT:" + str(e.get("ncit_id") or "")
+        if nid == "NCIT:":
+            continue
+        chebi_surf[nid].add(surface)
+        if e.get("ncit_label"):
+            ncit_label[nid] = e["ncit_label"]
 
     # ---- (A2) DGIdb target provider: add targets for corpus chemicals that ChEBI
     #      has no `has role` annotation for (antibodies/biologics, etc.) ----
     clabel = {curie(nid): lbl for nid, lbl in label.items()}
+    clabel.update(ncit_label)                  # so an NCIt-only chemical carries its own name
     db = load_dgidb(DGIDB_PATH, map_gene, entrez_of)   # {} when the file is absent
     n_db_chem = 0
     if db:
