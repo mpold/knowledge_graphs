@@ -579,7 +579,12 @@ def _drug_targets():
         has_db = any(r.startswith("DGIdb") for r in vrs)
         has_ch = any(not r.startswith("DGIdb") for r in vrs)
         tsrc[g] = "dgidb" if (has_db and not has_ch) else ("chebi+dgidb" if has_db else "chebi")
-        # colour class: green = approved anti-neoplastic, amber = approved (other), pink = other target
+        # Colour class, read off the DGIdb drug class carried in via_roles (the ChEBI roles
+        # carry no approval status at all): green = approved & anti-neoplastic, amber = approved
+        # but not anti-neoplastic, pink = everything else -- a real target with NO approved drug
+        # behind it, i.e. DGIdb-investigational and/or a ChEBI `has role` target role. Pink is
+        # therefore not a source label: a pink gene may well be in DGIdb (check tsource), it just
+        # has nothing approved pointing at it.
         if any(r.startswith("DGIdb-antineoplastic") for r in vrs):
             tcat[g] = "green"
         elif any(r.startswith("DGIdb-approved") for r in vrs):
@@ -930,8 +935,8 @@ __LIBTAG__
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
 <div id="panel">
- <div class="row legend"><b style="background:#cfe3ff;border-color:#2b6cb0"></b>gene <b style="background:#1b7837;border-color:#145a28"></b>approved anti-neoplastic <b style="background:#e08600;border-color:#9a6700"></b>approved (other) <b style="background:#c2185b;border-color:#7a0f3a"></b>ChEBI <button class="ihelp" data-help="col" aria-label="About node colours" aria-expanded="false">i</button></div>
- <div class="row mut help" data-help="col">Drug-target genes (corpus chemicals): deeper colour = more chemicals. <b style="color:#1b7837">Green</b> = DGIdb approved anti-neoplastic, <b style="color:#e08600">amber</b> = DGIdb approved (non-anti-neoplastic), <b style="color:#c2185b">pink</b> = ChEBI, absent in DGIdb.</div>
+ <div class="row legend"><b style="background:#cfe3ff;border-color:#2b6cb0"></b>gene <b style="background:#1b7837;border-color:#145a28"></b>approved anti-neoplastic <b style="background:#e08600;border-color:#9a6700"></b>approved (other) <b style="background:#c2185b;border-color:#7a0f3a"></b>no approved drug <button class="ihelp" data-help="col" aria-label="About node colours" aria-expanded="false">i</button></div>
+ <div class="row mut help" data-help="col">Drug-target genes (corpus chemicals): deeper colour = more chemicals. <b style="color:#1b7837">Green</b> = DGIdb approved anti-neoplastic, <b style="color:#e08600">amber</b> = DGIdb approved (non-anti-neoplastic), <b style="color:#c2185b">pink</b> = no approved drug: DGIdb investigational and/or a ChEBI target role only (the gene may still be in DGIdb).</div>
  <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
  <div class="row">Min unique publications: <b id="mpv">1</b> <button class="ihelp" aria-label="About min unique publications" aria-expanded="false">i</button><br><input id="minpub" type="range" min="1" max="10" value="1">
   <div class="mut help">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
@@ -1419,7 +1424,7 @@ function build(thr){
  const nsz=id=>(nss[id]?nss[id].size:(isoSz[id]||0));
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
   const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
-  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved)':' (ChEBI)')):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs)};});
+  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs)};});
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:true,scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
  // undirected and unarrowed: a shared sentence has no subject and object

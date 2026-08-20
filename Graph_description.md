@@ -16,7 +16,9 @@ PMID, relation label and the model that produced it.
 **Nodes** — genes (circle), diseases (diamond), chemicals (square), so type reads without
 relying on colour. Size and label size grow with the node's unique sentences *in view*. Gene
 fill also encodes drug-target status: deeper colour means more corpus chemicals target it,
-green for DGIdb approved anti-neoplastic, amber for approved (other), pink for ChEBI-only.
+green for DGIdb approved anti-neoplastic, amber for approved (other), pink for no approved
+drug at all -- DGIdb investigational and/or a ChEBI target role only, which is a statement about
+approval status, not about which database the gene came from.
 Hover gives the name, kind, sentence count and target count.
 
 **Edges** — colour is the relation carried by most of its sentences *in view*: `activates`
