@@ -631,6 +631,42 @@ _BORDERLINE = set("ERBB3 FGFR4 RAF1 MTOR PIK3CB GLI2 SHH MDM4 MIR19A MIR106A MIR
 ACAT_LABEL = {"driver": "oncogene addiction", "noa": "non-oncogene addiction"}
 
 
+# ----- false drug-target pairs (manual curation) --------------------------------------
+# DGIdb ingests clinical-context sources -- MyCancerGenome(ClinicalTrial), TALC,
+# ClearityFoundationClinicalTrial, CancerCommons -- whose claim is "this drug is used where
+# this gene is altered", and records them with interaction_type "inhibitor". The type gate in
+# load_dgidb therefore cannot see them, and they arrive here indistinguishable from a binding
+# assertion: rituximab (anti-CD20) "targeting" EGFR, gefitinib targeting ERBB2, regorafenib
+# and selumetinib targeting KRAS, panobinostat (a class I/II HDAC inhibitor) targeting the
+# class III sirtuins. On the reference run 78 of 271 mappings behind coloured nodes rest only
+# on such sources, and seven nodes were GREEN -- claiming an approved anti-neoplastic -- on
+# that basis alone.
+#
+# Only the ones a drug's known pharmacology CONTRADICTS are listed. Judgement calls stay in:
+# JAK2 <- ruxolitinib and MTOR <- everolimus/sirolimus are clinical-sourced and true, and
+# complex- or fusion-level attributions (EML4 <- crizotinib, BCR <- dasatinib, PIK3R1 <-
+# alpelisib, RICTOR <- dactolisib, NOTCH1 <- RO4929097) are defensible readings of "target",
+# so they are deliberately NOT dropped. The identifier-namespace artifacts are a different
+# problem with a different fix: target_pharm.py drops those rows at the source.
+# Matched case-insensitively against the ChEBI label carried in chemical_to_target.json.
+FALSE_TARGETS = {
+    "EGFR": {"rituximab", "pertuzumab", "tucatinib"},      # CD20 and HER2 drugs
+    "ERBB2": {"gefitinib", "rituximab"},                   # EGFR-selective / anti-CD20
+    "LAG3": {"nivolumab"},                                 # nivolumab is anti-PD-1; relatlimab is the LAG-3 arm
+    "KRAS": {"regorafenib", "selumetinib"},                # KRAS is the biomarker; MEK is the target
+    "BRAF": {"dasatinib (anhydrous)", "dasatinib monohydrate", "dasatinib(1+)"},
+    "FLT3": {"bortezomib", "clofarabine"},                 # proteasome / nucleoside analogue
+    "ALK": {"ganetespib"},                                 # HSP90
+    "AKT1": {"everolimus", "azd4547"},                     # mTOR / FGFR
+    "SIRT1": {"panobinostat"}, "SIRT3": {"panobinostat"}, "SIRT6": {"panobinostat"},
+    "PTCH1": {"vismodegib"},                               # vismodegib binds SMO
+    "CFLAR": {"dovitinib"},                                # FGFR/VEGFR TKI
+    "MTOR": {"bgj-398"}, "PIK3CA": {"bgj-398"},            # infigratinib is FGFR-selective
+    "PIK3CB": {"bgj-398"}, "PIK3R1": {"bgj-398"},
+}
+N_FALSE_DROPPED = 0
+
+
 def _drug_targets():
     """(n_chemicals, chemicals, source, colour-class) per gene, from chemical_to_target.json:
     corpus genes flagged in_corpus_GENETIC, used to shade drug-target nodes."""
@@ -643,7 +679,14 @@ def _drug_targets():
         if not v.get("in_corpus_GENETIC"):
             continue
         chems = v.get("chemicals") or []
-        tgt[g] = v.get("n_chemicals") or len(chems)
+        block = FALSE_TARGETS.get(g)
+        if block:
+            keep = [c for c in chems if (c.get("chebi_label") or "").casefold() not in block]
+            globals()["N_FALSE_DROPPED"] += len(chems) - len(keep)
+            chems = keep
+            if not chems:                       # every claim on this gene was a false one
+                continue
+        tgt[g] = len(chems)                     # recount: n_chemicals is the pre-filter figure
         chems_by_gene[g] = sorted({c.get("chebi_label") for c in chems if c.get("chebi_label")})
         vrs = [str(r) for c in chems for r in (c.get("via_roles") or [])]
         has_db = any(r.startswith("DGIdb") for r in vrs)
@@ -2278,6 +2321,9 @@ def main():
               + (f"; not yet run: {', '.join(bg['missing'])}" if bg['missing'] else ""))
         universe = kept if args.score <= GRAPH_BASE else [t for t in d if keep_fn(t, GRAPH_BASE)]
         payload = graph_payload_multi(universe, flags)
+        if N_FALSE_DROPPED:
+            print(f"  drug targets: dropped {N_FALSE_DROPPED} curated false gene-chemical "
+                  f"pair(s) (FALSE_TARGETS)")
         yrs = [s["yr"] for e in payload["edges"] for s in e["sents"] if s.get("yr")]
         miny, maxy = (min(yrs), max(yrs)) if yrs else (2000, 2026)
         lib = get_vis_lib()
