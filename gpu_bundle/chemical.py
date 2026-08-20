@@ -171,6 +171,34 @@ _DRUG_SUFFIXES = ("mab", "nib", "tinib", "ciclib", "parib", "lisib", "degib", "a
 _GAZ_TOKEN = re.compile(r"^[a-z][a-z']{6,}$")        # single token, length >= 7, letters only
 
 
+# A drug spends its first years in the literature under a CODE NAME -- MCLA-128, PD-0332991,
+# RO4929097, GDC-0941 -- and often keeps it long after the INN arrives. Neither backstop above
+# can see one: both scan `word_re`, which is letters-only, so a paper that says "MCLA-128"
+# where the NER missed it leaves no trace at all. NCIt carries these forms (MCLA-128, MCLA 128,
+# MCLA128 all sit on concept C152948 with zenocutuzumab), so they are scanned for here.
+#
+# The shape is deliberately narrow -- 2-6 letters, an optional single hyphen or space, then at
+# least THREE digits (up to nine: PF-00477736 carries eight) -- and both ends are guarded so
+# a code inside a longer identifier is not
+# picked out (the "MB-231" of MDA-MB-231, the "H1975" of NCI-H1975). Cell lines are the obvious
+# hazard and HCT116 fits the shape exactly; what stops it is that a hit only counts when the
+# string is IN the NCIt drug lexicon, matched CASE-SENSITIVELY. That is also what
+# DrugLexicon.lookup() requires of an acronym, so a surface recovered here is one that will
+# still resolve downstream rather than landing in unmatched_chemical.json.
+_CODE_TOKEN = re.compile(r"(?<![A-Za-z0-9-])[A-Za-z]{2,6}[- ]?\d{3,9}[A-Za-z]?(?![A-Za-z0-9-])")
+
+
+def build_ncit_codeset(ncit):
+    """NCIt drug names that look like a code name, in the exact casing NCIt records -- the
+    casing DrugLexicon.lookup() will demand back. Empty when the lexicon is absent."""
+    codes = set()
+    for key, val in (getattr(ncit, "names", None) or {}).items():
+        cased = val[1] if isinstance(val, (list, tuple)) and len(val) > 1 else key
+        if _CODE_TOKEN.fullmatch(cased or ""):
+            codes.add(cased)
+    return codes
+
+
 def _norm_drug(s):
     """Normalize a DGIdb drug name to a comparison key: lowercase, drop combination
     products, strip radiolabel (' 111in') and biosimilar ('-awwb') suffixes."""
@@ -219,9 +247,10 @@ def build_gazetteer(IX):
 
 
 # ============================================================ (0) upstream
-def stage1(gaz=None, dgidb=None):
+def stage1(gaz=None, dgidb=None, codes=None):
     counts = Counter()
     gaz_counts = Counter()                            # surfaces recovered by the ChEBI gazetteer
+    code_counts = Counter()                           # surfaces recovered by the NCIt code names
     dgidb_hits = {}                                   # normalized DGIdb drug -> {occurrences, surfaces}
     n_files = 0
     word_re = re.compile(r"[A-Za-z][A-Za-z']{6,}")    # single tokens, length >= 7
@@ -251,7 +280,17 @@ def stage1(gaz=None, dgidb=None):
                         d = dgidb_hits.setdefault(cf, {"occurrences": 0, "surfaces": set()})
                         d["occurrences"] += 1
                         d["surfaces"].add(w)
+            if codes:
+                seen_c = set()
+                for m in _CODE_TOKEN.finditer(sent.get("text") or ""):
+                    w = m.group(0)
+                    if w in codes and w not in seen_c:          # case-sensitive, as NCIt records it
+                        seen_c.add(w)
+                        if dash_normalize(w).casefold() not in tagged:
+                            code_counts[w] += 1
     for w, n in gaz_counts.items():                   # fold gazetteer hits into the surface tally
+        counts[w] += n
+    for w, n in code_counts.items():
         counts[w] += n
     agg = Counter()
     forms = defaultdict(set)
@@ -267,6 +306,7 @@ def stage1(gaz=None, dgidb=None):
     info = {"n_files": n_files, "occ": sum(counts.values()),
             "unique_before": len(counts), "unique_after": len(agg),
             "gaz_surfaces": len(gaz_counts), "gaz_occ": sum(gaz_counts.values()),
+            "code_surfaces": len(code_counts), "code_occ": sum(code_counts.values()),
             "dgidb_found": len(dgidb_hits)}
     return rows, info, dgidb_hits
 
@@ -420,19 +460,15 @@ def main():
     dgidb = build_dgidb_drugset(DGIDB_PATH)
     print(f"DGIDB    {len(dgidb):,} clean DGIdb drug names scanned for in corpus text")
 
-    rows, info, dgidb_hits = stage1(gaz, dgidb)
-    print(f"STAGE 1  files={info['n_files']:,}  CHEMICAL occ={info['occ']:,}  "
-          f"unique {info['unique_before']:,}->{info['unique_after']:,}  "
-          f"(+gazetteer: {info['gaz_surfaces']:,} surfaces, {info['gaz_occ']:,} occ) "
-          f"-> {CLEAN_TSV}")
-
-    # NCIt fallback. ChEBI is a small-molecule ontology, so every biologic in the corpus --
-    # bevacizumab, pembrolizumab, the whole antibody class -- falls out of the cascade above and
-    # is discarded, even when the NER stage recognised it perfectly well. NCIt represents them,
-    # and drug_lexicon already carries surface -> (code, preferred label). Matching here rather
+    # NCIt serves two jobs and so is loaded BEFORE stage 1, not just before the cascade.
+    # (a) fallback: ChEBI is a small-molecule ontology, so every biologic in the corpus --
+    # bevacizumab, pembrolizumab, the whole antibody class -- falls out of the cascade below and
+    # would be discarded, even when the NER recognised it perfectly well. NCIt represents them,
+    # and drug_lexicon already carries surface -> (code, preferred label). Matching there rather
     # than inside the ChEBI cascade keeps the two ontologies apart: a surface resolves to ChEBI
-    # when ChEBI knows it, and only otherwise to NCIt, which is recorded as its own field so no
+    # when ChEBI knows it, and only otherwise to NCIt, recorded as its own field so no
     # downstream reader mistakes an NCIt code for a ChEBI one.
+    # (b) backstop: its code names (MCLA-128, PD-0332991) are the third gazetteer stage 1 scans.
     try:
         from drug_lexicon import DrugLexicon
         NCIT = DrugLexicon()
@@ -443,6 +479,15 @@ def main():
               f"non-ChEBI fallback")
     else:
         print("NCIT     lexicon absent -- run drug_lexicon.py --build to normalize biologics")
+    codes = build_ncit_codeset(NCIT) if NCIT is not None else set()
+    print(f"CODENAMES {len(codes):,} NCIt code-name surfaces (e.g. MCLA-128) for NER backstop")
+
+    rows, info, dgidb_hits = stage1(gaz, dgidb, codes)
+    print(f"STAGE 1  files={info['n_files']:,}  CHEMICAL occ={info['occ']:,}  "
+          f"unique {info['unique_before']:,}->{info['unique_after']:,}  "
+          f"(+gazetteer: {info['gaz_surfaces']:,} surfaces, {info['gaz_occ']:,} occ"
+          f"; +code names: {info['code_surfaces']:,} surfaces, {info['code_occ']:,} occ) "
+          f"-> {CLEAN_TSV}")
 
     single, ambiguous, unmatched, ncit_only = {}, {}, {}, {}
     mode_counts = Counter()
