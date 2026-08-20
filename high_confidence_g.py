@@ -99,7 +99,7 @@ DATA_ROOT = ROOT / "kaggle_working"
 # module-level paths; (re)bound to DATA_ROOT by set_data_root() so --data-root can retarget them
 OUT_DIR = XML_DIR = SENT_DIR = None
 RE_FILE = PMC_YEARS = TARGET_FILE = None
-CHIMER_KB = CHIMER_SEQ = None
+CHIMER_KB = CHIMER_SEQ = DEPMAP = None
 # every lung_* project caches its slice of the shared corpus under this name
 CONTRIB_NAME = "corpus_contrib.json"
 DISEASE_LIB = CHEM_LIB = None
@@ -110,7 +110,7 @@ def set_data_root(data_root):
     """Point every input/output path at `data_root` (the pipeline's output tree)."""
     global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, PMC_YEARS
     global TARGET_FILE, DISEASE_LIB, CHEM_LIB, JSON_OUT, GRAPH_OUT
-    global CHIMER_KB, CHIMER_SEQ
+    global CHIMER_KB, CHIMER_SEQ, DEPMAP
     DATA_ROOT = Path(data_root).resolve()
     OUT_DIR = DATA_ROOT / "TRIPLES"
     XML_DIR = DATA_ROOT / "experimental_ner"   # input XML corpus (may be empty in the bundle)
@@ -121,6 +121,8 @@ def set_data_root(data_root):
     # ChimerDB 4.0, converted by chimerdb_to_tsv.py; both optional, absent -> no fusion attribute
     CHIMER_KB = DATA_ROOT / "databases" / "ChimerKB4.tsv"      # curated: sets the flag
     CHIMER_SEQ = DATA_ROOT / "databases" / "ChimerSeq4.tsv"    # TCGA RNA-seq: evidence only
+    # DepMap CRISPR dependency, reduced per gene by depmap_to_tsv.py; optional
+    DEPMAP = DATA_ROOT / "databases" / "depmap_dependency.tsv"
     # normalization libraries carrying the in-place phenotype / non_chemical flags
     DISEASE_LIB = DATA_ROOT / "DISEASE" / "disease.json"
     CHEM_LIB = DATA_ROOT / "CHEMICAL" / "chemical.json"
@@ -740,6 +742,40 @@ FUSION_SUPPLEMENT = [
 ]
 
 
+def _dependency():
+    """gene -> (fraction of DepMap lines dependent, class) from depmap_dependency.tsv.
+
+    The corpus can say a tumour depends on a gene; DepMap says how OFTEN across ~1,100 cell
+    lines, and whether the dependency is SELECTIVE or universal. That second half is what the
+    graph could not express before. `common` means nearly every line dies without it -- the
+    ribosome, the proteasome, the spliceosome -- and a dependency with no discrimination is not
+    a target, however real it is. On this release USP39, URI1, PRC1 and DNAJC17 all sit above
+    99%, which is a different claim from the one "dependency" usually carries.
+
+    TWO CAVEATS, both large enough to state on the node rather than in a footnote.
+
+    A `common` gene is not automatically a bad target: MYC scores 95% and EWSR1 94% because
+    almost every cultured line needs them, yet both are drivers. What `common` rules out is
+    SELECTIVITY IN VITRO, not therapeutic interest -- MYC's case rests on tumour maintenance in
+    vivo, which no cell-line screen measures.
+
+    A `none` gene may simply have no representative in the panel. PRDM14 scores 0.3% (4 lines of
+    1,178), and its biology is germ-cell and ESC-like, which DepMap barely covers. That is weak
+    evidence of absence, not evidence of no addiction.
+    """
+    out = {}
+    try:
+        with open(DEPMAP, encoding="utf-8", newline="") as fh:
+            for r in csv.DictReader(fh, delimiter="	"):
+                try:
+                    out[r["gene"]] = (float(r["frac_dep"]), r["class"])
+                except (KeyError, ValueError):
+                    continue
+    except OSError:
+        return {}
+    return out
+
+
 def _fusion_partners():
     """gene -> (side, partners, n_partners, seq_samples, diseases) from ChimerDB 4.0.
 
@@ -809,6 +845,7 @@ def graph_payload_multi(triples, flags):
         years = {}
     tgt, chems_by_gene, tsrc, tcat = _drug_targets()
     fusion = _fusion_partners()
+    depend = _dependency()
     dir_sent = collections.defaultdict(set)            # (a,b,cat) -> sentences
     pair_sent = collections.defaultdict(dict)          # pair -> {sentence: [score, pmid, cat, spec, src]}
     pair_src = collections.defaultdict(set)            # pair -> model roles behind ANY of its triples
@@ -870,7 +907,11 @@ def graph_payload_multi(triples, flags):
                       "fseq": fusion.get(nd, ("", (), 0, 0, (), 0))[3] if k == "gene" else 0,
                       # 1 when a partner came from FUSION_SUPPLEMENT rather than ChimerKB, so the
                       # HTML can say which claims the database backs and which this project does
-                      "fsup": fusion.get(nd, ("", (), 0, 0, (), 0))[5] if k == "gene" else 0})
+                      "fsup": fusion.get(nd, ("", (), 0, 0, (), 0))[5] if k == "gene" else 0,
+                      # DepMap: how many cell lines depend on this gene, and whether that
+                      # dependency discriminates. "" when the gene was never screened.
+                      "dep": round(depend.get(nd, (0.0, ""))[0], 4) if k == "gene" else 0,
+                      "depcls": depend.get(nd, (0.0, ""))[1] if k == "gene" else ""})
     return {"nodes": nodes, "edges": edges}
 
 
@@ -1168,6 +1209,9 @@ __LIBTAG__
 __KINDROW__
  <div class="row" id="acathdr">Addiction class <button class="ihelp" data-help="acat" aria-label="About the addiction class" aria-expanded="false">i</button></div>
  <div class="row legend" id="acatfilters"></div>
+ <div class="row" id="dephdr">CRISPR dependency <button class="ihelp" data-help="dep" aria-label="About DepMap dependency" aria-expanded="false">i</button></div>
+ <div class="row legend" id="depfilters"></div>
+ <div class="row mut help" id="dephelp" data-help="dep">From <b>DepMap</b> (CRISPR, ~1,178 cell lines): the share of lines that die without the gene. <b>Selective</b> is the band that matches what "addiction" is supposed to mean &mdash; some tumours need it, others do not &mdash; and is where EGFR (21%), ERBB2 (19%), KRAS (38%) and MDM2 (40%) sit. <b>Common essential</b> (&ge;90%) is the ribosome, the proteasome, the spliceosome: real dependencies with no therapeutic window. Two cautions. A common gene is not automatically a bad target &mdash; MYC scores 95% and EWSR1 94% because almost every cultured line needs them, so what the label rules out is <em>selectivity in vitro</em>, not therapeutic interest. And <b>no dependent line</b> can mean the panel has no representative of the gene's context rather than no addiction: PRDM14 scores 0.3%, and its germ-cell/ESC-like biology is barely in DepMap. Cell lines are not tumours &mdash; for immune and stromal genes (CTLA4, CD274, TIGIT, CD40) a null here means nothing at all.</div>
  <div class="row" id="fushdr">Fusion partner <button class="ihelp" data-help="fus" aria-label="About fusion status" aria-expanded="false">i</button></div>
  <div class="row legend" id="fusfilters"></div>
  <div class="row mut help" id="fushelp" data-help="fus">From <b>ChimerDB 4.0</b>, curated set only (ChimerKB); genes carrying a thicker ring are in it. <b>5&prime;</b> means the gene donates the promoter and keeps none of its own protein &mdash; TMPRSS2 in TMPRSS2-ERG, which is why that lesion is treated as an ERG event. <b>3&prime;</b> means it contributes the kinase or DNA-binding domain the fusion is named for. A junction exists in no normal cell, so it is a selectivity handle even where the protein has no drug pocket. <b>Read it as "appears in a curated fusion pair", not "makes a chimeric protein":</b> MYC and BCL6 are flagged through their IGH/IGK partners, which substitute a promoter rather than fusing two proteins, and BCL6's 21 partners are the signature of exactly that. The TCGA count in the tooltip is In-Frame RNA-seq evidence from ChimerSeq, which is algorithmic and never sets the flag &mdash; no recurrence threshold makes it safe, since requiring 3 samples still admits USP39 while losing PAX3 and YAP1.</div>
@@ -1220,6 +1264,12 @@ function addTip(n){return n.acat?(' · '+(ACAT_LAB[n.acat]||n.acat)+': '+n.agrp+
 const FUS_LAB={'5p':"5' partner",'3p':"3' partner",both:"5' and 3' partner"};
 // `fsup` marks a gene whose partner this project added rather than ChimerDB, and the tooltip
 // says so: a curated claim and a database claim should never look identical.
+// DepMap. `common` is the one that changes a reading: a gene nearly every line needs is a
+// dependency without discrimination, which is not the same as a target. It is stated on the node
+// rather than left to the panel, because the number alone invites the opposite conclusion.
+const DEP_LAB={common:'common essential',selective:'selective',rare:'rare',none:'no dependent line'};
+function depTip(n){return n.depcls?(' · DepMap: '+DEP_LAB[n.depcls]
+  +(n.depcls==='none'?'':' ('+Math.round(n.dep*1000)/10+'% of lines)')):'';}
 function fusTip(n){return n.fus?(' · fusion: '+(FUS_LAB[n.fus]||n.fus)+' of '+n.fn+(n.fsup?' (curated)':'')+' ('
   +(n.fpart||[]).slice(0,4).join(', ')+(n.fn>4?', …':'')+')'
   +(n.fseq?' · '+n.fseq+' In-Frame TCGA samples':'')):'';}
@@ -1227,6 +1277,7 @@ const KIND={};DATA.nodes.forEach(n=>{KIND[n.id]=n.kind||'gene';});
 // '' (nobody placed this gene) becomes 'none' so it can be a tick box like the other two
 const ACAT={};DATA.nodes.forEach(n=>{ACAT[n.id]=n.acat||'none';});
 const FUS={};DATA.nodes.forEach(n=>{FUS[n.id]=n.fus||'none';});
+const DEPC={};DATA.nodes.forEach(n=>{DEPC[n.id]=n.depcls||'unscreened';});
 // --- training-set provenance ---------------------------------------------------------
 // Every SENTENCE records which corpus produced it: 'ppi' (BioInfer only), 'biored' (BioRED
 // only, i.e. a reading the binary model never claimed) or 'both' (the merge corroborated it).
@@ -1255,6 +1306,8 @@ function buildSrcButtons(){
 function activeKinds(){const b=[...document.querySelectorAll('.kindf')];return b.length?new Set(b.filter(c=>c.checked).map(c=>c.value)):null;}
 // null when every box is ticked: the filter then costs nothing per edge, and a run whose
 // curation placed no gene at all never renders the row to begin with
+function activeDeps(){const b=[...document.querySelectorAll('.depf')];if(!b.length)return null;
+ const on=b.filter(c=>c.checked);return on.length===b.length?null:new Set(on.map(c=>c.value));}
 function activeFus(){const b=[...document.querySelectorAll('.fusf')];if(!b.length)return null;
  const on=b.filter(c=>c.checked);return on.length===b.length?null:new Set(on.map(c=>c.value));}
 function activeAcats(){const b=[...document.querySelectorAll('.acatf')];if(!b.length)return null;
@@ -1551,7 +1604,7 @@ function focusKeep(edges,seeds,hops){
 function build(thr){
  const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
  const txt=activeText(), tm=textMatcher(txt); TM=tm;
- const kinds=activeKinds(), acats=activeAcats(), fuss=activeFus();
+ const kinds=activeKinds(), acats=activeAcats(), fuss=activeFus(), deps=activeDeps();
  let edges=[];
  // The text query is a LENS, not a threshold input: an edge's support is what survives the
  // score, year, relation and source settings, and the thresholds below judge THAT. Feeding the
@@ -1580,6 +1633,7 @@ function build(thr){
    // same rule as the class row: gene endpoints only, both of them, so unticking a class
    // removes the edges that reached it rather than leaving half-connected neighbours
    if(fuss&&[e.from,e.to].some(nd=>KIND[nd]==='gene'&&!fuss.has(FUS[nd])))return;
+   if(deps&&[e.from,e.to].some(nd=>KIND[nd]==='gene'&&!deps.has(DEPC[nd])))return;
    const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
    const np=new Set(sup.map(s=>s.pmid)).size;
    if(mp>1&&np<mp)return;
@@ -1678,10 +1732,11 @@ function build(thr){
  const nsz=id=>(nss[id]?nss[id].size:(isoSz[id]||0));
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
   const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
-  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+addTip(n)+fusTip(n),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
+  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+addTip(n)+fusTip(n)+depTip(n),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
    borderWidth:(n.fus?3:1),borderWidthSelected:(n.fus?5:2)};});
  updateAcatCounts(nodes,acats);   // nodes is final here: every filter, including this one, has run
  updateFusCounts(nodes,fuss);
+ updateDepCounts(nodes,deps);
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:true,scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
  // undirected and unarrowed: a shared sentence has no subject and object
@@ -1714,6 +1769,9 @@ function build(thr){
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)'
      +(n.acat?'<div class=mut>'+ACAT_LAB[n.acat]+' &mdash; '+esc(n.agrp)+(n.abord?' (borderline)':'')+'; curated by hand, not read off the corpus or a database</div>':'')
+     +(n.depcls?'<div class=mut>DepMap: '+DEP_LAB[n.depcls]+', '+Math.round(n.dep*1000)/10+'% of ~1,178 cell lines'
+        +(n.depcls==='common'?' &mdash; a dependency without discrimination, which is not the same as a target':'')
+        +(n.depcls==='none'?' &mdash; or no line in the panel represents its context':'')+'</div>':'')
      +(n.fus?'<div class=mut>'+(n.fsup?'ChimerDB + curated supplement':'ChimerDB')+': '+FUS_LAB[n.fus]+' of '+n.fn+' &mdash; '+esc((n.fpart||[]).join(', '))+(n.fseq?'; '+n.fseq+' In-Frame TCGA samples':'')+'</div>':'');}
    else if(p.edges.length&&_cm[p.edges[0]]){const L=_cm[p.edges[0]];info.innerHTML=INFO_HEAD+cmTip(L,cmDis).innerHTML;}
    else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=INFO_HEAD+edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
@@ -1756,6 +1814,24 @@ function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>
 // only UNCLASSIFIED partners so the both-endpoints rule removes their last edge, and 16 fall
 // below degree or cluster once the class filter has thinned the edge set. Showing the payload
 // total alone read as a promise the view could not keep.
+const DEP_BOX=[['selective','selective'],['common','common essential'],['rare','rare'],['none','no dependent line'],['unscreened','not screened']];
+let DEPTOT={};
+function buildDepFilters(){
+ const n={};DATA.nodes.forEach(x=>{if((x.kind||'gene')==='gene')n[x.depcls||'unscreened']=(n[x.depcls||'unscreened']||0)+1;});
+ DEPTOT=n;
+ const box=DEP_BOX.filter(([k])=>n[k]);
+ const row=document.getElementById('depfilters');
+ if(box.length<2){['depfilters','dephdr','dephelp'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});return;}
+ row.innerHTML=box.map(([k,lab])=>'<label><input type=checkbox class=depf value="'+k+'" checked> '
+   +lab+' <span class=cnt data-dep="'+k+'">('+n[k]+')</span></label>').join(' ');
+ document.querySelectorAll('.depf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
+}
+function updateDepCounts(nodes,deps){const seen={};
+ nodes.forEach(n=>{if(KIND[n.id]==='gene')seen[DEPC[n.id]]=(seen[DEPC[n.id]]||0)+1;});
+ document.querySelectorAll('#depfilters .cnt').forEach(el=>{const k=el.getAttribute('data-dep');
+  const on=!deps||deps.has(k);
+  el.textContent=on?('('+(DEPTOT[k]||0)+' · '+(seen[k]||0)+' in view)'):('('+(DEPTOT[k]||0)+' · off)');
+  el.style.color=(on&&!seen[k])?'#b3243b':'';});}
 const FUS_BOX=[['5p',"5′ partner"],['3p',"3′ partner"],['both',"5′ and 3′"],['none','not recorded']];
 let FUSTOT={};
 function buildFusFilters(){
@@ -2355,7 +2431,7 @@ document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>b
 (function(){const lp=document.getElementById('lpanel');
  const kids=lp?Array.prototype.slice.call(lp.children||[]):[];   // HTMLCollection, not an array
  if(kids.length&&!kids.some(c=>!c.style||c.style.display!=='none'))lp.style.display='none';})();
-buildAcatFilters();buildFusFilters();buildCatFilters();buildSrcButtons();build(1);
+buildAcatFilters();buildFusFilters();buildDepFilters();buildCatFilters();buildSrcButtons();build(1);
 </script></body></html>"""
 
 
@@ -2481,6 +2557,9 @@ def main():
             print(f"  fusion partners: {nfus} gene nodes "
                   f"(ChimerKB{f' + {nsup} from FUSION_SUPPLEMENT' if nsup else ''}) "
                   f"({side.get('5p', 0)} 5', {side.get('3p', 0)} 3', {side.get('both', 0)} both)")
+        ndep = collections.Counter(n.get("depcls") for n in payload["nodes"] if n.get("depcls"))
+        if ndep:
+            print(f"  DepMap dependency: " + ", ".join(f"{k} {v}" for k, v in ndep.most_common()))
         if N_FALSE_DROPPED:
             print(f"  drug targets: dropped {N_FALSE_DROPPED} curated false gene-chemical "
                   f"pair(s) (FALSE_TARGETS)")

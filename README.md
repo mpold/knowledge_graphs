@@ -312,6 +312,19 @@ ChimerSeq set a flag it should never set.
 python audit_fusions.py --data-root kaggle_working     # exit 0 = clean
 ```
 
+**CRISPR dependency** comes from DepMap once staged, and rides on the gene node as `dep` /
+`depcls`: the share of ~1,178 cell lines that die without the gene, and whether that dependency
+discriminates. The `selective` band is what "addiction" is supposed to mean — EGFR 21%, ERBB2 19%,
+KRAS 38%, MDM2 40% — while `common essential` (≥90%) is the ribosome, the proteasome and the
+spliceosome: real dependencies with no therapeutic window. Two cautions travel with it, both on the
+node itself. A common gene is not automatically a bad target (MYC 95%, EWSR1 94%), so the label
+rules out *selectivity in vitro*, not interest; and `no dependent line` can mean the panel lacks the
+gene's context rather than that no addiction exists (PRDM14 scores 0.3%).
+
+```bash
+python depmap_to_tsv.py --data-root kaggle_working     # 421 MB matrix -> 18k-row TSV, once
+```
+
 The graph spans gene, DISEASE and CHEMICAL nodes (diseases and chemicals identified by MONDO /
 ChEBI label — or NCIt label, for the biologics ChEBI has no term for — shaped ◆ and ■), so the
 gene–disease and chemical–gene edges BioRED contributes are drawn instead of discarded — on the
@@ -401,6 +414,7 @@ it is modified. Without one, stage 1 simply downloads everything.
 ├── pubmed_fusions.py          # stage 3: does a gene form fusions? (PubMed screen)
 ├── chimerdb_to_tsv.py         # stage 3: ChimerDB .xlsx -> .tsv (stdlib, one-off)
 ├── audit_fusions.py           # stage 3: regression test for the fusion attribute
+├── depmap_to_tsv.py           # stage 3: DepMap CRISPR matrix -> per-gene TSV
 ├── gpu_bundle/                # stage 2: the GPU pipeline
 │   ├── gpu.py                 #   orchestrator (19 steps)
 │   ├── drug_lexicon.py        #   NCIt drug lexicon: builder + matcher (step 3)
