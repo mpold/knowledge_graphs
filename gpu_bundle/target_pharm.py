@@ -104,6 +104,27 @@ _ACTION_WORDS = ["inverse agonist", "partial agonist", "antagonist", "agonist",
                  "potentiator", "stabiliser", "stabilizer"]
 
 
+# Chemicals that are metabolites, cofactors or single-letter NER accidents -- never a
+# compound under study -- and that reach the target layer anyway, through both doors:
+#   ADP         GuideToPharmacology lists it as an "agonist" of a CONSECUTIVE run of gene
+#               ids (NCBIGENE 323 APBB2, 326 AIRE, 327 APEH, 328 APEX1, 329 BIRC2, 496
+#               ATP4B) -- an id-alignment artifact, and 329/BIRC2 is a corpus gene, so a
+#               nucleotide ended up colouring a drug-target node.
+#   AMP         carries "adenosine A1 receptor agonist" in ChEBI: the endogenous ligand of
+#               the receptor, which is not the same claim as a drug that targets it.
+#   L-cysteine  in the corpus only because the NER surface "C" (the one-letter amino-acid
+#               code) normalizes onto it; it then carries an "EC 4.3.1.3 (histidine
+#               ammonia-lyase) inhibitor" role onto HAL. chemical.py now refuses 1-2
+#               character surfaces, so this is the belt to that fix's braces.
+# Keyed by ChEBI id, not label, so a synonym change upstream cannot silently reopen the door.
+NON_DRUG = {
+    "CHEBI:16761": "ADP",
+    "CHEBI:16027": "adenosine 5'-monophosphate (AMP)",
+    "CHEBI:17561": "L-cysteine",
+    "CHEBI:15356": "cysteine",
+}
+
+
 def is_target_role(role):
     return (bool(ACTION.search(role)) and not PROCESS.search(role)
             and (role.startswith("EC ") or bool(PROTEIN.search(role))))
@@ -166,7 +187,7 @@ def _norm_drug(s):
     return s.strip()
 
 
-def load_dgidb(path, map_gene):
+def load_dgidb(path, map_gene, entrez_of=None):
     """DGIdb interactions TSV -> {drug_name_lower: {hgnc_symbol: set(interaction_types)}}.
 
     ChEBI `has role` only covers small molecules; DGIdb is an open, gene-centric
@@ -183,7 +204,7 @@ def load_dgidb(path, map_gene):
         print(f"(A2) DGIdb: {path.name} not found in databases/ -- skipping DGIdb targets.")
         return {}
     out = defaultdict(lambda: defaultdict(set))    # name_lower -> gene -> set(DGIdb class tags)
-    nrows = nlinked = 0
+    nrows = nlinked = nunres = ndrop = 0
     with open(path, encoding="utf-8", newline="") as fh:
         rd = csv.DictReader(fh, delimiter="\t")
         cols = {(c or "").lower(): c for c in (rd.fieldnames or [])}
@@ -194,6 +215,8 @@ def load_dgidb(path, map_gene):
                     return cols[n]
             return None
 
+        scol = pick("interaction_source_db_name", "source_db_name")
+        ccol = pick("gene_claim_name")
         dncol = pick("drug_name")
         dccol = pick("drug_claim_name", "drug_claim_primary_name")
         gcol = pick("gene_name", "gene_claim_name")
@@ -211,6 +234,21 @@ def load_dgidb(path, map_gene):
         for row in rd:
             nrows += 1
             gene = (row.get(gcol) or "").strip()
+            # GuideToPharmacology rows carry the target as a bare "NCBIGENE:<id>" claim, but
+            # the id is GtoPdb's OWN target id wearing an NCBI label. DGIdb resolves most of
+            # them through the GtoPdb relation and lands on the right gene (imatinib's claim
+            # is 1923 while ABL1 is entrez 25; tazemetostat's is 2654 while EZH2 is 2146).
+            # For the rest it read the id AS an NCBI gene id, and the result is whatever gene
+            # happens to hold that number -- alphabetically early ones, since GtoPdb ids are
+            # small: A1BG "targeted" by 119 drugs, AADAC by 106, and four separate ALK/FLT3
+            # inhibitors all landing on HBEGF (entrez 1839 = claim 1839). The equality IS the
+            # signature, so drop exactly those rows. Checked against 14 canonical drug-target
+            # pairs (osimertinib-EGFR, venetoclax-BCL2, palbociclib-CDK4, ...): none is lost.
+            if entrez_of is not None and (row.get(scol) or "") == "GuideToPharmacology":
+                m = re.match(r"NCBIGENE:(\d+)$", (row.get(ccol) or "").upper())
+                if m and entrez_of(gene) == m.group(1):
+                    ndrop += 1
+                    continue
             keys = {_norm_drug(row.get(dncol)), _norm_drug(row.get(dccol))} - {""}
             if not keys or not gene:
                 continue
@@ -223,11 +261,21 @@ def load_dgidb(path, map_gene):
             itypes = {t.strip().lower() for t in raw.replace("|", ",").split(",")
                       if t.strip() and t.strip().lower() not in ("n/a", "na", "none", "null")}
             tag = "DGIdb-" + cat + ((": " + ", ".join(sorted(itypes))) if itypes else "")
-            for sym in (map_gene(gene) or {gene}):
+            # No `or {gene}` fallback: an unresolvable DGIdb claim is not a gene, and
+            # keeping it wrote entities like "NULL", "F7R" and "GAPDHL17" into the
+            # gene -> chemicals cross-link as if they were genes.
+            syms = map_gene(gene)
+            if not syms:
+                nunres += 1
+                continue
+            for sym in syms:
                 for key in keys:
                     out[key][sym].add(tag)
             ncat[cat] += 1
             nlinked += 1
+    print(f"(A2) DGIdb: dropped {ndrop:,} GuideToPharmacology rows whose NCBIGENE claim is "
+          f"the resolved gene's own entrez id (GtoPdb target id read in the wrong namespace); "
+          f"{nunres:,} rows named a gene HGNC cannot resolve")
     print(f"(A2) DGIdb: read {nrows:,} rows; {nlinked:,} typed drug-gene links "
           f"(antineoplastic={ncat['antineoplastic']:,}, approved={ncat['approved']:,}, "
           f"investigational={ncat['investigational']:,}) -> {len(out):,} drug names indexed")
@@ -278,11 +326,23 @@ def main():
     def map_gene(name):
         return idx_ci.get(name.casefold()) or idx_del.get(delsep(name)) or set()
 
+    # symbol -> NCBI gene id, for the DGIdb namespace check in load_dgidb
+    entrez = {d["symbol"]: str(d["entrez_id"]) for d in docs
+              if d.get("symbol") and d.get("entrez_id")}
+
+    def entrez_of(sym):
+        return entrez.get(sym)
+
     # ---- annotate EVERY protein-targeting chemical with its HGNC gene target(s),
     #      derived from its ChEBI target roles -> written into target_pharm.json
     chem_genes = {}                              # chebi_id -> {gene: set(roles)}
     for cid, e in tlib.items():
         gr = defaultdict(set)
+        if cid in NON_DRUG:                      # metabolite/cofactor: no target claim from it
+            chem_genes[cid] = gr
+            e["hgnc_targets"] = []
+            e["n_hgnc_targets"] = 0
+            continue
         for role in e["target_roles"]:
             for nm in target_names(role):
                 for gene in map_gene(nm):
@@ -303,7 +363,7 @@ def main():
     # ---- (A2) DGIdb target provider: add targets for corpus chemicals that ChEBI
     #      has no `has role` annotation for (antibodies/biologics, etc.) ----
     clabel = {curie(nid): lbl for nid, lbl in label.items()}
-    db = load_dgidb(DGIDB_PATH, map_gene)              # {} when the file is absent
+    db = load_dgidb(DGIDB_PATH, map_gene, entrez_of)   # {} when the file is absent
     n_db_chem = 0
     if db:
         def src_of(rs):
@@ -311,6 +371,8 @@ def main():
             has_ch = any(not r.startswith("DGIdb") for r in rs)
             return "chebi+dgidb" if (has_db and has_ch) else ("dgidb" if has_db else "chebi")
         for cid in list(chebi_surf):
+            if cid in NON_DRUG:
+                continue
             names = {(clabel.get(cid) or "").casefold()} | {x.casefold() for x in chebi_surf[cid]}
             names.discard("")
             hits = defaultdict(set)                    # gene -> set(DGIdb class tags)

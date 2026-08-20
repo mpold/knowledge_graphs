@@ -333,7 +333,21 @@ def resolve(slot, mode):
 
 
 # ============================================================ (1) cascade
+# A one- or two-character surface cannot identify a compound in running text, but ChEBI is
+# full of terms that short: the one-letter amino-acid and nucleotide codes, the element
+# symbols, and the particle-physics entries. Every such surface this corpus produced was an
+# NER accident -- 'C' onto cysteine/cytosine/carbon, 'N' onto asparagine/nitrogen, 'Si'
+# silicon, 'Cu' copper, 'PU' plutonium, 'c' CHARM QUARK, 'd' down quark -- 16 occurrences,
+# not one of them a compound under study. Worse, they carry ChEBI target roles downstream:
+# 'C' -> L-cysteine -> "histidine ammonia-lyase inhibitor" -> HAL, a drug-target link out of
+# a single letter. Refused here so they never enter the chemical libraries; a genuinely
+# two-character drug name would need a CURATED entry, which is the right place to argue it.
+MIN_SURFACE = 3
+
+
 def match_cascade(value, IX):
+    if len(value.strip()) < MIN_SURFACE and value not in CURATED:
+        return set(), "", "too short"
     cur = CURATED.get(value)
     if cur is not None:
         if cur.startswith("CHEBI:"):
