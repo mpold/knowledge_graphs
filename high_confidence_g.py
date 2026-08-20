@@ -1063,7 +1063,7 @@ __LIBTAG__
   <div class="mut help">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
  <div class="row">Font size: <b id="fsv">50%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="50" aria-label="Label font size"></div>
  <div class="row">Min cluster size: <select id="mincluster"><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select></div>
- <div class="row">Min connections: <select id="mindeg"><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. A single pass: nodes that lose links in it can finish below the bar.</div></div>
+ <div class="row">Min connections: <select id="mindeg"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. A single pass: nodes that lose links in it can finish below the bar. <b>1</b> turns it off and keeps that fringe &mdash; the only way to see a node whose whole evidence is one edge, which on the reference run is 42 of the 177 addiction-classified genes (LMO1, GLI2, PAX3, PPARG, MIR21, MIR17HG among them). Expect a denser canvas: it is the setting that admits every hapax in the corpus.</div></div>
  <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
@@ -1073,7 +1073,7 @@ __LIBTAG__
 __KINDROW__
  <div class="row" id="acathdr">Addiction class <button class="ihelp" data-help="acat" aria-label="About the addiction class" aria-expanded="false">i</button></div>
  <div class="row legend" id="acatfilters"></div>
- <div class="row mut help" id="acathelp" data-help="acat">A <b>hand curation</b>, not a corpus or database read-out &mdash; the only claim in this graph nothing upstream produced. <b>Oncogene addiction</b>: an activating lesion (mutation, amplification, fusion) the tumour cannot survive losing. <b>Non-oncogene addiction</b>: a dependency the transformed state creates with no lesion in the gene itself &mdash; chaperone load, mitotic and replicative stress, metabolic rewiring, apoptotic priming. Loss-of-function tumour suppressors are in <em>neither</em> and sit under <b>unclassified</b>: their loss opens synthetic-lethal vulnerabilities elsewhere, which is a different claim. Hover a node for its group, marked <em>(borderline)</em> where the call could reasonably go the other way. Counts are gene nodes in the whole file, not in the view. An edge survives only when BOTH its gene endpoints are ticked, so unticking <b>unclassified</b> leaves the curated subnetwork alone; disease and chemical nodes are never filtered here.</div>
+ <div class="row mut help" id="acathelp" data-help="acat">A <b>hand curation</b>, not a corpus or database read-out &mdash; the only claim in this graph nothing upstream produced. <b>Oncogene addiction</b>: an activating lesion (mutation, amplification, fusion) the tumour cannot survive losing. <b>Non-oncogene addiction</b>: a dependency the transformed state creates with no lesion in the gene itself &mdash; chaperone load, mitotic and replicative stress, metabolic rewiring, apoptotic priming. Loss-of-function tumour suppressors are in <em>neither</em> and sit under <b>unclassified</b>: their loss opens synthetic-lethal vulnerabilities elsewhere, which is a different claim. Hover a node for its group, marked <em>(borderline)</em> where the call could reasonably go the other way. Counts read <em>total &middot; in view</em>: the total is every gene node the curation placed, the second is how many are drawn now. The gap is normal and often large &mdash; a classified gene still has to survive the score, min-connections and min-cluster settings, and this filter's own both-endpoints rule drops a driver whose only partners are unclassified. An edge survives only when BOTH its gene endpoints are ticked, so unticking <b>unclassified</b> leaves the curated subnetwork alone; disease and chemical nodes are never filtered here.</div>
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
  <div class="row mut help" data-help="rel">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels. Thickness and arrowhead size follow the number of <b>independent publications</b> behind the edge, not its sentence count &mdash; one paper repeating itself never thickens a line.</div>
@@ -1567,6 +1567,7 @@ function build(thr){
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
   const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
   return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+addTip(n),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs)};});
+ updateAcatCounts(nodes,acats);   // nodes is final here: every filter, including this one, has run
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:true,scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
  // undirected and unarrowed: a shared sentence has no subject and object
@@ -1612,14 +1613,16 @@ function catsOf(e){const c={};e.sents.forEach(s=>c[sentCat(e,s)]=1);return Objec
 // The class row is drawn from the payload, so a run whose ADDICTION table places nothing
 // (a corpus of genes nobody curated) shows no row at all rather than three empty boxes.
 const ACAT_BOX=[['driver','oncogene addiction'],['noa','non-oncogene addiction'],['none','unclassified']];
+let ACATTOT={};
 function buildAcatFilters(){
  const n={};DATA.nodes.forEach(x=>{if((x.kind||'gene')==='gene')n[x.acat||'none']=(n[x.acat||'none']||0)+1;});
+ ACATTOT=n;
  const box=ACAT_BOX.filter(([k])=>n[k]);
  const row=document.getElementById('acatfilters');
  // one class (or none) is not a filter -- hide the whole block, heading and help with it
  if(box.length<2){['acatfilters','acathdr','acathelp'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});return;}
  row.innerHTML=box.map(([k,lab])=>'<label><input type=checkbox class=acatf value="'+k+'" checked> '
-   +lab+' <span class=cnt>('+n[k]+')</span></label>').join(' ');
+   +lab+' <span class=cnt data-acat="'+k+'">('+n[k]+')</span></label>').join(' ');
  document.querySelectorAll('.acatf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
 }
 function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>CATTOT[c]=(CATTOT[c]||0)+1));const cats=Object.keys(CATTOT).sort((a,b)=>CATTOT[b]-CATTOT[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+esc(c)+'" checked> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+esc(c)+' <span class=cnt data-cat="'+esc(c)+'">('+CATTOT[c]+')</span></label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
@@ -1631,6 +1634,19 @@ function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>
 // and min-cluster size all prune afterwards. A category pruned to nothing reads 0 (in red)
 // instead of looking available: ticking it alone would leave the canvas blank, typically
 // because its edges form components smaller than "Min cluster size".
+// The class counts read "total · in view" for the same reason the relation ones do, and the
+// gap between the two halves is bigger here than anywhere else in the panel: the curation places
+// 177 of 424 genes, but ticking driver+noa alone draws 102 of them at score 0.5. The missing 75
+// are not a filter bug -- 42 hold a single edge and min-connections (floor 2) peels them, 17 have
+// only UNCLASSIFIED partners so the both-endpoints rule removes their last edge, and 16 fall
+// below degree or cluster once the class filter has thinned the edge set. Showing the payload
+// total alone read as a promise the view could not keep.
+function updateAcatCounts(nodes,acats){const seen={};
+ nodes.forEach(n=>{if(KIND[n.id]==='gene')seen[ACAT[n.id]]=(seen[ACAT[n.id]]||0)+1;});   // the id maps, not a scan per node
+ document.querySelectorAll('#acatfilters .cnt').forEach(el=>{const k=el.getAttribute('data-acat');
+  const on=!acats||acats.has(k);
+  el.textContent=on?('('+(ACATTOT[k]||0)+' · '+(seen[k]||0)+' in view)'):('('+(ACATTOT[k]||0)+' · off)');
+  el.style.color=(on&&!seen[k])?'#b3243b':'';});}
 function updateCatCounts(edges,cats){const seen={};edges.forEach(o=>{const c={};o.vis.forEach(s=>c[sentCat(o.e,s)]=1);for(const k in c)seen[k]=(seen[k]||0)+1;});
  document.querySelectorAll('#catfilters .cnt').forEach(el=>{const c=el.getAttribute('data-cat');
   el.textContent=cats.has(c)?('('+CATTOT[c]+' · '+(seen[c]||0)+' in view)'):('('+CATTOT[c]+' · off)');
