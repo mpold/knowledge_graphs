@@ -144,6 +144,19 @@ CURATED = {
     "CHX":  "CHEBI:27641",   # cycloheximide
     "BTZ":  "CHEBI:52717",   # bortezomib
     "ATRA": "CHEBI:15367",   # all-trans-retinoic acid (tretinoin)
+    "atRA": "CHEBI:15367",   # the casing this corpus actually writes (RAR / CRABP-II context)
+    "ATO":  "CHEBI:30621",   # arsenic trioxide -- "ATO in NB4 cells", the APL line, so this is
+                             # the differentiation-therapy agent, not any other expansion
+    "TTM":  "CHEBI:30703",   # tetrathiomolybdate(2-) -- the copper chelator, read from its use
+                             # here in BRAF-mutant melanoma alongside BH3 mimetics
+    "2-deoxyglucose": "CHEBI:15866",  # spelling merge: the hyphenated 2-deoxy-D-glucose is
+                             # already a corpus chemical, and this form was being discarded
+    # DELIBERATELY NOT CURATED, though both are frequent in the unmatched list:
+    #   DCA   (16 sentences) reads as dichloroacetate in an EGFR/ATR-inhibitor paper, but
+    #         deoxycholic acid is the other common expansion and no sentence defines it here.
+    #         An abbreviation this project cannot settle from its own text stays unmatched.
+    #   RITA  (13 sentences) is the p53 activator (NSC 652287) and unambiguous in context, but
+    #         ChEBI has no term for it, so there is no id to point at. NCIt would be the route.
     "CBD":  "CHEBI:69478",   # cannabidiol
     "ICG":  "CHEBI:31696",   # indocyanine green
     "SFN":  "CHEBI:47807",   # sulforaphane
