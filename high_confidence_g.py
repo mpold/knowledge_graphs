@@ -658,7 +658,10 @@ FALSE_TARGETS = {
     "FLT3": {"bortezomib", "clofarabine"},                 # proteasome / nucleoside analogue
     "ALK": {"ganetespib"},                                 # HSP90
     "AKT1": {"everolimus", "azd4547"},                     # mTOR / FGFR
-    "SIRT1": {"panobinostat"}, "SIRT3": {"panobinostat"}, "SIRT6": {"panobinostat"},
+    "SIRT1": {"panobinostat"}, "SIRT3": {"panobinostat"},  # class I/II HDAC drug vs
+    "SIRT6": {"panobinostat"}, "SIRT5": {"panobinostat"},  # class III NAD+ sirtuins
+    "SIRT7": {"panobinostat"},
+    "PDGFB": {"axitinib", "sunitinib"},                    # they inhibit the RECEPTOR, not the ligand
     "PTCH1": {"vismodegib"},                               # vismodegib binds SMO
     "CFLAR": {"dovitinib"},                                # FGFR/VEGFR TKI
     "MTOR": {"bgj-398"}, "PIK3CA": {"bgj-398"},            # infigratinib is FGFR-selective
