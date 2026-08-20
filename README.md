@@ -281,6 +281,14 @@ python high_confidence_g.py --data-root kaggle_working
 python high_confidence_g.py --data-root kaggle_working --merge gate    # or typed / none
 ```
 
+The drug-target colouring rests on a cross-link (corpus chemical → HGNC gene) built from
+ChEBI roles and DGIdb. Three ways a gene could pick up a colour it had not earned are fixed
+in the pipeline and guarded by a regression check — run it after any DGIdb or ChEBI update:
+
+```bash
+python audit_drug_targets.py --data-root kaggle_working     # exit 0 = clean
+```
+
 The graph spans gene, DISEASE and CHEMICAL nodes (diseases and chemicals identified by MONDO /
 ChEBI label — or NCIt label, for the biologics ChEBI has no term for — shaped ◆ and ■), so the
 gene–disease and chemical–gene edges BioRED contributes are drawn instead of discarded — on the
@@ -361,6 +369,7 @@ it is modified. Without one, stage 1 simply downloads everything.
 ├── clean_up.py                # stage 1: step 8 — deletes the intermediate XML/PDF dirs (last)
 ├── subtract.py                # stage 1: optional dir-subtract utility (-> gpu_bundle/removed)
 ├── high_confidence_g.py       # stage 3: the graph (typed edges + --merge)
+├── audit_drug_targets.py      # stage 3: regression test for false drug targets
 ├── gpu_bundle/                # stage 2: the GPU pipeline
 │   ├── gpu.py                 #   orchestrator (19 steps)
 │   ├── drug_lexicon.py        #   NCIt drug lexicon: builder + matcher (step 3)
