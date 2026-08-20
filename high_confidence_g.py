@@ -82,6 +82,7 @@ Run::  python high_confidence_g.py [--data-root kaggle_working] [--score 0.8] [-
 import argparse
 import bisect
 import collections
+import csv
 import datetime
 import html
 import json
@@ -98,6 +99,7 @@ DATA_ROOT = ROOT / "kaggle_working"
 # module-level paths; (re)bound to DATA_ROOT by set_data_root() so --data-root can retarget them
 OUT_DIR = XML_DIR = SENT_DIR = None
 RE_FILE = PMC_YEARS = TARGET_FILE = None
+CHIMER_KB = CHIMER_SEQ = None
 # every lung_* project caches its slice of the shared corpus under this name
 CONTRIB_NAME = "corpus_contrib.json"
 DISEASE_LIB = CHEM_LIB = None
@@ -108,6 +110,7 @@ def set_data_root(data_root):
     """Point every input/output path at `data_root` (the pipeline's output tree)."""
     global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, PMC_YEARS
     global TARGET_FILE, DISEASE_LIB, CHEM_LIB, JSON_OUT, GRAPH_OUT
+    global CHIMER_KB, CHIMER_SEQ
     DATA_ROOT = Path(data_root).resolve()
     OUT_DIR = DATA_ROOT / "TRIPLES"
     XML_DIR = DATA_ROOT / "experimental_ner"   # input XML corpus (may be empty in the bundle)
@@ -115,6 +118,9 @@ def set_data_root(data_root):
     RE_FILE = OUT_DIR / "triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"
     PMC_YEARS = DATA_ROOT / "databases" / "pmc_years.json"
     TARGET_FILE = DATA_ROOT / "CHEMICAL" / "chemical_to_target.json"   # gene -> corpus chemicals (in_corpus_GENETIC flag)
+    # ChimerDB 4.0, converted by chimerdb_to_tsv.py; both optional, absent -> no fusion attribute
+    CHIMER_KB = DATA_ROOT / "databases" / "ChimerKB4.tsv"      # curated: sets the flag
+    CHIMER_SEQ = DATA_ROOT / "databases" / "ChimerSeq4.tsv"    # TCGA RNA-seq: evidence only
     # normalization libraries carrying the in-place phenotype / non_chemical flags
     DISEASE_LIB = DATA_ROOT / "DISEASE" / "disease.json"
     CHEM_LIB = DATA_ROOT / "CHEMICAL" / "chemical.json"
@@ -710,6 +716,54 @@ def _drug_targets():
     return tgt, chems_by_gene, tsrc, tcat
 
 
+def _fusion_partners():
+    """gene -> (side, partners, n_partners, seq_samples, diseases) from ChimerDB 4.0.
+
+    WHICH SIDE OF THE JUNCTION a gene sits on is the whole point of carrying this, because it
+    decides whether there is anything to inhibit. The 5' partner contributes a promoter and
+    keeps none of its protein -- TMPRSS2 is 26x 5' and 0x 3' in ChimerKB, and TMPRSS2-ERG is
+    treated as an ERG lesion for exactly that reason -- while the 3' partner contributes the
+    kinase or DNA-binding domain that the fusion is named for (ERG: 3x 5', 48x 3').
+
+    THE FLAG COMES FROM ChimerKB ONLY. ChimerSeq is called from TCGA RNA-seq and is algorithmic:
+    it lists TP53 in 65 rows, CTNNB1 in 50 and USP39 in 40, none of which fuse in any meaningful
+    sense, against 3, 9 and 0 in the curated set. Recurrence does not rescue it -- measured over
+    the 32,172 In-Frame rows, requiring the same pair in >=3 TCGA samples still admits USP39
+    while already losing PAX3, FOXO1, YAP1 and MYB, and >=5 loses more. No threshold separates
+    signal from noise here, so ChimerSeq contributes a COUNT (`fseq`, In-Frame samples touching
+    the gene) and never the flag itself.
+    """
+    side, partners, disease, seq = {}, collections.defaultdict(set), collections.defaultdict(set), {}
+    try:
+        with open(CHIMER_KB, encoding="utf-8", newline="") as fh:
+            for r in csv.DictReader(fh, delimiter="	"):
+                h, t = (r.get("H_gene") or "").strip(), (r.get("T_gene") or "").strip()
+                if not h or not t:
+                    continue
+                for g, other, s in ((h, t, "5p"), (t, h, "3p")):
+                    side[g] = s if side.get(g, s) == s else "both"
+                    partners[g].add(other)
+                    if r.get("Disease"):
+                        disease[g].add(r["Disease"].strip())
+    except OSError:
+        return {}
+    try:                                    # evidence only: how much TCGA RNA-seq touches the gene
+        with open(CHIMER_SEQ, encoding="utf-8", newline="") as fh:
+            hit = collections.defaultdict(set)
+            for r in csv.DictReader(fh, delimiter="	"):
+                if r.get("Frame") != "In-Frame":      # only these can make a chimeric PROTEIN
+                    continue
+                bc = r.get("BarcodeID") or ""
+                for g in ((r.get("H_gene") or "").strip(), (r.get("T_gene") or "").strip()):
+                    if g:
+                        hit[g].add(bc)
+            seq = {g: len(v) for g, v in hit.items()}
+    except OSError:
+        seq = {}
+    return {g: (side[g], sorted(partners[g]), len(partners[g]), seq.get(g, 0),
+                sorted(disease.get(g, ()))) for g in side}
+
+
 def graph_payload_multi(triples, flags):
     """Gene + disease + chemical graph. One edge per unordered node pair, best-supported
     (direction, relation) wins, one record per sentence; nodes are typed and identified by
@@ -724,6 +778,7 @@ def graph_payload_multi(triples, flags):
     except Exception:
         years = {}
     tgt, chems_by_gene, tsrc, tcat = _drug_targets()
+    fusion = _fusion_partners()
     dir_sent = collections.defaultdict(set)            # (a,b,cat) -> sentences
     pair_sent = collections.defaultdict(dict)          # pair -> {sentence: [score, pmid, cat, spec, src]}
     pair_src = collections.defaultdict(set)            # pair -> model roles behind ANY of its triples
@@ -775,7 +830,14 @@ def graph_payload_multi(triples, flags):
                       # placed and for every non-gene node, so the HTML can test it directly
                       "acat": ADDICTION.get(nd, ("", ""))[0] if k == "gene" else "",
                       "agrp": ADDICTION.get(nd, ("", ""))[1] if k == "gene" else "",
-                      "abord": 1 if (k == "gene" and nd in _BORDERLINE) else 0})
+                      "abord": 1 if (k == "gene" and nd in _BORDERLINE) else 0,
+                      # ChimerDB: which side of the junction, who with, and how much TCGA
+                      # RNA-seq backs it. "" for a gene nobody has seen fused, and for every
+                      # non-gene node, so the HTML can test the field directly.
+                      "fus": fusion.get(nd, ("", (), 0, 0, ()))[0] if k == "gene" else "",
+                      "fpart": fusion.get(nd, ("", (), 0, 0, ()))[1][:8] if k == "gene" else [],
+                      "fn": fusion.get(nd, ("", (), 0, 0, ()))[2] if k == "gene" else 0,
+                      "fseq": fusion.get(nd, ("", (), 0, 0, ()))[3] if k == "gene" else 0})
     return {"nodes": nodes, "edges": edges}
 
 
@@ -2340,6 +2402,11 @@ def main():
               + (f"; not yet run: {', '.join(bg['missing'])}" if bg['missing'] else ""))
         universe = kept if args.score <= GRAPH_BASE else [t for t in d if keep_fn(t, GRAPH_BASE)]
         payload = graph_payload_multi(universe, flags)
+        nfus = sum(1 for n in payload["nodes"] if n.get("fus"))
+        if nfus:
+            side = collections.Counter(n["fus"] for n in payload["nodes"] if n.get("fus"))
+            print(f"  fusion partners (ChimerKB): {nfus} gene nodes "
+                  f"({side.get('5p', 0)} 5', {side.get('3p', 0)} 3', {side.get('both', 0)} both)")
         if N_FALSE_DROPPED:
             print(f"  drug targets: dropped {N_FALSE_DROPPED} curated false gene-chemical "
                   f"pair(s) (FALSE_TARGETS)")
