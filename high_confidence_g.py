@@ -716,6 +716,30 @@ def _drug_targets():
     return tgt, chems_by_gene, tsrc, tcat
 
 
+# ----- fusion pairs ChimerKB does not carry (manual curation) --------------------------
+# ChimerKB is curated and conservative, and it is not a superset of the literature: five genes
+# this project had already documented are absent from it, each with real support. They are added
+# here as PAIRS -- 5' gene first -- so the loader derives both sides exactly as it does from the
+# database, and each carries the PubMed count that justified it (pubmed_fusions.py, 2026-08-20).
+# The supplement is deliberately tiny: it closes a known gap, it does not become a second
+# database.
+#
+# MAP3K8 cost two wrong entries before it was right. SPECC1L::MAP3K8 and DIP2B::MAP3K8 were
+# written from memory and return ZERO publications each; the partner the literature actually
+# reports is ABLIM1. It is also the exception to the rule the rest of this file states: MAP3K8
+# sits 5' and still keeps its kinase domain, because these rearrangements truncate its
+# C-terminal autoinhibitory tail rather than donating a promoter. A 5' position does not always
+# mean "nothing to inhibit".
+FUSION_SUPPLEMENT = [
+    # (5' gene, 3' gene, evidence)
+    ("MEIS1", "NCOA2", "spindle-cell rhabdomyosarcoma; 27 PubMed records"),
+    ("EWSR1", "SMAD3", "fibroblastic tumour; 20 PubMed records"),
+    ("TBL1XR1", "RARB", "variant APL; 8 PubMed records"),
+    ("PAX3", "FOXO6", "biphenotypic sinonasal sarcoma; 2 records, PMIDs 36169791, 42446761"),
+    ("MAP3K8", "ABLIM1", "Spitz melanoma; 2 records, PMID 39363234"),
+]
+
+
 def _fusion_partners():
     """gene -> (side, partners, n_partners, seq_samples, diseases) from ChimerDB 4.0.
 
@@ -734,6 +758,7 @@ def _fusion_partners():
     the gene) and never the flag itself.
     """
     side, partners, disease, seq = {}, collections.defaultdict(set), collections.defaultdict(set), {}
+    supp = set()                        # genes owing a partner to FUSION_SUPPLEMENT
     try:
         with open(CHIMER_KB, encoding="utf-8", newline="") as fh:
             for r in csv.DictReader(fh, delimiter="	"):
@@ -747,6 +772,11 @@ def _fusion_partners():
                         disease[g].add(r["Disease"].strip())
     except OSError:
         return {}
+    for h, t, _why in FUSION_SUPPLEMENT:    # a known gap in ChimerKB, closed by hand
+        for g, other, sd in ((h, t, "5p"), (t, h, "3p")):
+            side[g] = sd if side.get(g, sd) == sd else "both"
+            partners[g].add(other)
+            supp.add(g)
     try:                                    # evidence only: how much TCGA RNA-seq touches the gene
         with open(CHIMER_SEQ, encoding="utf-8", newline="") as fh:
             hit = collections.defaultdict(set)
@@ -761,7 +791,7 @@ def _fusion_partners():
     except OSError:
         seq = {}
     return {g: (side[g], sorted(partners[g]), len(partners[g]), seq.get(g, 0),
-                sorted(disease.get(g, ()))) for g in side}
+                sorted(disease.get(g, ())), 1 if g in supp else 0) for g in side}
 
 
 def graph_payload_multi(triples, flags):
@@ -834,10 +864,13 @@ def graph_payload_multi(triples, flags):
                       # ChimerDB: which side of the junction, who with, and how much TCGA
                       # RNA-seq backs it. "" for a gene nobody has seen fused, and for every
                       # non-gene node, so the HTML can test the field directly.
-                      "fus": fusion.get(nd, ("", (), 0, 0, ()))[0] if k == "gene" else "",
-                      "fpart": fusion.get(nd, ("", (), 0, 0, ()))[1][:8] if k == "gene" else [],
-                      "fn": fusion.get(nd, ("", (), 0, 0, ()))[2] if k == "gene" else 0,
-                      "fseq": fusion.get(nd, ("", (), 0, 0, ()))[3] if k == "gene" else 0})
+                      "fus": fusion.get(nd, ("", (), 0, 0, (), 0))[0] if k == "gene" else "",
+                      "fpart": fusion.get(nd, ("", (), 0, 0, (), 0))[1][:8] if k == "gene" else [],
+                      "fn": fusion.get(nd, ("", (), 0, 0, (), 0))[2] if k == "gene" else 0,
+                      "fseq": fusion.get(nd, ("", (), 0, 0, (), 0))[3] if k == "gene" else 0,
+                      # 1 when a partner came from FUSION_SUPPLEMENT rather than ChimerKB, so the
+                      # HTML can say which claims the database backs and which this project does
+                      "fsup": fusion.get(nd, ("", (), 0, 0, (), 0))[5] if k == "gene" else 0})
     return {"nodes": nodes, "edges": edges}
 
 
@@ -1185,7 +1218,9 @@ function addTip(n){return n.acat?(' · '+(ACAT_LAB[n.acat]||n.acat)+': '+n.agrp+
 // ChimerDB, curated set. The side is the informative half: 5' donates a promoter and keeps
 // none of its protein, 3' contributes the domain the fusion is named for.
 const FUS_LAB={'5p':"5' partner",'3p':"3' partner",both:"5' and 3' partner"};
-function fusTip(n){return n.fus?(' · fusion: '+(FUS_LAB[n.fus]||n.fus)+' of '+n.fn+' ('
+// `fsup` marks a gene whose partner this project added rather than ChimerDB, and the tooltip
+// says so: a curated claim and a database claim should never look identical.
+function fusTip(n){return n.fus?(' · fusion: '+(FUS_LAB[n.fus]||n.fus)+' of '+n.fn+(n.fsup?' (curated)':'')+' ('
   +(n.fpart||[]).slice(0,4).join(', ')+(n.fn>4?', …':'')+')'
   +(n.fseq?' · '+n.fseq+' In-Frame TCGA samples':'')):'';}
 const KIND={};DATA.nodes.forEach(n=>{KIND[n.id]=n.kind||'gene';});
@@ -1679,7 +1714,7 @@ function build(thr){
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)'
      +(n.acat?'<div class=mut>'+ACAT_LAB[n.acat]+' &mdash; '+esc(n.agrp)+(n.abord?' (borderline)':'')+'; curated by hand, not read off the corpus or a database</div>':'')
-     +(n.fus?'<div class=mut>ChimerDB: '+FUS_LAB[n.fus]+' of '+n.fn+' &mdash; '+esc((n.fpart||[]).join(', '))+(n.fseq?'; '+n.fseq+' In-Frame TCGA samples':'')+'</div>':'');}
+     +(n.fus?'<div class=mut>'+(n.fsup?'ChimerDB + curated supplement':'ChimerDB')+': '+FUS_LAB[n.fus]+' of '+n.fn+' &mdash; '+esc((n.fpart||[]).join(', '))+(n.fseq?'; '+n.fseq+' In-Frame TCGA samples':'')+'</div>':'');}
    else if(p.edges.length&&_cm[p.edges[0]]){const L=_cm[p.edges[0]];info.innerHTML=INFO_HEAD+cmTip(L,cmDis).innerHTML;}
    else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=INFO_HEAD+edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
 }
@@ -2442,7 +2477,9 @@ def main():
         nfus = sum(1 for n in payload["nodes"] if n.get("fus"))
         if nfus:
             side = collections.Counter(n["fus"] for n in payload["nodes"] if n.get("fus"))
-            print(f"  fusion partners (ChimerKB): {nfus} gene nodes "
+            nsup = sum(1 for n in payload["nodes"] if n.get("fsup"))
+            print(f"  fusion partners: {nfus} gene nodes "
+                  f"(ChimerKB{f' + {nsup} from FUSION_SUPPLEMENT' if nsup else ''}) "
                   f"({side.get('5p', 0)} 5', {side.get('3p', 0)} 3', {side.get('both', 0)} both)")
         if N_FALSE_DROPPED:
             print(f"  drug targets: dropped {N_FALSE_DROPPED} curated false gene-chemical "
