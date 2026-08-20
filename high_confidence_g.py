@@ -1135,6 +1135,9 @@ __LIBTAG__
 __KINDROW__
  <div class="row" id="acathdr">Addiction class <button class="ihelp" data-help="acat" aria-label="About the addiction class" aria-expanded="false">i</button></div>
  <div class="row legend" id="acatfilters"></div>
+ <div class="row" id="fushdr">Fusion partner <button class="ihelp" data-help="fus" aria-label="About fusion status" aria-expanded="false">i</button></div>
+ <div class="row legend" id="fusfilters"></div>
+ <div class="row mut help" id="fushelp" data-help="fus">From <b>ChimerDB 4.0</b>, curated set only (ChimerKB); genes carrying a thicker ring are in it. <b>5&prime;</b> means the gene donates the promoter and keeps none of its own protein &mdash; TMPRSS2 in TMPRSS2-ERG, which is why that lesion is treated as an ERG event. <b>3&prime;</b> means it contributes the kinase or DNA-binding domain the fusion is named for. A junction exists in no normal cell, so it is a selectivity handle even where the protein has no drug pocket. <b>Read it as "appears in a curated fusion pair", not "makes a chimeric protein":</b> MYC and BCL6 are flagged through their IGH/IGK partners, which substitute a promoter rather than fusing two proteins, and BCL6's 21 partners are the signature of exactly that. The TCGA count in the tooltip is In-Frame RNA-seq evidence from ChimerSeq, which is algorithmic and never sets the flag &mdash; no recurrence threshold makes it safe, since requiring 3 samples still admits USP39 while losing PAX3 and YAP1.</div>
  <div class="row mut help" id="acathelp" data-help="acat">A <b>hand curation</b>, not a corpus or database read-out &mdash; the only claim in this graph nothing upstream produced. <b>Oncogene addiction</b>: an activating lesion (mutation, amplification, fusion) the tumour cannot survive losing. <b>Non-oncogene addiction</b>: a dependency the transformed state creates with no lesion in the gene itself &mdash; chaperone load, mitotic and replicative stress, metabolic rewiring, apoptotic priming. Loss-of-function tumour suppressors are in <em>neither</em> and sit under <b>unclassified</b>: their loss opens synthetic-lethal vulnerabilities elsewhere, which is a different claim. Hover a node for its group, marked <em>(borderline)</em> where the call could reasonably go the other way. Counts read <em>total &middot; in view</em>: the total is every gene node the curation placed, the second is how many are drawn now. The gap is normal and often large &mdash; a classified gene still has to survive the score, min-connections and min-cluster settings, and this filter's own both-endpoints rule drops a driver whose only partners are unclassified. An edge survives only when BOTH its gene endpoints are ticked, so unticking <b>unclassified</b> leaves the curated subnetwork alone; disease and chemical nodes are never filtered here.</div>
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
@@ -1179,9 +1182,16 @@ function nodeColor(n){if(n.kind&&n.kind!=='gene')return {background:n.bg,border:
 // instead of letting a clean label imply a certainty the curation does not have.
 const ACAT_LAB={driver:'oncogene addiction',noa:'non-oncogene addiction'};
 function addTip(n){return n.acat?(' · '+(ACAT_LAB[n.acat]||n.acat)+': '+n.agrp+(n.abord?' (borderline)':'')):'';}
+// ChimerDB, curated set. The side is the informative half: 5' donates a promoter and keeps
+// none of its protein, 3' contributes the domain the fusion is named for.
+const FUS_LAB={'5p':"5' partner",'3p':"3' partner",both:"5' and 3' partner"};
+function fusTip(n){return n.fus?(' · fusion: '+(FUS_LAB[n.fus]||n.fus)+' of '+n.fn+' ('
+  +(n.fpart||[]).slice(0,4).join(', ')+(n.fn>4?', …':'')+')'
+  +(n.fseq?' · '+n.fseq+' In-Frame TCGA samples':'')):'';}
 const KIND={};DATA.nodes.forEach(n=>{KIND[n.id]=n.kind||'gene';});
 // '' (nobody placed this gene) becomes 'none' so it can be a tick box like the other two
 const ACAT={};DATA.nodes.forEach(n=>{ACAT[n.id]=n.acat||'none';});
+const FUS={};DATA.nodes.forEach(n=>{FUS[n.id]=n.fus||'none';});
 // --- training-set provenance ---------------------------------------------------------
 // Every SENTENCE records which corpus produced it: 'ppi' (BioInfer only), 'biored' (BioRED
 // only, i.e. a reading the binary model never claimed) or 'both' (the merge corroborated it).
@@ -1210,6 +1220,8 @@ function buildSrcButtons(){
 function activeKinds(){const b=[...document.querySelectorAll('.kindf')];return b.length?new Set(b.filter(c=>c.checked).map(c=>c.value)):null;}
 // null when every box is ticked: the filter then costs nothing per edge, and a run whose
 // curation placed no gene at all never renders the row to begin with
+function activeFus(){const b=[...document.querySelectorAll('.fusf')];if(!b.length)return null;
+ const on=b.filter(c=>c.checked);return on.length===b.length?null:new Set(on.map(c=>c.value));}
 function activeAcats(){const b=[...document.querySelectorAll('.acatf')];if(!b.length)return null;
  const on=b.filter(c=>c.checked);return on.length===b.length?null:new Set(on.map(c=>c.value));}
 const net=document.getElementById('net'); let network=null, NODEDS=null;
@@ -1504,7 +1516,7 @@ function focusKeep(edges,seeds,hops){
 function build(thr){
  const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
  const txt=activeText(), tm=textMatcher(txt); TM=tm;
- const kinds=activeKinds(), acats=activeAcats();
+ const kinds=activeKinds(), acats=activeAcats(), fuss=activeFus();
  let edges=[];
  // The text query is a LENS, not a threshold input: an edge's support is what survives the
  // score, year, relation and source settings, and the thresholds below judge THAT. Feeding the
@@ -1530,6 +1542,9 @@ function build(thr){
    // path: that path exists for node TYPES the corpus never relates to each other, which is a
    // statement about the data; an unticked class is a statement about what you asked to see.
    if(acats&&[e.from,e.to].some(nd=>KIND[nd]==='gene'&&!acats.has(ACAT[nd])))return;
+   // same rule as the class row: gene endpoints only, both of them, so unticking a class
+   // removes the edges that reached it rather than leaving half-connected neighbours
+   if(fuss&&[e.from,e.to].some(nd=>KIND[nd]==='gene'&&!fuss.has(FUS[nd])))return;
    const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
    const np=new Set(sup.map(s=>s.pmid)).size;
    if(mp>1&&np<mp)return;
@@ -1628,8 +1643,10 @@ function build(thr){
  const nsz=id=>(nss[id]?nss[id].size:(isoSz[id]||0));
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
   const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
-  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+addTip(n),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs)};});
+  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+addTip(n)+fusTip(n),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
+   borderWidth:(n.fus?3:1),borderWidthSelected:(n.fus?5:2)};});
  updateAcatCounts(nodes,acats);   // nodes is final here: every filter, including this one, has run
+ updateFusCounts(nodes,fuss);
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:true,scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
  // undirected and unarrowed: a shared sentence has no subject and object
@@ -1661,7 +1678,8 @@ function build(thr){
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
    if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)'
-     +(n.acat?'<div class=mut>'+ACAT_LAB[n.acat]+' &mdash; '+esc(n.agrp)+(n.abord?' (borderline)':'')+'; curated by hand, not read off the corpus or a database</div>':'');}
+     +(n.acat?'<div class=mut>'+ACAT_LAB[n.acat]+' &mdash; '+esc(n.agrp)+(n.abord?' (borderline)':'')+'; curated by hand, not read off the corpus or a database</div>':'')
+     +(n.fus?'<div class=mut>ChimerDB: '+FUS_LAB[n.fus]+' of '+n.fn+' &mdash; '+esc((n.fpart||[]).join(', '))+(n.fseq?'; '+n.fseq+' In-Frame TCGA samples':'')+'</div>':'');}
    else if(p.edges.length&&_cm[p.edges[0]]){const L=_cm[p.edges[0]];info.innerHTML=INFO_HEAD+cmTip(L,cmDis).innerHTML;}
    else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=INFO_HEAD+edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
 }
@@ -1703,6 +1721,25 @@ function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>
 // only UNCLASSIFIED partners so the both-endpoints rule removes their last edge, and 16 fall
 // below degree or cluster once the class filter has thinned the edge set. Showing the payload
 // total alone read as a promise the view could not keep.
+const FUS_BOX=[['5p',"5′ partner"],['3p',"3′ partner"],['both',"5′ and 3′"],['none','not recorded']];
+let FUSTOT={};
+function buildFusFilters(){
+ const n={};DATA.nodes.forEach(x=>{if((x.kind||'gene')==='gene')n[x.fus||'none']=(n[x.fus||'none']||0)+1;});
+ FUSTOT=n;
+ const box=FUS_BOX.filter(([k])=>n[k]);
+ const row=document.getElementById('fusfilters');
+ // nothing to filter on when ChimerDB was never staged: hide the block rather than show 1 box
+ if(box.length<2){['fusfilters','fushdr','fushelp'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});return;}
+ row.innerHTML=box.map(([k,lab])=>'<label><input type=checkbox class=fusf value="'+k+'" checked> '
+   +lab+' <span class=cnt data-fus="'+k+'">('+n[k]+')</span></label>').join(' ');
+ document.querySelectorAll('.fusf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
+}
+function updateFusCounts(nodes,fuss){const seen={};
+ nodes.forEach(n=>{if(KIND[n.id]==='gene')seen[FUS[n.id]]=(seen[FUS[n.id]]||0)+1;});
+ document.querySelectorAll('#fusfilters .cnt').forEach(el=>{const k=el.getAttribute('data-fus');
+  const on=!fuss||fuss.has(k);
+  el.textContent=on?('('+(FUSTOT[k]||0)+' · '+(seen[k]||0)+' in view)'):('('+(FUSTOT[k]||0)+' · off)');
+  el.style.color=(on&&!seen[k])?'#b3243b':'';});}
 function updateAcatCounts(nodes,acats){const seen={};
  nodes.forEach(n=>{if(KIND[n.id]==='gene')seen[ACAT[n.id]]=(seen[ACAT[n.id]]||0)+1;});   // the id maps, not a scan per node
  document.querySelectorAll('#acatfilters .cnt').forEach(el=>{const k=el.getAttribute('data-acat');
@@ -2283,7 +2320,7 @@ document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>b
 (function(){const lp=document.getElementById('lpanel');
  const kids=lp?Array.prototype.slice.call(lp.children||[]):[];   // HTMLCollection, not an array
  if(kids.length&&!kids.some(c=>!c.style||c.style.display!=='none'))lp.style.display='none';})();
-buildAcatFilters();buildCatFilters();buildSrcButtons();build(1);
+buildAcatFilters();buildFusFilters();buildCatFilters();buildSrcButtons();build(1);
 </script></body></html>"""
 
 
