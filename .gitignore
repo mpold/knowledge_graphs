@@ -62,3 +62,6 @@ xhigh_confidence_g.py
 Thumbs.db
 .idea/
 .vscode/
+
+# Collected API results for rankings.py (cBioPortal + RCSB). Re-fetchable, so not tracked.
+rankings_cache/
