@@ -223,14 +223,29 @@ def _norm_drug(s):
     return s.strip()
 
 
+def code_key(s):
+    """Canonical form of a code name: lowercase, hyphens and spaces removed. The corpus writes
+    AEW541, DGIdb writes AEW-541 and the literature writes NVP-AEW541; all three collapse here."""
+    return (s or "").strip().lower().replace("-", "").replace(" ", "")
+
+
 def build_dgidb_drugset(path):
-    """Set of clean DGIdb drug names (single-token, alpha, len>=7) from drug_name/
-    drug_claim_name -- the surfaces scanned for in corpus text to recover drugs the
-    NER misses AND that ChEBI does not contain (e.g. bevacizumab)."""
+    """DGIdb drug names to scan corpus text for, in two families.
+
+    INN names -- single token, alphabetic, >=7 characters -- recover the drugs the NER misses and
+    ChEBI does not carry (bevacizumab). That letters-only rule was the whole filter, and it
+    silently discarded every drug still known by its CODE name. The cost was invisible until a
+    node was checked by hand: the corpus says "inhibition of IGF1R activity by NVP-AEW541 (a small
+    molecule IGF1R inhibitor)", DGIdb carries AEW-541 -> IGF1R as a ChEMBL binding row, and IGF1R
+    was still drawn as an undrugged gene, because AEW541 has digits in it.
+
+    So code names are kept too, under `code_key`, and returned separately: they need the
+    code-token scan rather than the letters-only word scan, and matching them case-insensitively
+    is safe because the shape (2-6 letters, 3+ digits) is already narrow."""
     p = Path(path)
     if not p.exists():
-        return set()
-    names = set()
+        return set(), {}
+    names, codes = set(), {}
     with open(p, encoding="utf-8", newline="") as fh:
         rd = csv.DictReader(fh, delimiter="	")
         cols = {(c or "").lower(): c for c in (rd.fieldnames or [])}
@@ -239,10 +254,13 @@ def build_dgidb_drugset(path):
             for col in (dn, dc):
                 if not col:
                     continue
-                k = _norm_drug(row.get(col))
+                raw = (row.get(col) or "").strip()
+                k = _norm_drug(raw)
                 if re.fullmatch(r"[a-z]{7,}", k):
                     names.add(k)
-    return names
+                elif k and _CODE_TOKEN.fullmatch(raw.split()[-1] if raw else ""):
+                    codes.setdefault(code_key(raw.split()[-1]), k)   # canonical -> DGIdb key
+    return names, codes
 
 
 def build_gazetteer(IX):
@@ -260,7 +278,7 @@ def build_gazetteer(IX):
 
 
 # ============================================================ (0) upstream
-def stage1(gaz=None, dgidb=None, codes=None):
+def stage1(gaz=None, dgidb=None, codes=None, dgidb_codes=None):
     counts = Counter()
     gaz_counts = Counter()                            # surfaces recovered by the ChEBI gazetteer
     code_counts = Counter()                           # surfaces recovered by the NCIt code names
@@ -293,14 +311,26 @@ def stage1(gaz=None, dgidb=None, codes=None):
                         d = dgidb_hits.setdefault(cf, {"occurrences": 0, "surfaces": set()})
                         d["occurrences"] += 1
                         d["surfaces"].add(w)
-            if codes:
+            if codes or dgidb_codes:
                 seen_c = set()
                 for m in _CODE_TOKEN.finditer(sent.get("text") or ""):
                     w = m.group(0)
-                    if w in codes and w not in seen_c:          # case-sensitive, as NCIt records it
+                    if w in seen_c:
+                        continue
+                    if codes and w in codes:                    # case-sensitive, as NCIt records it
                         seen_c.add(w)
                         if dash_normalize(w).casefold() not in tagged:
                             code_counts[w] += 1
+                    elif dgidb_codes:
+                        # DGIdb's own code names, matched on the canonical form so the corpus's
+                        # AEW541 meets DGIdb's AEW-541; recorded under DGIdb's key so the
+                        # drug -> gene layer downstream can look it up
+                        key = dgidb_codes.get(code_key(w))
+                        if key:
+                            seen_c.add(w)
+                            d = dgidb_hits.setdefault(key, {"occurrences": 0, "surfaces": set()})
+                            d["occurrences"] += 1
+                            d["surfaces"].add(w)
     for w, n in gaz_counts.items():                   # fold gazetteer hits into the surface tally
         counts[w] += n
     for w, n in code_counts.items():
@@ -470,8 +500,9 @@ def main():
           f"(label + synonyms, 4 key folds)")
     gaz = build_gazetteer(IX)
     print(f"GAZETTEER {len(gaz):,} ChEBI drug-name surfaces (INN-suffix) for NER backstop")
-    dgidb = build_dgidb_drugset(DGIDB_PATH)
-    print(f"DGIDB    {len(dgidb):,} clean DGIdb drug names scanned for in corpus text")
+    dgidb, dgidb_codes = build_dgidb_drugset(DGIDB_PATH)
+    print(f"DGIDB    {len(dgidb):,} clean DGIdb drug names + {len(dgidb_codes):,} code names "
+          f"scanned for in corpus text")
 
     # NCIt serves two jobs and so is loaded BEFORE stage 1, not just before the cascade.
     # (a) fallback: ChEBI is a small-molecule ontology, so every biologic in the corpus --
@@ -495,7 +526,7 @@ def main():
     codes = build_ncit_codeset(NCIT) if NCIT is not None else set()
     print(f"CODENAMES {len(codes):,} NCIt code-name surfaces (e.g. MCLA-128) for NER backstop")
 
-    rows, info, dgidb_hits = stage1(gaz, dgidb, codes)
+    rows, info, dgidb_hits = stage1(gaz, dgidb, codes, dgidb_codes)
     print(f"STAGE 1  files={info['n_files']:,}  CHEMICAL occ={info['occ']:,}  "
           f"unique {info['unique_before']:,}->{info['unique_after']:,}  "
           f"(+gazetteer: {info['gaz_surfaces']:,} surfaces, {info['gaz_occ']:,} occ"

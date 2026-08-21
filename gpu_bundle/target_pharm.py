@@ -454,8 +454,13 @@ def main():
             gr = chem_genes[sid] = defaultdict(set)
             for gene, tags in genes.items():
                 gr[gene].update(tags)
+            # For an INN the DGIdb key reads fine ("panitumumab"); for a code name it does not
+            # ("aew-541"), and the label is what the graph shows on the node. Prefer the corpus's
+            # own spelling when the drug is code-shaped -- the paper wrote AEW541, so show that.
+            surfs = sorted(meta.get("surfaces") or [], key=len, reverse=True)
+            label = surfs[0] if (surfs and any(c.isdigit() for c in name)) else name
             ent = tlib[sid] = {
-                "chebi_label": name, "n_target_roles": 0, "target_roles": [],
+                "chebi_label": label, "n_target_roles": 0, "target_roles": [],
                 "target_classes": [], "actions": sorted({t for ts in genes.values() for t in ts}),
                 "hgnc_targets": [{"hgnc_symbol": gx, "via_roles": sorted(rs), "source": "dgidb"}
                                  for gx, rs in sorted(gr.items())],
