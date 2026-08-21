@@ -84,6 +84,7 @@ import collections
 import csv
 import html
 import json
+import re
 import statistics
 import sys
 import time
@@ -694,7 +695,7 @@ glued to 14-3-3. The pocket was someone else's. Requiring a real chain takes REL
 leaves MDM2 (80), MCL1 (95) and BCL6 (139) untouched. Where a gene still has entries that hold only
 a peptide of it, the count is reported in its row.
 <b>Limits, in both directions.</b> The %(ligand_da)d Da filter admits detergents, lipids and
-nucleotides: CTNNB1's eight ligand entries are ADP, Mg and Na from co-crystallised partners, not
+nucleotides: CTNNB1's two ligand entries are ADP and Mg from co-crystallised partners, not
 binders in its groove, so a low count deserves a look at what the ligands actually are. And an
 <i>apo only</i> gene may simply never have been screened rather than lacking a pocket.
 <b>model only</b> means no experimental coordinates &mdash; an AlphaFold model exists for
@@ -835,6 +836,59 @@ def render(rows, d, out):
 
 
 # ---------------------------------------------------------------- main ------------------------
+def load_data(graph=None, data_root=DEFAULT_ROOT, cache=DEFAULT_CACHE, refresh=(),
+              offline=False, quiet=False):
+    """Everything the questions are answered from, in one dict. Split out of main() so that
+    audit_rankings.py re-runs the real loader instead of a copy of it that can drift."""
+    graph = graph or newest_graph(ROOT)
+    if not graph:
+        raise SystemExit(f"no *_M.html found in {ROOT}; pass --graph")
+    db = Path(data_root) / "databases"
+    payload = read_payload(graph)
+    node = {n['id']: n for n in payload['nodes'] if n.get('kind') == 'gene'}
+    pubs = collections.defaultdict(set)
+    for e in payload['edges']:
+        for x in e['sents']:
+            pubs[e['from']].add(x['pmid'])
+            pubs[e['to']].add(x['pmid'])
+    print(f"{Path(graph).name}: {len(node)} gene nodes")
+
+    docs = hgnc_docs(db)
+    entrez_all = {d['symbol']: int(d['entrez_id']) for d in docs
+                  if d.get('symbol') and d.get('entrez_id')}
+    acc_all = {d['symbol']: (d.get('uniprot_ids') or [None])[0] for d in docs if d.get('symbol')}
+    arm_all = {}
+    for d0 in docs:
+        s, loc = d0.get('symbol'), d0.get('location') or ''
+        mt = re.match(r'^(\d+|X|Y)([pq])', loc)
+        if s and mt:
+            arm_all[s] = mt.group(1) + mt.group(2)
+
+    dep = {r['gene']: r for r in csv.DictReader(
+        open(db / "depmap_dependency.tsv", encoding="utf-8"), delimiter="\t")}
+    with open(db / "CRISPRInferredCommonEssentials.csv", encoding="utf-8") as fh:
+        essential = {r[0].split(" (")[0] for r in csv.reader(fh) if r and r[0] != "Essentials"}
+    n_lines = max((int(r['n_lines']) for r in dep.values()), default=0)
+
+    ref = set(refresh or ())
+    rf = lambda k: ("all" in ref) or (k in ref)                              # noqa: E731
+    cache = Path(cache)
+    entrez = cached(cache, "gene_entrez", rf("entrez"), False,
+                    lambda: {g: entrez_all[g] for g in node if g in entrez_all})
+    lesions = cached(cache, "lesions", rf("lesions"), offline,
+                     lambda: collect_lesions(entrez, quiet),
+                     f" -- cBioPortal, {len(STUDIES)} cohorts x {len(entrez)} genes")
+    arm = cached(cache, "armlevel", rf("armlevel"), offline,
+                 lambda: collect_armlevel(entrez, lesions, arm_all, quiet),
+                 " -- sample-level co-amplification")
+    pdb = cached(cache, "pdb", rf("pdb"), offline,
+                 lambda: collect_pdb(sorted(node), acc_all, quiet),
+                 f" -- RCSB, 2 searches x {len(node)} genes")
+
+    return dict(node=node, pubs=pubs, dep=dep, essential=essential, lesions=lesions, arm=arm,
+                pdb=pdb, medmut=median_mutation(lesions), graph=str(graph), n_lines=n_lines)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -853,54 +907,7 @@ def main():
     ap.add_argument("--quiet", action="store_true", help="no per-batch progress on stderr")
     args = ap.parse_args()
 
-    graph = args.graph or newest_graph(ROOT)
-    if not graph:
-        raise SystemExit(f"no *_M.html found in {ROOT}; pass --graph")
-    db = Path(args.data_root) / "databases"
-    payload = read_payload(graph)
-    node = {n['id']: n for n in payload['nodes'] if n.get('kind') == 'gene'}
-    pubs = collections.defaultdict(set)
-    for e in payload['edges']:
-        for x in e['sents']:
-            pubs[e['from']].add(x['pmid'])
-            pubs[e['to']].add(x['pmid'])
-    print(f"{Path(graph).name}: {len(node)} gene nodes")
-
-    docs = hgnc_docs(db)
-    entrez_all = {d['symbol']: int(d['entrez_id']) for d in docs
-                  if d.get('symbol') and d.get('entrez_id')}
-    acc_all = {d['symbol']: (d.get('uniprot_ids') or [None])[0] for d in docs if d.get('symbol')}
-    import re
-    arm_all = {}
-    for d0 in docs:
-        s, loc = d0.get('symbol'), d0.get('location') or ''
-        mt = re.match(r'^(\d+|X|Y)([pq])', loc)
-        if s and mt:
-            arm_all[s] = mt.group(1) + mt.group(2)
-
-    dep = {r['gene']: r for r in csv.DictReader(
-        open(db / "depmap_dependency.tsv", encoding="utf-8"), delimiter="\t")}
-    with open(db / "CRISPRInferredCommonEssentials.csv", encoding="utf-8") as fh:
-        essential = {r[0].split(" (")[0] for r in csv.reader(fh) if r and r[0] != "Essentials"}
-    n_lines = max((int(r['n_lines']) for r in dep.values()), default=0)
-
-    ref = set(args.refresh)
-    rf = lambda k: ("all" in ref) or (k in ref)                              # noqa: E731
-    cache = Path(args.cache)
-    entrez = cached(cache, "gene_entrez", rf("entrez"), False,
-                    lambda: {g: entrez_all[g] for g in node if g in entrez_all})
-    lesions = cached(cache, "lesions", rf("lesions"), args.offline,
-                     lambda: collect_lesions(entrez, args.quiet),
-                     f" -- cBioPortal, {len(STUDIES)} cohorts x {len(entrez)} genes")
-    arm = cached(cache, "armlevel", rf("armlevel"), args.offline,
-                 lambda: collect_armlevel(entrez, lesions, arm_all, args.quiet),
-                 " -- sample-level co-amplification")
-    pdb = cached(cache, "pdb", rf("pdb"), args.offline,
-                 lambda: collect_pdb(sorted(node), acc_all, args.quiet),
-                 f" -- RCSB, 2 searches x {len(node)} genes")
-
-    d = dict(node=node, pubs=pubs, dep=dep, essential=essential, lesions=lesions, arm=arm,
-             pdb=pdb, medmut=median_mutation(lesions), graph=str(graph), n_lines=n_lines)
+    d = load_data(args.graph, args.data_root, args.cache, args.refresh, args.offline, args.quiet)
     rows = build_rows(d)
     doc, f = render(rows, d, args.out)
 
