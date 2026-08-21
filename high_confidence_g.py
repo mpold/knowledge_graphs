@@ -99,7 +99,7 @@ DATA_ROOT = ROOT / "kaggle_working"
 # module-level paths; (re)bound to DATA_ROOT by set_data_root() so --data-root can retarget them
 OUT_DIR = XML_DIR = SENT_DIR = None
 RE_FILE = PMC_YEARS = TARGET_FILE = None
-CHIMER_KB = CHIMER_SEQ = DEPMAP = None
+CHIMER_KB = CHIMER_SEQ = DEPMAP = HGNC_DIR = None
 # every lung_* project caches its slice of the shared corpus under this name
 CONTRIB_NAME = "corpus_contrib.json"
 DISEASE_LIB = CHEM_LIB = None
@@ -110,7 +110,7 @@ def set_data_root(data_root):
     """Point every input/output path at `data_root` (the pipeline's output tree)."""
     global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, PMC_YEARS
     global TARGET_FILE, DISEASE_LIB, CHEM_LIB, JSON_OUT, GRAPH_OUT
-    global CHIMER_KB, CHIMER_SEQ, DEPMAP
+    global CHIMER_KB, CHIMER_SEQ, DEPMAP, HGNC_DIR
     DATA_ROOT = Path(data_root).resolve()
     OUT_DIR = DATA_ROOT / "TRIPLES"
     XML_DIR = DATA_ROOT / "experimental_ner"   # input XML corpus (may be empty in the bundle)
@@ -123,6 +123,8 @@ def set_data_root(data_root):
     CHIMER_SEQ = DATA_ROOT / "databases" / "ChimerSeq4.tsv"    # TCGA RNA-seq: evidence only
     # DepMap CRISPR dependency, reduced per gene by depmap_to_tsv.py; optional
     DEPMAP = DATA_ROOT / "databases" / "depmap_dependency.tsv"
+    # HGNC, already staged for stage 2; used here only to normalise ChimerDB's gene symbols
+    HGNC_DIR = DATA_ROOT / "databases"
     # normalization libraries carrying the in-place phenotype / non_chemical flags
     DISEASE_LIB = DATA_ROOT / "DISEASE" / "disease.json"
     CHEM_LIB = DATA_ROOT / "CHEMICAL" / "chemical.json"
@@ -776,6 +778,52 @@ def _dependency():
     return out
 
 
+# ChimerDB records symbols as the source paper wrote them, so one partner arrives under several
+# names: FLI1's two "partners" are EWS and EWSR1, which is one gene written twice, and BRD4's are
+# C15orf55 and NUTM1, likewise. Counting raw strings therefore inflates `fn`, and `fn` is what the
+# ranking weights (>=5 partners +2, 2-4 +1.25, one +0.5) -- so FLI1, whose single partner is the
+# most famous fusion in sarcoma, was scoring as a two-partner gene.
+#
+# Two symbols ChimerKB uses that HGNC cannot resolve, bridged by hand rather than by a fuzzy rule.
+# A rule loose enough to catch either would merge genuinely distinct family members:
+#   TMP3   a transposition of TPM3 in ALK's partner list; not an alias of anything
+#   PTC6   a fusion nickname (RET/PTC6), not a gene symbol; TRIM24 is the gene
+CURATED_SYMBOL = {"TMP3": "TPM3", "PTC6": "TRIM24"}
+
+
+def _hgnc_alias():
+    """{alias or previous symbol -> approved symbol}, built from the staged HGNC set.
+
+    Approved symbol wins over anyone else's alias, the same precedence map_gene() uses in stage 2:
+    prev_symbol and alias_symbol collide with live symbols often enough that the naive map renames
+    real genes. A token two different genes claim is dropped rather than guessed. The index is also
+    keyed without punctuation, because HGNC writes AF-1P where the papers write AF1P."""
+    hits = sorted(Path(HGNC_DIR).glob("hgnc_complete_set_*.json")) if HGNC_DIR else []
+    if not hits:
+        return {}, set()
+    docs = json.loads(hits[-1].read_text(encoding="utf-8"))["response"]["docs"]
+    approved = {d["symbol"].upper() for d in docs if d.get("symbol")}
+    claim = collections.defaultdict(set)
+    for d in docs:
+        sym = (d.get("symbol") or "").upper()
+        if not sym:
+            continue
+        for field in ("prev_symbol", "alias_symbol"):
+            for a in d.get(field) or []:
+                a = a.strip().upper()
+                if a and a not in approved:
+                    claim[a].add(sym)
+    alias = {a: next(iter(v)) for a, v in claim.items() if len(v) == 1}
+    squashed = {}
+    for a, g in alias.items():
+        k = a.replace("-", "").replace("_", "").replace(" ", "")
+        if k not in alias:
+            squashed.setdefault(k, set()).add(g)
+    alias.update({k: next(iter(v)) for k, v in squashed.items() if len(v) == 1 and k not in alias})
+    alias.update(CURATED_SYMBOL)
+    return alias, approved
+
+
 def _fusion_partners():
     """gene -> (side, partners, n_partners, seq_samples, diseases) from ChimerDB 4.0.
 
@@ -792,13 +840,25 @@ def _fusion_partners():
     while already losing PAX3, FOXO1, YAP1 and MYB, and >=5 loses more. No threshold separates
     signal from noise here, so ChimerSeq contributes a COUNT (`fseq`, In-Frame samples touching
     the gene) and never the flag itself.
+
+    EVERY SYMBOL IS NORMALISED to its HGNC-approved form first -- see _hgnc_alias(). Without it a
+    partner recorded under two names counts twice, and `fn` is a scoring term.
     """
     side, partners, disease, seq = {}, collections.defaultdict(set), collections.defaultdict(set), {}
     supp = set()                        # genes owing a partner to FUSION_SUPPLEMENT
+    alias, approved = _hgnc_alias()     # empty if HGNC is not staged: symbols pass through as-is
+
+    def norm(g):
+        g = (g or "").strip().upper()
+        if not g or g in approved:
+            return g
+        if g in alias:
+            return alias[g]
+        return alias.get(g.replace("-", "").replace("_", "").replace(" ", ""), g)
     try:
         with open(CHIMER_KB, encoding="utf-8", newline="") as fh:
             for r in csv.DictReader(fh, delimiter="	"):
-                h, t = (r.get("H_gene") or "").strip(), (r.get("T_gene") or "").strip()
+                h, t = norm(r.get("H_gene")), norm(r.get("T_gene"))
                 if not h or not t:
                     continue
                 for g, other, s in ((h, t, "5p"), (t, h, "3p")):
@@ -808,7 +868,8 @@ def _fusion_partners():
                         disease[g].add(r["Disease"].strip())
     except OSError:
         return {}
-    for h, t, _why in FUSION_SUPPLEMENT:    # a known gap in ChimerKB, closed by hand
+    for h0, t0, _why in FUSION_SUPPLEMENT:  # a known gap in ChimerKB, closed by hand
+        h, t = norm(h0), norm(t0)
         for g, other, sd in ((h, t, "5p"), (t, h, "3p")):
             side[g] = sd if side.get(g, sd) == sd else "both"
             partners[g].add(other)
@@ -820,7 +881,7 @@ def _fusion_partners():
                 if r.get("Frame") != "In-Frame":      # only these can make a chimeric PROTEIN
                     continue
                 bc = r.get("BarcodeID") or ""
-                for g in ((r.get("H_gene") or "").strip(), (r.get("T_gene") or "").strip()):
+                for g in (norm(r.get("H_gene")), norm(r.get("T_gene"))):
                     if g:
                         hit[g].add(bc)
             seq = {g: len(v) for g, v in hit.items()}
