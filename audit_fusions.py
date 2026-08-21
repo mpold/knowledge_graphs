@@ -35,11 +35,18 @@ WHAT IT CHECKS (1-5 fail the run, 6-7 are drift reports)
   7. promoter swaps   Flagged genes whose partners include an immunoglobulin or TCR locus. These
                       are promoter substitutions, not chimeric proteins -- MYC and BCL6 arrive
                       this way -- and the distinction is invisible in the flag itself.
+  8. symbol aliasing  No partner list may hold two symbols for the SAME gene. ChimerDB writes what
+                      the paper wrote, so FLI1 carried EWS and EWSR1 and was counted as a
+                      two-partner gene -- one being the most famous fusion in sarcoma, written
+                      twice. `fn` is a scoring term, so this is arithmetic, not cosmetics. FAILS
+                      the run: the loader normalises through HGNC and a duplicate means it
+                      stopped.
 
 Run::  python audit_fusions.py [--data-root kaggle_working] [--graph PATH] [--quiet]
-Exit code 0 when checks 1-5 pass (or staging is absent), 1 otherwise.
+Exit code 0 when checks 1-5 and 8 pass (or staging is absent), 1 otherwise.
 """
 import argparse
+import collections
 import csv
 import json
 import re
@@ -127,14 +134,26 @@ def audit(data_root, graph, quiet=False):
     fails += bool(hit)
 
     # -- 4. ChimerSeq must not set flags ----------------------------------------------------
+    # Compare like with like: the loader normalises symbols through HGNC, so the reference
+    # set has to be normalised too. Without this the check reports CARS1, CENATAC and every
+    # other renamed gene as if ChimerSeq had smuggled it in.
+    alias, approved = HC._hgnc_alias()
+
+    def canon(g):
+        g = (g or "").strip().upper()
+        if not g or g in approved:
+            return g
+        return alias.get(g, alias.get(g.replace("-", "").replace("_", "")
+                                      .replace(" ", ""), g))
+
     kb_genes = set()
     with open(HC.CHIMER_KB, encoding="utf-8", newline="") as fh:
         for r in csv.DictReader(fh, delimiter="\t"):
-            for g in ((r.get("H_gene") or "").strip(), (r.get("T_gene") or "").strip()):
+            for g in (canon(r.get("H_gene")), canon(r.get("T_gene"))):
                 if g:
                     kb_genes.add(g)
     # the curated supplement is allowed to add genes ChimerKB lacks; ChimerSeq is not
-    supp_genes = {g for pair in HC.FUSION_SUPPLEMENT for g in pair[:2]}
+    supp_genes = {canon(g) for pair in HC.FUSION_SUPPLEMENT for g in pair[:2]}
     extra = sorted(set(fusion) - kb_genes - supp_genes)
     print(f"[4] flags come from ChimerKB or the curated supplement "
           f"({len(supp_genes)} genes) ... {'yes' if not extra else 'NO: ' + str(extra[:8])}")
@@ -178,7 +197,25 @@ def audit(data_root, graph, quiet=False):
             ig = [p for p in fusion[g][1] if IG_TR.match(p)]
             print(f"      {g:9} {fusion[g][0]:5} {len(fusion[g][1]):>3} partners incl. {', '.join(ig[:3])}")
 
-    print(f"\n{'FAIL' if fails else 'PASS'}: checks 1-5 {'found problems' if fails else 'are clean'}")
+    # -- 8. two symbols for one gene inside a partner list ---------------------------------
+    dup = {}
+    for g, v in fusion.items():
+        seen = collections.defaultdict(list)
+        for p in v[1]:
+            seen[canon(p)].append(p)
+        d = {k: w for k, w in seen.items() if len(w) > 1}
+        if d:
+            dup[g] = d
+    print(f"\n[8] one symbol per partner ............. {len(fusion) - len(dup)}/{len(fusion)} genes"
+          + ("" if not dup else "  ALIASED: " + ", ".join(
+              f"{g} ({' + '.join(sorted(next(iter(w.values()))))})" for g, w in
+              list(dup.items())[:4])))
+    if not alias:
+        print("    (HGNC not staged, so nothing was normalised and nothing can be checked)")
+    fails += bool(dup)
+
+    print(f"\n{'FAIL' if fails else 'PASS'}: checks 1-5 and 8 "
+          f"{'found problems' if fails else 'are clean'}")
     return 1 if fails else 0
 
 
