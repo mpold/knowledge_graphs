@@ -80,10 +80,12 @@ PIPELINE
    prior-work attributions ("has been shown", "previous studies", ...) and
    references / URLs / DOIs are removed by regex.
 
-4. ORIGINAL RESULT (cue gate + BioBERT) -- surviving candidates are embedded with
-   BioBERT and kept only when they (a) match >= 1 result cue (finding / change /
-   relation / statistic regex -- a hard precision gate) AND (b) reach the
-   positive-vs-negative anchor margin >= RESULT_MARGIN. The cue gate supplies
+4. ORIGINAL RESULT (cue gate + BioBERT) -- a surviving candidate is kept only when it
+   (a) matches >= 1 result cue (finding / change / relation / statistic regex -- a
+   hard precision gate) AND (b) reaches the positive-vs-negative anchor margin >=
+   RESULT_MARGIN. The cue gate runs first, so only cue-bearing candidates are
+   embedded with BioBERT -- a cue-less one is dropped whatever its embedding says
+   (about two thirds of all candidates on a 4-file sample). The cue gate supplies
    precision; BioBERT re-ranks within the cue-bearing candidates (raw mean-pooled
    embeddings are anisotropic, so the margin alone is too weak to use on its own).
 
@@ -102,6 +104,23 @@ OUTPUT
     summaries, the per-section distribution (incl. figure-legend / table-heading),
     the entity-label distribution per format, and the full list of zero-sentence
     output files.
+
+THROUGHPUT
+----------
+None of these change which sentences or entities are written (fp16 aside, see below):
+
+  * Files are processed in chunks of ``BIOBERT_FILE_BATCH`` (16): one embedding pass
+    and one NER pass per chunk, so the BioBERT batches stay full.
+  * XML parsing + candidate screening (``collect_chunk``) runs in
+    ``BIOBERT_PARSE_WORKERS`` worker processes (default min(4, cores - 1); 0 = inline),
+    a bounded number of chunks ahead of the GPU, so lxml never stalls the models.
+  * Every GPU (``BIOBERT_GPUS``, default all visible) gets its own scorer + NER replica;
+    chunks go to whichever is free and are written back in input order.
+  * Embedding and NER inputs are fed in LENGTH order (padding is per batch) and mapped
+    back to input order. Batch sizes: ``BIOBERT_BATCH`` (128), ``BIOBERT_NER_BATCH`` (64).
+  * On CUDA the embedding model and the NER models run in float16. NER spans can differ
+    from a float32 run only where a score sits within ~1e-3 of ``BIOBERT_NER_MIN_SCORE``;
+    ``BIOBERT_NER_FP16=0`` restores float32 NER.
 
 ENVIRONMENT
 -----------
@@ -226,7 +245,7 @@ MODEL_ID = os.environ.get("BIOBERT_MODEL", "dmis-lab/biobert-v1.1")
 # the precision work and BioBERT re-ranks within the cue-bearing candidates.
 RESULT_MARGIN = float(os.environ.get("BIOBERT_RESULT_MARGIN", "0.01"))
 # Embedding micro-batch size and max tokens per sentence.
-EMB_BATCH = int(os.environ.get("BIOBERT_BATCH", "32"))
+EMB_BATCH = int(os.environ.get("BIOBERT_BATCH", "128"))
 EMB_MAXLEN = int(os.environ.get("BIOBERT_MAXLEN", "256"))
 # How many input files to process per inference chunk. Candidates from this many
 # files are gathered, then embedded in ONE pass and NER-tagged in ONE pass, so the
@@ -234,6 +253,17 @@ EMB_MAXLEN = int(os.environ.get("BIOBERT_MAXLEN", "256"))
 # purely a throughput knob -- output is identical to processing one file at a time
 # (each sentence is scored independently and padding is masked). Tune for memory.
 BATCH_FILES = int(os.environ.get("BIOBERT_FILE_BATCH", "16"))
+# Worker processes that parse the XML + screen candidates AHEAD of the GPU, so lxml and the
+# sentence splitter no longer stall the models (and no longer fight the GPU threads for the
+# GIL). Output is identical for any value; 0 parses inline as before. Default: one core per
+# worker, keeping one free for the GPU threads, at most 4.
+_PW = os.environ.get("BIOBERT_PARSE_WORKERS", "").strip()
+PARSE_WORKERS = int(_PW) if _PW else max(0, min(4, (os.cpu_count() or 1) - 1))
+# How many CUDA devices to use (default: every visible one). Each GPU gets its own copy of
+# the scorer + NER models and file chunks are dealt out to whichever GPU is free -- Kaggle's
+# T4 x2 otherwise leaves the second card idle. Output is identical for any value: chunks are
+# written back in input order. BIOBERT_GPUS=1 restores the single-device run.
+_GPUS = os.environ.get("BIOBERT_GPUS", "").strip()
 # Optional cap on number of input files (handy for a smoke test); empty = all.
 _MAX = os.environ.get("BIOBERT_MAX_FILES", "").strip()
 MAX_FILES = int(_MAX) if _MAX else None
@@ -268,7 +298,11 @@ NER_ENABLED = os.environ.get("BIOBERT_NER", "1").strip().lower() not in ("0", "f
 LEXICON_ENABLED = os.environ.get("DRUG_LEXICON", "1").strip().lower() not in ("0", "false", "no")
 # Drop low-confidence entity spans below this aggregated score.
 NER_MIN_SCORE = float(os.environ.get("BIOBERT_NER_MIN_SCORE", "0.5"))
-NER_BATCH = int(os.environ.get("BIOBERT_NER_BATCH", "16"))
+NER_BATCH = int(os.environ.get("BIOBERT_NER_BATCH", "64"))
+# Run the NER models in float16 on CUDA (~2x the throughput on a T4). Spans can differ from
+# a float32 run only where an aggregated score sits within ~1e-3 of NER_MIN_SCORE or two
+# labels tie; BIOBERT_NER_FP16=0 restores float32.
+NER_FP16 = os.environ.get("BIOBERT_NER_FP16", "1").strip().lower() not in ("0", "false", "no")
 # Outside / non-entity classes to drop. The pipeline only ignores "O" by default,
 # but alvaroalon2/biobert_diseases_ner names its outside class "0" (the digit), so
 # its non-entity spans (e.g. "in adults.") would otherwise leak in as entities.
@@ -298,20 +332,64 @@ NEG_ANCHORS = [
 ]
 
 
-def _pick_device(torch):
-    """Return (device_str, torch_dtype, pipeline_device) for the best backend."""
+def _pick_device(torch, gpu=0):
+    """Return (device_str, torch_dtype, pipeline_device) for the best backend.
+    `gpu` selects the CUDA device index; ignored on MPS / CPU."""
     if torch.cuda.is_available():
-        return "cuda", torch.float16, 0
+        return f"cuda:{gpu}", torch.float16, gpu
     if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
         return "mps", torch.float32, "mps"
     return "cpu", torch.float32, -1
+
+
+def gpu_count():
+    """CUDA devices to spread the work over: BIOBERT_GPUS capped at what is visible, >= 1."""
+    try:
+        import torch
+        visible = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    except ImportError:
+        visible = 0
+    want = int(_GPUS) if _GPUS else visible
+    return max(1, min(want, visible))
+
+
+def ordered_map(fn, items, replicas):
+    """Yield fn(replica, item) for each item, IN INPUT ORDER, running one worker thread per
+    replica (one per GPU). torch releases the GIL during kernels, so threads keep every GPU
+    busy without the cost of separate processes. A single replica runs inline."""
+    if len(replicas) < 2:
+        for it in items:
+            yield fn(replicas[0], it)
+        return
+    import queue
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+    free = queue.Queue()
+    for r in replicas:
+        free.put(r)
+
+    def task(it):
+        r = free.get()
+        try:
+            return fn(r, it)
+        finally:
+            free.put(r)
+
+    window = deque()                     # bounded look-ahead, so results never pile up
+    with ThreadPoolExecutor(len(replicas)) as ex:
+        for it in items:
+            window.append(ex.submit(task, it))
+            if len(window) > 2 * len(replicas):
+                yield window.popleft().result()
+        while window:
+            yield window.popleft().result()
 
 
 class BioBERTScorer:
     """Wrap BioBERT for original-result scoring via embedding-anchor margins."""
 
     def __init__(self, model_id=MODEL_ID, token=HF_TOKEN, batch_size=EMB_BATCH,
-                 max_len=EMB_MAXLEN):
+                 max_len=EMB_MAXLEN, gpu=0):
         try:
             import torch
             from transformers import AutoModel, AutoTokenizer
@@ -326,7 +404,7 @@ class BioBERTScorer:
         tok_kwargs = {"token": token} if token else {}
         self.tok = AutoTokenizer.from_pretrained(model_id, **tok_kwargs)
 
-        self.device, self.dtype, _ = _pick_device(torch)
+        self.device, self.dtype, _ = _pick_device(torch, gpu)
 
         self.model = AutoModel.from_pretrained(
             model_id, dtype=self.dtype, low_cpu_mem_usage=True, **tok_kwargs)
@@ -339,9 +417,14 @@ class BioBERTScorer:
         self.neg = F.normalize(self._embed(NEG_ANCHORS).mean(0), p=2, dim=0)
 
     def _embed(self, texts):
-        """Mean-pooled, masked, L2-normalized BioBERT embeddings -> tensor [N, H]."""
+        """Mean-pooled, masked, L2-normalized BioBERT embeddings -> tensor [N, H].
+
+        Texts are batched in length order (padding is per batch, so mixing a 10-token
+        sentence with a 250-token one wastes most of the batch) and returned in input order."""
         torch = self.torch
         F = torch.nn.functional
+        order = sorted(range(len(texts)), key=lambda k: len(texts[k]))
+        texts = [texts[k] for k in order]
         out = []
         for i in range(0, len(texts), self.batch_size):
             chunk = texts[i:i + self.batch_size]
@@ -355,7 +438,12 @@ class BioBERTScorer:
             counts = mask.sum(dim=1).clamp(min=1e-9)
             mean = summed / counts
             out.append(F.normalize(mean.float(), p=2, dim=1).cpu())
-        return torch.cat(out, dim=0) if out else torch.empty(0)
+        if not out:
+            return torch.empty(0)
+        emb = torch.cat(out, dim=0)
+        restored = torch.empty_like(emb)
+        restored[torch.tensor(order)] = emb           # back to input order
+        return restored
 
     def result_sims(self, sentences):
         """Return [(sim_pos, sim_neg), ...] cosine similarities to each centroid."""
@@ -397,7 +485,7 @@ class BioBERTNER:
     """
 
     def __init__(self, model_ids=NER_MODELS, token=HF_TOKEN, min_score=NER_MIN_SCORE,
-                 batch_size=NER_BATCH):
+                 batch_size=NER_BATCH, gpu=0):
         try:
             import torch
             from transformers import pipeline
@@ -416,14 +504,16 @@ class BioBERTNER:
                 self.lexicon = lex if lex.ready else None
             except Exception as exc:                       # pragma: no cover
                 self.load_errors.append(("drug_lexicon", f"{type(exc).__name__}: {exc}"))
-        self.device, _, pipe_dev = _pick_device(torch)
+        self.device, dtype, pipe_dev = _pick_device(torch, gpu)
+        if not NER_FP16:
+            dtype = torch.float32
         tok_kwargs = {"token": token} if token else {}
 
         for mid in model_ids:
             try:
                 pipe = pipeline(
                     "token-classification", model=mid, tokenizer=mid,
-                    aggregation_strategy="first", device=pipe_dev, **tok_kwargs)
+                    aggregation_strategy="first", device=pipe_dev, dtype=dtype, **tok_kwargs)
                 self.pipes.append((_model_domain(mid), mid, pipe))
             except Exception as exc:                       # pragma: no cover
                 self.load_errors.append((mid, f"{type(exc).__name__}: {exc}"))
@@ -438,16 +528,20 @@ class BioBERTNER:
         if not sentences or not self.pipes:
             return [[] for _ in sentences]
 
+        # feed the pipelines in length order so each padded batch holds similar lengths;
+        # results are mapped back through `order`, so the output is in input order
+        order = sorted(range(len(sentences)), key=lambda k: len(sentences[k]))
+        by_len = [sentences[k] for k in order]
         for domain, _mid, pipe in self.pipes:
             try:
-                results = pipe(sentences, batch_size=self.batch_size)
+                results = pipe(by_len, batch_size=self.batch_size)
             except Exception:                              # pragma: no cover
                 continue
             # pipeline returns a list-of-lists when given a list of inputs; a
             # single-input call would return one list -- normalize either way.
             if results and isinstance(results[0], dict):
                 results = [results]
-            for idx, ents in enumerate(results):
+            for idx, ents in zip(order, results):
                 bucket = per_sentence[idx]
                 for e in ents or []:
                     score = float(e.get("score", 0.0))
@@ -908,7 +1002,15 @@ def collect_candidates(path, ner=None):
     return record, candidates
 
 
-def process_batch(paths, scorer, ner=None):
+def collect_chunk(paths):
+    """Parse + candidate-screen a chunk of files: the CPU half of :func:`process_batch`.
+
+    A module-level function of plain data in, plain data out, so it can run in a worker
+    process (see PARSE_WORKERS) while the GPU is busy with the previous chunk."""
+    return [collect_candidates(p) for p in paths]
+
+
+def process_batch(paths, scorer, ner=None, collected=None):
     """Process a chunk of files with ONE BioBERT embedding pass and ONE NER pass.
 
     Candidates from every file in ``paths`` are flattened into a single list, embedded
@@ -917,29 +1019,34 @@ def process_batch(paths, scorer, ner=None):
     sliced back to their originating files. This is throughput-only: because each
     sentence is scored independently and padding is masked, the per-file records are
     byte-for-byte identical to calling ``process_file`` on each path in turn.
+    ``collected`` is ``collect_chunk(paths)`` when it was already computed elsewhere
+    (a parse worker); by default the files are parsed here.
     """
+    if collected is None:
+        collected = collect_chunk(paths)
     records, per_file_cands = [], []
-    for path in paths:
-        rec, cands = collect_candidates(path, ner)
+    for rec, cands in collected:
+        rec["ner_models"] = ner.model_ids if ner is not None else []
         records.append(rec)
         per_file_cands.append(cands)
 
-    # 1) ONE embedding pass over every candidate in the chunk
-    flat_texts = [c[0] for cands in per_file_cands for c in cands]
+    # 1) ONE embedding pass over the chunk's cue-bearing candidates. The cue gate is a
+    # hard gate applied before the margin, so a cue-less candidate is dropped whatever its
+    # embedding says -- embedding it would be pure waste (it is most of the candidates).
+    flat_texts = [c[0] for cands in per_file_cands for c in cands if c[3]]
     if flat_texts:
-        print(f"    embedding {len(flat_texts)} candidate(s) across "
+        print(f"    embedding {len(flat_texts)} cue-bearing candidate(s) across "
               f"{len(paths)} file(s) with BioBERT ...", flush=True)
-    flat_sims = scorer.result_sims(flat_texts)
+    sims_iter = iter(scorer.result_sims(flat_texts))
 
-    # 2) slice sims back per file and apply the cue + margin gate
-    pos = 0
+    # 2) walk the candidates in order, pairing each cue-bearing one with its sims, and
+    # apply the cue + margin gate
     for rec, cands in zip(records, per_file_cands):
-        sims = flat_sims[pos:pos + len(cands)]
-        pos += len(cands)
         matched_types = set()
-        for (text, stype, stitle, cues), (sim_pos, sim_neg) in zip(cands, sims):
+        for text, stype, stitle, cues in cands:
             if not cues:                           # cue hard-gate (precision) -> drop
                 continue
+            sim_pos, sim_neg = next(sims_iter)
             margin = sim_pos - sim_neg
             if margin < RESULT_MARGIN:             # weak BioBERT re-rank -> drop
                 continue
@@ -1332,18 +1439,24 @@ def main():
     if MAX_FILES:
         files = files[:MAX_FILES]
 
+    n_gpu = gpu_count()
     print(f"loading BioBERT ({MODEL_ID}) ...", flush=True)
-    scorer = BioBERTScorer()               # exits with install hint if unavailable
-    print(f"BioBERT model loaded  : {scorer.model_id}  (device={scorer.device})",
+    # one scorer (+ NER) per GPU; replicas[0] is the one reported in the summary
+    scorers = [BioBERTScorer(gpu=g) for g in range(n_gpu)]   # exits with install hint if unavailable
+    scorer = scorers[0]
+    devices = ", ".join(sc.device for sc in scorers)
+    print(f"BioBERT model loaded  : {scorer.model_id}  (device={devices})",
           flush=True)
 
     ner = None
+    ners = [None] * n_gpu
     if NER_ENABLED:
         print(f"loading BioBERT NER ({', '.join(NER_MODELS)}) ...", flush=True)
-        ner = BioBERTNER()                 # best-effort: bad ids recorded, not fatal
+        ners = [BioBERTNER(gpu=g) for g in range(n_gpu)]    # best-effort: bad ids recorded, not fatal
+        ner = ners[0]
         if ner.pipes:
             print(f"BioBERT NER loaded    : {', '.join(ner.model_ids)} "
-                  f"(device={ner.device})", flush=True)
+                  f"(device={', '.join(n.device for n in ners)})", flush=True)
         else:
             print("BioBERT NER           : NO models loaded "
                   "(entities will be empty) -- see load errors below", flush=True)
@@ -1367,7 +1480,7 @@ def main():
         "zero_files": [],
         "ner_enabled": NER_ENABLED,
         "ner_models": (ner.model_ids if ner is not None else []),
-        "ner_device": (ner.device if ner is not None else "n/a"),
+        "ner_device": (", ".join(n.device for n in ners) if ner is not None else "n/a"),
         "ner_errors": (ner.load_errors if ner is not None else []),
         "by_format": {
             "jats": empty_fmt_stats(),
@@ -1379,14 +1492,42 @@ def main():
     import json
     n_total = len(files)
     done = 0
-    for start in range(0, n_total, BATCH_FILES):
+
+    pool = None
+    if PARSE_WORKERS:
+        from concurrent.futures import ProcessPoolExecutor
+        pool = ProcessPoolExecutor(PARSE_WORKERS)
+        print(f"XML parsing           : {PARSE_WORKERS} worker process(es), ahead of the GPU "
+              f"(BIOBERT_PARSE_WORKERS=0 parses inline)", flush=True)
+
+    def _parsed_ahead(starts):
+        """Yield (start, future-or-None) per chunk, keeping the parse pool a few chunks ahead
+        of the GPU consumer (bounded, so parsed candidates never pile up in memory)."""
+        if pool is None:
+            yield from ((s, None) for s in starts)
+            return
+        from collections import deque
+        window = deque()
+        for s in starts:
+            window.append((s, pool.submit(collect_chunk, files[s:s + BATCH_FILES])))
+            if len(window) > 2 * PARSE_WORKERS:
+                yield window.popleft()
+        while window:
+            yield window.popleft()
+
+    def _run_chunk(replica, item):
+        sc, nr = replica
+        start, parsed = item
         chunk = files[start:start + BATCH_FILES]
+        collected = parsed.result() if parsed is not None else None
         t0 = time.perf_counter()
         print(f"[{start + 1}-{start + len(chunk)}/{n_total}] processing "
-              f"{len(chunk)} file(s) in one inference batch ...", flush=True)
-        recs = process_batch(chunk, scorer, ner)
-        dt = time.perf_counter() - t0
+              f"{len(chunk)} file(s) in one inference batch on {sc.device} ...", flush=True)
+        return chunk, process_batch(chunk, sc, nr, collected), time.perf_counter() - t0
 
+    for chunk, recs, dt in ordered_map(_run_chunk,
+                                       _parsed_ahead(range(0, n_total, BATCH_FILES)),
+                                       list(zip(scorers, ners))):
         for rec in recs:
             done += 1
             print(f"  [{done}/{n_total}] {rec['source_file']}: "
@@ -1434,10 +1575,12 @@ def main():
 
         print(f"    chunk done in {dt:.1f}s "
               f"({dt / max(len(chunk), 1):.1f}s/file)", flush=True)
+    if pool is not None:
+        pool.shutdown()
 
     generated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(SUMMARY_PATH, "w", encoding="utf-8") as fh:
-        fh.write(render_html(agg, generated_at, scorer.model_id, scorer.device))
+        fh.write(render_html(agg, generated_at, scorer.model_id, devices))
 
     jats, tei = agg["by_format"]["jats"], agg["by_format"]["tei"]
     total_sent = jats["total_sentences"] + tei["total_sentences"]

@@ -9,8 +9,8 @@ candidate sentences of the lung_adeno corpus, but only **181 (27%)** were tagged
 all — and 18 of those were labelled `GENETIC`, not `CHEMICAL`:
 
 | bevacizumab | nivolumab | pembrolizumab | cetuximab | trastuzumab | atezolizumab |
-|---|---|---|---|---|---|
-| 213 | 150 | 90 | 87 | 59 | 39 |
+|-------------|-----------|---------------|-----------|-------------|--------------|
+| 213         | 150       | 90            | 87        | 59          | 39           |
 
 Then normalisation removes most of the survivors: across the whole corpus only **2** `-mab`
 surfaces got a ChEBI id, while durvalumab, dupilumab, inetetamab (×42) and tinurilimab (×20) were

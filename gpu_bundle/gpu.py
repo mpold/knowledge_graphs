@@ -77,7 +77,7 @@ Dependency / strategy notes:
         bigbio_to_re.py  BigBIO KB corpus (HF `datasets`) -> entity-blinded TSVs
         train_re.py      fine-tune BioBERT -> ppi-biobert-re/ checkpoint (imports calibration.py)
         calibration.py   evaluate on test + fit a probability calibrator
-                         (-> ppi-biobert-re/calibration.json, summaries/calibration.html)
+                         (-> ppi-biobert-re/calibration.json, summaries/calibration_ppi.html)
     GPU; needs internet + the `datasets` library to download BigBIO bioinfer on
     first use. Its output, ppi-biobert-re/, is exactly what step 16 loads via
     RE_MODEL_PPI -- so the model dir no longer has to be uploaded. When it IS
@@ -98,7 +98,15 @@ Dependency / strategy notes:
     sentences/*.json -- the input every later step reads. GPU; needs the HF BioBERT
     models (dmis-lab/biobert-v1.1 + alvaroalon2/biobert_{diseases,genetic,chemical}_ner),
     fetched on first use (internet) or cached.
-  * Steps 4-12 build the GENETIC/DISEASE/CHEMICAL normalization libraries.
+  * Steps 4-12 build the GENETIC/DISEASE/CHEMICAL normalization libraries. Steps 5-12
+    run as three lanes side by side -- GENETIC (roman -> greek -> keys_values ->
+    controls), DISEASE (disease -> phenotypes), CHEMICAL (chemical -> nonchemical) --
+    because each reads only sentences/ + databases/ and writes only its own dir. Within a
+    lane the order is kept: controls, phenotypes and nonchemical rewrite their lane's
+    libraries in place. target_pharm (13) waits for all
+    three. A failed step stops only its lane; the others finish, then the run stops.
+    NORM_PARALLEL_CPU=0 runs them in turn. Watch memory: chemical.py's ChEBI load overlaps
+    the MONDO and HGNC loads.
   * triples.py (14) reads those libraries; relationships.py (15) reads triples.py's
     output; pub_years.py (16) reads relationships.py's genetic_genetic.json.
   * relation_extraction.py (17) is a GPU step (BioBERT inference, auto CUDA) that loads
@@ -176,6 +184,17 @@ OPTIONS / ENV
   --steps a,b,c             run only these step names (also env NORM_STEPS)
   --retrain                 train even when the gate finds the artifacts complete
                             (also env NORM_RETRAIN=1)
+  NORM_PARALLEL_TRAIN=0     with >= 2 GPUs, steps 1 and 2 run side by side (one GPU
+                            each, output lines prefixed with the step name); this env
+                            runs them one after the other instead
+  NORM_PARALLEL_CPU=0       steps 5-12 normally run as three lanes side by side (GENETIC:
+                            roman -> greek -> keys_values -> controls |
+                            DISEASE: disease -> phenotypes | CHEMICAL: chemical ->
+                            nonchemical; each writes only its own dir); this env runs them
+                            one after the other instead
+  BIOBERT_GPUS / RE_GPUS    cap the GPUs steps 4 / 17 spread over (default: all visible)
+  BIOBERT_PARSE_WORKERS     processes step 4 parses XML with, ahead of the GPU (default
+                            min(4, cores - 1); 0 = inline)
   --re-args "..."           extra args for step 1 (also env RE_PIPELINE_ARGS);
                             implies --retrain for that step
   --biored-args "..."       extra args for step 2, e.g. "--require-cue"
@@ -189,13 +208,17 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 # each step: name, script, extra args, required ontology DBs, GPU?, model dirs, description
 # `models` = checkpoints the step READS (staged + exported via MODEL_ENV); optional keys:
 # support=[modules staged with the step], produces_model="dir it generates", optional=True,
-# reads_sentences=False for a step that does not consume sentences/ (default True)
+# reads_sentences=False for a step that does not consume sentences/ (default True),
+# lane="DIR" for a normalization step that reads sentences/ + databases/ and writes ONLY
+# under DIR/ (see run_lanes). Steps sharing a lane run in plan order -- controls, phenotypes
+# and nonchemical rewrite their lane's libraries in place -- while different lanes overlap.
 STEPS = [
     dict(name="re_pipeline", script="run_re_pipeline.py", args=[], dbs=[], gpu=True, models=[],
          support=["bigbio_to_re.py", "train_re.py", "calibration.py"], produces_model="ppi-biobert-re",
@@ -213,22 +236,22 @@ STEPS = [
          support=["drug_lexicon.py"],
          desc="[GPU] BioBERT result-sentence selection + NER over experimental_ner/ -> sentences/ "
               "(needs HF BioBERT models; adds an INN-stem + NCIt lexicon pass when the lexicon is present)"),
-    dict(name="roman", script="roman.py", args=[], dbs=["hgnc"], gpu=False, models=[],
+    dict(name="roman", script="roman.py", args=[], lane="GENETIC", dbs=["hgnc"], gpu=False, models=[],
          desc="GENETIC surfaces -> HGNC (roman key); writes clean_genetic_ne.tsv + greek_clean_genetic_ne.tsv"),
-    dict(name="greek", script="greek.py", args=[], dbs=["hgnc"], gpu=False, models=[],
+    dict(name="greek", script="greek.py", args=[], lane="GENETIC", dbs=["hgnc"], gpu=False, models=[],
          desc="Greek-symbol-expanded GENETIC surfaces -> HGNC"),
-    dict(name="keys_values", script="keys_values.py", args=[], dbs=[], gpu=False, models=[],
+    dict(name="keys_values", script="keys_values.py", args=[], lane="GENETIC", dbs=[], gpu=False, models=[],
          desc="HGNC coverage reports over the GENETIC libraries"),
-    dict(name="controls", script="controls.py", args=[], dbs=["hgnc"], gpu=False, models=[],
+    dict(name="controls", script="controls.py", args=[], lane="GENETIC", dbs=["hgnc"], gpu=False, models=[],
          desc="flag experimental-control / tool GENETIC entities (control: yes/no)"),
-    dict(name="disease", script="disease.py", args=[], dbs=["mondo"], gpu=False, models=[],
+    dict(name="disease", script="disease.py", args=[], lane="DISEASE", dbs=["mondo"], gpu=False, models=[],
          desc="DISEASE surfaces -> MONDO"),
-    dict(name="phenotypes", script="phenotypes.py", args=[], dbs=[], gpu=False, models=[],
+    dict(name="phenotypes", script="phenotypes.py", args=[], lane="DISEASE", dbs=[], gpu=False, models=[],
          desc="flag phenotype/process DISEASE surfaces (phenotype: yes/no)"),
-    dict(name="chemical", script="chemical.py", args=[], dbs=["chebi"], gpu=False, models=[],
+    dict(name="chemical", script="chemical.py", args=[], lane="CHEMICAL", dbs=["chebi"], gpu=False, models=[],
          support=["drug_lexicon.py"],
          desc="CHEMICAL surfaces -> ChEBI, then NCIt for the biologics ChEBI cannot represent"),
-    dict(name="nonchemical", script="nonchemical.py", args=[], dbs=["hgnc"], gpu=False, models=[],
+    dict(name="nonchemical", script="nonchemical.py", args=[], lane="CHEMICAL", dbs=["hgnc"], gpu=False, models=[],
          desc="flag non-chemical CHEMICAL surfaces (non_chemical: yes/no)"),
     dict(name="target_pharm", script="target_pharm.py", args=[], dbs=["chebi", "hgnc"], gpu=False, models=[],
          desc="chemical<->gene-target cross-links (needs GENETIC libs + chemical.json)"),
@@ -305,11 +328,115 @@ def cuda_available():
         return False
 
 
+def gpu_count():
+    try:
+        import torch
+        return torch.cuda.device_count() if torch.cuda.is_available() else 0
+    except Exception:
+        return 0
+
+
+def parallel_training(steps):
+    """Training steps to launch side by side, one per GPU -- or () to run them in turn.
+
+    The two runs are independent (own BigBIO corpus, TSV dir, checkpoint dir and report),
+    so with two GPUs they cost the wall time of the slower one instead of the sum. Needs
+    both steps planned and >= 2 visible GPUs; an explicit --gpus in --re-args/--biored-args,
+    or NORM_PARALLEL_TRAIN=0, keeps the sequential run."""
+    planned = [st for st in steps if st["name"] in TRAINING_STEPS]
+    if (len(planned) < 2 or gpu_count() < 2
+            or os.environ.get("NORM_PARALLEL_TRAIN", "1").strip().lower() in ("0", "false", "no")
+            or any("--gpus" in st["args"] for st in planned)):
+        return ()
+    return tuple(st["name"] for st in planned)
+
+
+def _pump(tag, argv, env, cwd, lock):
+    """Run one subprocess, echoing each output line as "[tag] line" under `lock` so
+    concurrent steps' logs interleave line by line. Returns (returncode, seconds)."""
+    t = time.time()
+    env = dict(env, PYTHONUNBUFFERED="1",
+               TQDM_MININTERVAL="30")   # a pipe turns every tqdm refresh into a line
+    proc = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                            errors="replace")
+    for line in proc.stdout:
+        line = line.rstrip()
+        if line:
+            with lock:
+                print(f"[{tag}] {line}", flush=True)
+    return proc.wait(), time.time() - t
+
+
+def _run_threads(targets):
+    threads = [threading.Thread(target=fn, args=args) for fn, args in targets]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+
+
+def run_side_by_side(jobs, cwd):
+    """Run [(tag, argv, env), ...] concurrently; every output line is prefixed "[tag] " so
+    the interleaved logs stay readable. Returns {tag: (returncode, seconds)}."""
+    lock, out = threading.Lock(), {}
+
+    def one(tag, argv, env):
+        out[tag] = _pump(tag, argv, env, cwd, lock)
+
+    _run_threads([(one, job) for job in jobs])
+    return out
+
+
+def lane_block(steps, i):
+    """The run of consecutive lane-tagged steps starting at steps[i], grouped by lane in
+    plan order -> {lane: [step, ...]}; {} when steps[i] has no lane."""
+    lanes = {}
+    for st in steps[i:]:
+        if not st.get("lane"):
+            break
+        lanes.setdefault(st["lane"], []).append(st)
+    return lanes
+
+
+def parallel_lanes_enabled():
+    return os.environ.get("NORM_PARALLEL_CPU", "1").strip().lower() not in ("0", "false", "no")
+
+
+def run_lanes(lanes, cwd, step_env):
+    """Run each lane's steps in order, the lanes side by side (one thread each).
+
+    The lanes are independent -- each reads sentences/ + databases/ and writes only its own
+    GENETIC/, DISEASE/ or CHEMICAL/ dir -- so they cost the wall time of the slowest lane
+    instead of the sum. Within a lane a failed required step stops that lane (its later
+    steps build on it); the other lanes run to completion. Returns {step name: (rc, seconds)}
+    for every step that ran."""
+    lock, out = threading.Lock(), {}
+
+    def chain(lane_steps):
+        for st in lane_steps:
+            with lock:
+                env = step_env(st)
+            rc, dt = _pump(st["name"], [sys.executable, st["script"], *st["args"]], env, cwd, lock)
+            out[st["name"]] = (rc, dt)
+            with lock:
+                print(f"-- {st['name']} {'done' if rc == 0 else f'FAILED (exit {rc})'} "
+                      f"in {dt:.1f}s", flush=True)
+            if rc != 0 and not st.get("optional"):
+                return
+
+    _run_threads([(chain, (ls,)) for ls in lanes.values()])
+    return out
+
+
 def report_accelerator():
     try:
         import torch
         if torch.cuda.is_available():
-            return f"GPU: {torch.cuda.get_device_name(0)} (torch {torch.__version__}) -- used by the re_pipeline (training), sentences (NER) + relation_extraction steps"
+            n = torch.cuda.device_count()
+            return (f"GPU: {n} x {torch.cuda.get_device_name(0)} (torch {torch.__version__}) -- "
+                    f"sentences (NER) + relation_extraction use all {n} (BIOBERT_GPUS / RE_GPUS "
+                    f"to cap); the two training runs take one GPU each when both run")
         return f"no CUDA (torch {torch.__version__}, CPU build) -- the GPU steps (re_pipeline, sentences, relation_extraction) run on CPU (slow)"
     except Exception:
         if shutil.which("nvidia-smi"):
@@ -622,8 +749,7 @@ def main():
 
     stage_work(input_root, work_root, steps)
 
-    results, t0 = [], time.time()
-    for st in steps:
+    def step_env(st):
         if st["gpu"] and not cuda_available():
             print(f"\n[!] step '{st['name']}' is a GPU step but no CUDA is visible -- it will run on CPU "
                   f"(much slower). Enable the Kaggle GPU accelerator to speed it up.", flush=True)
@@ -637,17 +763,48 @@ def main():
                 print(f"[!] {m}/ not present -- {MODEL_ENV[m]} not set for step '{st['name']}'.",
                       flush=True)
         print(f"\n{'=' * 66}\n[{st['name']}] {st['desc']}\n{'=' * 66}", flush=True)
-        t = time.time()
-        rc = subprocess.run([sys.executable, st["script"], *st["args"]], cwd=str(work_root), env=env).returncode
-        dt = time.time() - t
+        return env
+
+    together = parallel_training(steps)
+    ran_early = {}      # step name -> (rc, seconds) for steps already run side by side
+    laned = set()       # steps run by run_lanes (which prints their own done/failed line)
+    results, t0 = [], time.time()
+    for i, st in enumerate(steps):
+        lanes = (lane_block(steps, i) if st.get("lane") and st["name"] not in ran_early
+                 and parallel_lanes_enabled() else {})
+        if st["name"] in ran_early:
+            rc, dt = ran_early.pop(st["name"])
+        elif len(lanes) >= 2:
+            print(f"\n[parallel] lanes run side by side, each in order: "
+                  + "  |  ".join(" -> ".join(s["name"] for s in ls) for ls in lanes.values())
+                  + "  (NORM_PARALLEL_CPU=0 runs them in turn)", flush=True)
+            ran_early = run_lanes(lanes, str(work_root), step_env)
+            laned.update(ran_early)
+            rc, dt = ran_early.pop(st["name"])
+        elif st["name"] in together:
+            group = [s for s in steps if s["name"] in together]
+            jobs = [(s["name"], [sys.executable, s["script"], *s["args"], "--gpus", str(g)], step_env(s))
+                    for g, s in enumerate(group)]
+            print(f"\n[parallel] {' + '.join(together)} run side by side, one GPU each "
+                  f"(NORM_PARALLEL_TRAIN=0 runs them in turn)", flush=True)
+            ran_early = run_side_by_side(jobs, str(work_root))
+            rc, dt = ran_early.pop(st["name"])
+        else:
+            env = step_env(st)
+            t = time.time()
+            rc = subprocess.run([sys.executable, st["script"], *st["args"]], cwd=str(work_root), env=env).returncode
+            dt = time.time() - t
         results.append((st["name"], rc, dt))
         if rc != 0:
             if st.get("optional"):
                 print(f"\n[!] optional step '{st['name']}' failed (exit {rc}) after {dt:.1f}s -- continuing.", flush=True)
                 continue
             print(f"\n!! step '{st['name']}' FAILED (exit {rc}) after {dt:.1f}s -- stopping.", flush=True)
+            # steps that already ran side by side (other lanes) still belong in the summary
+            results += [(s["name"], *ran_early[s["name"]]) for s in steps if s["name"] in ran_early]
             break
-        print(f"-- {st['name']} done in {dt:.1f}s", flush=True)
+        if st["name"] not in laned:
+            print(f"-- {st['name']} done in {dt:.1f}s", flush=True)
 
     print(f"\n{'=' * 66}\n SUMMARY\n{'=' * 66}")
     for name, rc, dt in results:

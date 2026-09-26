@@ -8,7 +8,7 @@ Unifies the three steps we otherwise run by hand:
     2. TRAIN      train_re.py       -- fine-tune BioBERT into a checkpoint
     3. CALIBRATE  calibration.py     -- evaluate on test (metrics + confusion matrix),
                                        fit a probability calibrator on dev, write
-                                       <model>/calibration.json AND summaries/calibration.html
+                                       <model>/calibration.json AND summaries/calibration_<task>.html
 
 Steps 1 and 2 are run as subprocesses (so they stay byte-for-byte the same scripts,
 with all their existing flags and fixes). Training is run with --calibration none so
@@ -73,7 +73,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SUMMARY_PATH = ROOT / "summaries" / "calibration.html"
+SUMMARY_DIR = ROOT / "summaries"
+
+
+def summary_path(task):
+    """Per-task report, so the PPI and BioRED runs (which may run concurrently) never
+    overwrite each other's metrics."""
+    return SUMMARY_DIR / f"calibration_{task}.html"
 
 
 def _fmt_bytes(n):
@@ -86,8 +92,9 @@ def _fmt_bytes(n):
 
 
 def write_summary_html(ctx):
-    """Render the run summary (metrics + confusion matrix + outputs) to summaries/calibration.html."""
-    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)   # mkdir('summaries') if needed
+    """Render the run summary (metrics + confusion matrix + outputs) to summaries/calibration_<task>.html."""
+    out = summary_path(ctx["task"])
+    out.parent.mkdir(parents=True, exist_ok=True)   # mkdir('summaries') if needed
     e = html.escape
     labels = ctx["labels"]
     cm = ctx["confusion"]
@@ -191,8 +198,8 @@ def write_summary_html(ctx):
 </body>
 </html>
 """
-    SUMMARY_PATH.write_text(doc, encoding="utf-8")
-    print(f"summary written -> {SUMMARY_PATH}")
+    out.write_text(doc, encoding="utf-8")
+    print(f"summary written -> {out}")
 
 
 def setup_device(gpus):
@@ -286,7 +293,7 @@ def calibrate(args):
     threshold on dev to maximize micro-F1 and computes test metrics + a confusion
     matrix at that operating point (plain argmax with --no-tune-threshold), (b) fits
     a calibrator on dev positives (unless --calibration none) and reports ECE on test,
-    and (c) renders everything to summaries/calibration.html."""
+    and (c) renders everything to summaries/calibration_<task>.html."""
     print(f"\n{'=' * 70}\n[3/3 CALIBRATE + SUMMARY]  {args.calibration} on {args.model}\n{'=' * 70}", flush=True)
 
     sys.path.insert(0, str(ROOT))                       # train_re + calibration importable
@@ -445,7 +452,7 @@ def calibrate(args):
         if fp_.exists():
             outputs.append((f"{data.name}/{split}", _fmt_bytes(fp_.stat().st_size),
                             "entity-blinded TSV (sentence + label)"))
-    outputs.append((str(SUMMARY_PATH.relative_to(ROOT)).replace("\\", "/"), "-", "this summary"))
+    outputs.append((f"summaries/{summary_path(args.task).name}", "-", "this summary"))
 
     write_summary_html({
         "task": args.task, "dataset": args.dataset, "model": str(model_dir),

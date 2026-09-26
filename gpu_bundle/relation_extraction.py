@@ -108,7 +108,25 @@ many pairs were pruned.
     $env:RE_MODEL_PPI      = (Resolve-Path .\\ppi-biobert-re)
     $env:RE_MODEL_BIORED   = (Resolve-Path .\\biored-biobert-re)
 
-Input  : sentences/*.json                         (BioBERT NER spans)
+THROUGHPUT
+----------
+None of these change which triples are written or their order (fp16 aside, see below):
+
+  * Pairs are scored in LENGTH order (padding is per batch, so similar lengths waste
+    less of it) in batches of RE_BATCH (128); each kept triple carries its original
+    index and every model's triples are put back in input order before they are written.
+  * Every GPU (RE_GPUS, default all visible) loads its own copy of each checkpoint;
+    batches go to whichever is free and are consumed in batch order.
+  * On CUDA the checkpoints run in float16, with the softmax taken in float32. The
+    calibrators were fit on float32 probabilities and p_rel shifts in the 3rd-4th
+    decimal, so a triple sitting exactly at RE_MIN_SCORE can flip; RE_FP16=0 restores
+    float32.
+  * TRIPLES/triples_re.json is checkpointed every RE_FLUSH_SECONDS (600; 0 = only at
+    the end) so a crash doesn't lose hours of scoring. The interval is in time, not
+    batches: each flush rewrites the whole growing file, so a per-N-batches cadence
+    made checkpoint I/O grow quadratically with corpus size.
+
+Input  : sentences/*.json                        (BioBERT NER spans)
 Output : TRIPLES/triples_re.json                  scored triples; predicate carries
            {text:<label>, type:"relation", score:<p_rel>, model:<name>} and the triple
            carries the COMPOSITE score, score_2nd, score_components, self_pair, cues,
@@ -131,6 +149,7 @@ import html
 import json
 import os
 import sys
+import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -151,7 +170,11 @@ NORM_OUT = OUT_DIR / "triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"
 HTML_OUT = OUT_DIR / "relation_extraction.html"
 
 # --- config (override via env) ------------------------------------------------
-BATCH_SIZE = int(os.environ.get("RE_BATCH", "32"))
+BATCH_SIZE = int(os.environ.get("RE_BATCH", "128"))
+# score in float16 on CUDA (~2-4x the throughput on a T4). The softmax is taken in float32,
+# but the logits themselves shift by ~1e-3, so p_rel can differ from a float32 run in the
+# 3rd-4th decimal. RE_FP16=0 restores float32 (what calibration.json was fit against).
+FP16 = os.environ.get("RE_FP16", "1").strip().lower() in ("1", "true", "yes", "on")
 MAX_LEN = int(os.environ.get("RE_MAX_LEN", "256"))
 # keep a pair only if its endpoints are within this many characters of each other
 # (0 = no limit). Caps the all-pairs combinatorics on long sentences.
@@ -160,9 +183,15 @@ MIN_SCORE = float(os.environ.get("RE_MIN_SCORE", "0.5"))
 # apply a per-checkpoint probability calibrator (calibration.json next to the
 # model, fit by train_re.py) to p_rel before composite scoring. RE_CALIBRATE=0 disables.
 CALIBRATE = os.environ.get("RE_CALIBRATE", "1").strip().lower() in ("1", "true", "yes", "on")
-# on long full-corpus runs, flush partial results to disk every N batches so a crash
-# or machine sleep doesn't lose hours of scoring (0 = write only at the end)
-FLUSH_BATCHES = int(os.environ.get("RE_FLUSH_BATCHES", "200"))
+# on long full-corpus runs, flush partial results to disk every N seconds so a crash
+# or machine sleep doesn't lose hours of scoring (0 = write only at the end). Time-based,
+# not per-N-batches: each flush rewrites the whole (growing) file, so a batch cadence made
+# the checkpoint I/O grow quadratically with corpus size.
+FLUSH_SECONDS = float(os.environ.get("RE_FLUSH_SECONDS", "600"))
+# CUDA devices to score on (default: every visible one). Each checkpoint is loaded once per
+# GPU and batches are dealt out to whichever GPU is free; results are consumed in batch
+# order, so the output is identical for any value. RE_GPUS=1 restores the single-device run.
+_GPUS = os.environ.get("RE_GPUS", "").strip()
 
 # --- dependency-path overlay (triples_strategy.html section 5.2 step 4) --------
 # In high-entity sentences (up to 27 entities -> 351 all-pairs), most pairs are
@@ -335,7 +364,7 @@ def pair_id(meta):
     return (f'{meta["pmid"]}:{sig}:{meta["_a"]["start"]}-{meta["_a"]["end"]}'
             f':{meta["_b"]["start"]}-{meta["_b"]["end"]}')
 
-_MODEL_CACHE = {}   # model_name -> (tok, model, device, id2label, neg_ids)
+_MODEL_CACHE = {}   # (model_name, gpu) -> (tok, model, device, id2label, neg_ids)
 _CALIBRATORS = {}   # model_name -> calibration spec (or None)
 
 
@@ -493,10 +522,53 @@ def models_for(key, routes, fallback, biored, mode=None):
     return out if mode == "additive" else out[:1]
 
 
-def get_model(name):
-    """Lazy-load + cache (tok, model, device, id2label, neg_ids) for a checkpoint."""
-    if name in _MODEL_CACHE:
-        return _MODEL_CACHE[name]
+def gpu_count():
+    """CUDA devices to spread scoring over: RE_GPUS capped at what is visible, >= 1."""
+    try:
+        import torch
+        visible = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    except ImportError:
+        visible = 0
+    want = int(_GPUS) if _GPUS else visible
+    return max(1, min(want, visible))
+
+
+def ordered_map(fn, items, replicas):
+    """Yield fn(replica, item) for each item, IN INPUT ORDER, running one worker thread per
+    replica (one per GPU). torch releases the GIL during kernels, so threads keep every GPU
+    busy without the cost of separate processes. A single replica runs inline."""
+    if len(replicas) < 2:
+        for it in items:
+            yield fn(replicas[0], it)
+        return
+    import queue
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+    free = queue.Queue()
+    for r in replicas:
+        free.put(r)
+
+    def task(it):
+        r = free.get()
+        try:
+            return fn(r, it)
+        finally:
+            free.put(r)
+
+    window = deque()                     # bounded look-ahead, so results never pile up
+    with ThreadPoolExecutor(len(replicas)) as ex:
+        for it in items:
+            window.append(ex.submit(task, it))
+            if len(window) > 2 * len(replicas):
+                yield window.popleft().result()
+        while window:
+            yield window.popleft().result()
+
+
+def get_model(name, gpu=0):
+    """Lazy-load + cache (tok, model, device, id2label, neg_ids) for a checkpoint on one GPU."""
+    if (name, gpu) in _MODEL_CACHE:
+        return _MODEL_CACHE[(name, gpu)]
     try:
         import torch  # noqa: F401
         from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -507,9 +579,11 @@ def get_model(name):
     except (ValueError, OSError):
         from transformers import BertTokenizer    # BioBERT ships only vocab.txt (slow WordPiece)
         tok = BertTokenizer.from_pretrained(name)
-    model = AutoModelForSequenceClassification.from_pretrained(name)
     import torch
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    cuda = torch.cuda.is_available()
+    model = AutoModelForSequenceClassification.from_pretrained(
+        name, dtype=torch.float16 if (cuda and FP16) else torch.float32)
+    device = f"cuda:{gpu}" if cuda else "cpu"
     model.to(device).eval()
     id2label = {int(i): str(l) for i, l in model.config.id2label.items()}
     if len(id2label) < 2:
@@ -522,8 +596,8 @@ def get_model(name):
                 or ll.startswith("no_") or "no-relation" in ll):
             neg_ids.add(i)
     _CALIBRATORS[name] = Cal.load(Path(name) / "calibration.json") if CALIBRATE else None
-    _MODEL_CACHE[name] = (tok, model, device, id2label, neg_ids)
-    return _MODEL_CACHE[name]
+    _MODEL_CACHE[(name, gpu)] = (tok, model, device, id2label, neg_ids)
+    return _MODEL_CACHE[(name, gpu)]
 
 
 def score_batch(tok, model, device, marked):
@@ -532,7 +606,7 @@ def score_batch(tok, model, device, marked):
     enc = tok(marked, padding=True, truncation=True, max_length=MAX_LEN,
               return_tensors="pt").to(device)
     with torch.no_grad():
-        return torch.softmax(model(**enc).logits, dim=-1).cpu().tolist()
+        return torch.softmax(model(**enc).logits.float(), dim=-1).cpu().tolist()
 
 
 def section_factor(section):
@@ -621,9 +695,12 @@ def run(limit=None, route_mode=None):
 
     triples = []
     total_to_score = sum(len(v) for v in buckets.values())
-    scored_n = batch_n = 0
+    scored_n = 0
+    last_flush = time.time()
+    n_gpu = gpu_count()
     for name, items in buckets.items():
-        tok, model, device, id2label, neg_ids = get_model(name)
+        replicas = [get_model(name, g) for g in range(n_gpu)]
+        tok, model, device, id2label, neg_ids = replicas[0]
         cal = _CALIBRATORS.get(name)
         if cal:
             note = f" calibrated({cal['method']}, ceiling {Cal.ceiling(cal):.4f})"
@@ -631,8 +708,8 @@ def run(limit=None, route_mode=None):
             note = "  !! UNCALIBRATED (RE_CALIBRATE=0)"
         else:
             note = "  !! UNCALIBRATED (no calibration.json next to the checkpoint)"
-        print(f"  [{name}] labels={list(id2label.values())}{note} -> scoring {len(items):,} pairs",
-              flush=True)
+        print(f"  [{name}] labels={list(id2label.values())}{note} -> scoring {len(items):,} pairs"
+              f" on {', '.join(r[2] for r in replicas)}", flush=True)
         if not cal:
             print(f"     WARNING: `score` will be a raw softmax composite, NOT a probability. On the "
                   f"reference corpus ~half of all triples then pile up on the clamp at exactly 1.000, "
@@ -640,10 +717,20 @@ def run(limit=None, route_mode=None):
                   f"0.5-0.99 slider) stops discriminating. Ranking within this model is unaffected.",
                   flush=True)
         kept = 0
-        for i in range(0, len(items), BATCH_SIZE):
-            chunk = items[i:i + BATCH_SIZE]
-            probs = score_batch(tok, model, device, [m for m, _ in chunk])
-            for (m, meta), p in zip(chunk, probs):
+        # score in length order (padding is per batch, so similar lengths waste less of it);
+        # each kept triple carries its original index and the bucket is put back in input
+        # order at the end, so the output file is ordered exactly as before
+        by_len = sorted(range(len(items)), key=lambda k: len(items[k][0]))
+        pending = []                  # (original index, triple) for this bucket
+
+        def _score(replica, i):
+            r_tok, r_model, r_device = replica[:3]
+            idx = by_len[i:i + BATCH_SIZE]
+            return idx, score_batch(r_tok, r_model, r_device, [items[k][0] for k in idx])
+
+        for idx, probs in ordered_map(_score, range(0, len(items), BATCH_SIZE), replicas):
+            for k, p in zip(idx, probs):
+                meta = items[k][1]
                 order = sorted(range(len(p)), key=lambda k: p[k], reverse=True)
                 top, second = order[0], (order[1] if len(p) > 1 else order[0])
                 if top in neg_ids:
@@ -661,7 +748,7 @@ def run(limit=None, route_mode=None):
                 pred = {"text": label, "type": "relation", "score": round(p_raw, 4), "model": name}
                 if cal:
                     pred["score_calibrated"] = round(p_rel, 4)
-                triples.append({
+                pending.append((k, {
                     "subject": meta["subject"],
                     "predicate": pred,
                     "object": meta["object"],
@@ -672,13 +759,15 @@ def run(limit=None, route_mode=None):
                     "cues": meta.get("cues"), "result_margin": meta.get("result_margin"),
                     "pair_id": meta.get("pair_id"),
                     "pmid": meta["pmid"], "section": meta["section"], "sentence": meta["sentence"],
-                })
-            scored_n += len(chunk)
-            batch_n += 1
-            if FLUSH_BATCHES and batch_n % FLUSH_BATCHES == 0:
-                _flush(triples)
-                print(f"  ... scored {scored_n:,}/{total_to_score:,}  kept {len(triples):,}  (checkpointed)",
-                      flush=True)
+                }))
+            scored_n += len(idx)
+            if FLUSH_SECONDS and time.time() - last_flush >= FLUSH_SECONDS:
+                _flush(triples + [t for _, t in sorted(pending, key=lambda kt: kt[0])])
+                last_flush = time.time()
+                print(f"  ... scored {scored_n:,}/{total_to_score:,}  "
+                      f"kept {len(triples) + len(pending):,}  (checkpointed)", flush=True)
+        pending.sort(key=lambda kt: kt[0])
+        triples.extend(t for _, t in pending)
         print(f"  [{name}] kept {kept:,}", flush=True)
 
     _flush(triples)

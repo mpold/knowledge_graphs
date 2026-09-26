@@ -37,5 +37,16 @@ CELL 4:
 !python {INPUT_ROOT}/bigbio_to_re.py --task biored --dataset bigbio/biored --print-types
 
 CELL 5:
-!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT}
+!bash -c "set -o pipefail; PYTHONUNBUFFERED=1 TQDM_MININTERVAL=30 python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} 2>&1 | tee /tmp/run.log"
+print("pipeline exit code:", _exit_code)   # 0 = every required step succeeded
+import shutil, zipfile
+shutil.copy("/tmp/run.log", "/kaggle/working/run.log")
+with zipfile.ZipFile("/kaggle/working/kaggle_working.zip", "a", zipfile.ZIP_DEFLATED) as z:
+    z.write("/kaggle/working/run.log", "run.log")
 # --retrain trains the two RE models even when the gate finds them complete
+# Output streams live AND is saved (stderr too: warnings, tracebacks). PYTHONUNBUFFERED keeps a
+# piped run from printing in bursts; TQDM_MININTERVAL=30 stops progress bars flooding the log.
+# pipefail makes the exit code the run's, not tee's -- '!' never stops a cell, so it is printed.
+# The log is written to /tmp during the run: the pipeline's own zip step archives all of
+# /kaggle/working, and would otherwise bundle a half-written copy. The finished log is then
+# copied to /kaggle/working/run.log (Output panel) and added to kaggle_working.zip once.

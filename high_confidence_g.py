@@ -99,7 +99,6 @@ DATA_ROOT = ROOT / "kaggle_working"
 # module-level paths; (re)bound to DATA_ROOT by set_data_root() so --data-root can retarget them
 OUT_DIR = XML_DIR = SENT_DIR = None
 RE_FILE = PMC_YEARS = TARGET_FILE = None
-CHIMER_KB = CHIMER_SEQ = DEPMAP = HGNC_DIR = None
 # every lung_* project caches its slice of the shared corpus under this name
 CONTRIB_NAME = "corpus_contrib.json"
 DISEASE_LIB = CHEM_LIB = None
@@ -110,7 +109,6 @@ def set_data_root(data_root):
     """Point every input/output path at `data_root` (the pipeline's output tree)."""
     global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, PMC_YEARS
     global TARGET_FILE, DISEASE_LIB, CHEM_LIB, JSON_OUT, GRAPH_OUT
-    global CHIMER_KB, CHIMER_SEQ, DEPMAP, HGNC_DIR
     DATA_ROOT = Path(data_root).resolve()
     OUT_DIR = DATA_ROOT / "TRIPLES"
     XML_DIR = DATA_ROOT / "experimental_ner"   # input XML corpus (may be empty in the bundle)
@@ -118,13 +116,6 @@ def set_data_root(data_root):
     RE_FILE = OUT_DIR / "triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"
     PMC_YEARS = DATA_ROOT / "databases" / "pmc_years.json"
     TARGET_FILE = DATA_ROOT / "CHEMICAL" / "chemical_to_target.json"   # gene -> corpus chemicals (in_corpus_GENETIC flag)
-    # ChimerDB 4.0, converted by chimerdb_to_tsv.py; both optional, absent -> no fusion attribute
-    CHIMER_KB = DATA_ROOT / "databases" / "ChimerKB4.tsv"      # curated: sets the flag
-    CHIMER_SEQ = DATA_ROOT / "databases" / "ChimerSeq4.tsv"    # TCGA RNA-seq: evidence only
-    # DepMap CRISPR dependency, reduced per gene by depmap_to_tsv.py; optional
-    DEPMAP = DATA_ROOT / "databases" / "depmap_dependency.tsv"
-    # HGNC, already staged for stage 2; used here only to normalise ChimerDB's gene symbols
-    HGNC_DIR = DATA_ROOT / "databases"
     # normalization libraries carrying the in-place phenotype / non_chemical flags
     DISEASE_LIB = DATA_ROOT / "DISEASE" / "disease.json"
     CHEM_LIB = DATA_ROOT / "CHEMICAL" / "chemical.json"
@@ -571,76 +562,6 @@ def single(v):
     return v.strip() if isinstance(v, str) and v.strip() else None
 
 
-# ----- addiction class (manual curation, NOT derived from the corpus) ---------------
-# The graph already says which genes are DRUGGED (tcat, from DGIdb/ChEBI). It said nothing
-# about the question the corpus is actually about: which genes a tumour is ADDICTED to. That
-# is a literature judgement, not a database lookup -- no resource ships it as a field -- so it
-# is curated here, kept in one place, and stamped onto the node payload as `acat`/`agrp` so the
-# HTML can show it without re-deriving anything.
-#
-# Two distinct things, deliberately not merged into one flag:
-#   driver  ONCOGENE addiction: an ACTIVATING lesion (mutation, amplification, fusion,
-#           overexpression) the tumour cannot survive losing. EGFR-mutant lung, BCR-ABL CML,
-#           MYC in the tet-off models that named the phenomenon.
-#   noa     NON-ONCOGENE addiction (Luo/Solimini/Elledge): a dependency the transformed STATE
-#           creates without any lesion in the gene itself -- chaperone load, mitotic and
-#           replicative stress, metabolic rewiring, apoptotic priming. Real vulnerabilities,
-#           different biology, and the pair is routinely conflated in target lists.
-# Loss-of-function tumour suppressors are in NEITHER: their loss opens synthetic-lethal
-# vulnerabilities elsewhere, which is not the same claim. TP53 is the second-largest gene node
-# in the reference run and is deliberately unclassified here.
-#
-# `_BORDERLINE` marks calls a careful reader could reasonably move to the other side or drop:
-# pathway-level members (SHH, GLI2), amplicon passengers (PVT1, MIR106A/B), fusion PARTNERS
-# that are not oncogenes themselves (TMPRSS2 donates only a promoter). The HTML shows them as
-# "(borderline)" rather than hiding the uncertainty behind a clean label.
-#
-# On the reference oncogene_addiction run this classifies 177 of 424 gene nodes: 72 drivers
-# (31 of them green -- the kinase/RAS branch is almost fully drugged, while the 12 TF-class and
-# 8 oncomiR drivers are entirely undrugged) and 105 non-oncogene dependencies.
-_DRIVER_GROUPS = {
-    "RTK / kinase driver": "EGFR ERBB2 ERBB3 ALK ROS1 RET MET KIT FLT3 PDGFRA PDGFRB "
-                           "FGFR1 FGFR2 FGFR3 FGFR4 ABL1 JAK2",
-    "RAS-RAF-PI3K axis": "KRAS NRAS HRAS BRAF RAF1 PIK3CA AKT1 MTOR PIK3CB",
-    "transcription factor / MYC-class": "MYC MYCN MYB SOX2 BCL6 CTNNB1 NOTCH1 YAP1 LMO1 "
-                                        "GLI2 WNT1 SHH",
-    "cell-cycle / p53-axis amplicon": "CCND1 CCND3 CDK4 MDM2 MDM4",
-    "chromatin gain-of-function": "EZH2",
-    "cytokine receptor / ligand": "CRLF2 NRG1",
-    "oncomiR": "MIR155 MIR155HG MIR21 MIR17HG MIR19A MIR106A MIR106B PVT1",
-    "apoptotic driver (translocation)": "BCL2",
-    "fusion partner": "BCR EML4 NPM1 EWSR1 FLI1 ERG PML RELA PAX3 FOXO1 RUNX1 HOXA9 MEIS1 "
-                      "BRD4 PPARG TMPRSS2 HMGA2",
-}
-_NOA_GROUPS = {
-    "proteotoxic / chaperone / UPR": "HSP90AA1 HSP90B1 HSPA5 HSPB1 HSPD1 HSF1 XBP1 ATF4 ATF6 "
-                                     "EIF2AK3 EIF2S1 DDIT3 DNAJC1 DNAJC17 DNAJC5B ERP44 "
-                                     "PSMD11 SQSTM1 UBE2I UBA52 RPS27A URI1",
-    "mitotic / replicative stress": "PLK1 CDK1 CDK2 CCNB1 MASTL PTTG1 PRC1 CENPF AURKA CDC6 "
-                                    "PCNA RRM2 CHEK1 RAD51 H2AX ZRANB3 TP53BP1",
-    "transcriptional CDK / coactivator": "CDK7 CDK9 CDK12 CDK13 CSNK2A1 EP300 CREBBP",
-    "metabolic": "GLS SLC1A1 SLC2A1 SLC25A5 PKM HK1 G6PD FASN ACACA SOAT1 NAMPT PDK1 DHTKD1 "
-                 "PRKAA2 MLXIPL SLC7A8 UPP1 ATP5F1A",
-    "apoptotic priming": "MCL1 BCL2L1 BCL2L2 BIRC5 XIAP BIRC2 CFLAR DIABLO",
-    "redox / autophagy": "NUDT1 SOD1 SESN1 ATG5 ATG16L1 ULK1",
-    "signalling / adhesion dependency": "TBK1 CIB1 PTK2 RICTOR STK38",
-    "epigenetic dependency": "DNMT1 UHRF1 KDM4A KDM4B BMI1 SIRT1 SIRT3 SIRT6 HDAC6 HDAC9 "
-                             "TET1 TET3",
-    "SWI-SNF loss -> synthetic lethality": "SMARCA4 SMARCB1",
-    "splice / RNA / translation": "USP39 EXOSC10 DDX5 DDX17 MARS1 RACK1 RPS3A RPS6",
-}
-# EZH2 is the one gene that honestly belongs to both: Y641 gain-of-function in follicular
-# lymphoma is oncogene addiction, while the EZH2 dependency of SMARCB1/SMARCA4-null tumours is
-# synthetic lethality. `driver` wins here because the lesion is in EZH2 itself.
-ADDICTION = {g: ("driver", grp) for grp, gs in _DRIVER_GROUPS.items() for g in gs.split()}
-ADDICTION.update({g: ("noa", grp) for grp, gs in _NOA_GROUPS.items() for g in gs.split()
-                  if g not in ADDICTION})
-_BORDERLINE = set("ERBB3 FGFR4 RAF1 MTOR PIK3CB GLI2 SHH MDM4 MIR19A MIR106A MIR106B PVT1 "
-                  "RUNX1 HOXA9 MEIS1 PPARG TMPRSS2 HMGA2 AURKA PTK2 STK38 KDM4A KDM4B TET1 "
-                  "TET3".split())
-ACAT_LABEL = {"driver": "oncogene addiction", "noa": "non-oncogene addiction"}
-
-
 # ----- false drug-target pairs (manual curation) --------------------------------------
 # DGIdb ingests clinical-context sources -- MyCancerGenome(ClinicalTrial), TALC,
 # ClearityFoundationClinicalTrial, CancerCommons -- whose claim is "this drug is used where
@@ -654,7 +575,7 @@ ACAT_LABEL = {"driver": "oncogene addiction", "noa": "non-oncogene addiction"}
 #
 # Only the ones a drug's known pharmacology CONTRADICTS are listed. Judgement calls stay in:
 # JAK2 <- ruxolitinib and MTOR <- everolimus/sirolimus are clinical-sourced and true, and
-# complex- or fusion-level attributions (EML4 <- crizotinib, BCR <- dasatinib, PIK3R1 <-
+# attributions to a partner or subunit rather than the direct target (EML4 <- crizotinib, BCR <- dasatinib, PIK3R1 <-
 # alpelisib, RICTOR <- dactolisib, NOTCH1 <- RO4929097) are defensible readings of "target",
 # so they are deliberately NOT dropped. The identifier-namespace artifacts are a different
 # problem with a different fix: target_pharm.py drops those rows at the source.
@@ -720,177 +641,6 @@ def _drug_targets():
     return tgt, chems_by_gene, tsrc, tcat
 
 
-# ----- fusion pairs ChimerKB does not carry (manual curation) --------------------------
-# ChimerKB is curated and conservative, and it is not a superset of the literature: five genes
-# this project had already documented are absent from it, each with real support. They are added
-# here as PAIRS -- 5' gene first -- so the loader derives both sides exactly as it does from the
-# database, and each carries the PubMed count that justified it (pubmed_fusions.py, 2026-08-20).
-# The supplement is deliberately tiny: it closes a known gap, it does not become a second
-# database.
-#
-# MAP3K8 cost two wrong entries before it was right. SPECC1L::MAP3K8 and DIP2B::MAP3K8 were
-# written from memory and return ZERO publications each; the partner the literature actually
-# reports is ABLIM1. It is also the exception to the rule the rest of this file states: MAP3K8
-# sits 5' and still keeps its kinase domain, because these rearrangements truncate its
-# C-terminal autoinhibitory tail rather than donating a promoter. A 5' position does not always
-# mean "nothing to inhibit".
-FUSION_SUPPLEMENT = [
-    # (5' gene, 3' gene, evidence)
-    ("MEIS1", "NCOA2", "spindle-cell rhabdomyosarcoma; 27 PubMed records"),
-    ("EWSR1", "SMAD3", "fibroblastic tumour; 20 PubMed records"),
-    ("TBL1XR1", "RARB", "variant APL; 8 PubMed records"),
-    ("PAX3", "FOXO6", "biphenotypic sinonasal sarcoma; 2 records, PMIDs 36169791, 42446761"),
-    ("MAP3K8", "ABLIM1", "Spitz melanoma; 2 records, PMID 39363234"),
-]
-
-
-def _dependency():
-    """gene -> (fraction of DepMap lines dependent, class) from depmap_dependency.tsv.
-
-    The corpus can say a tumour depends on a gene; DepMap says how OFTEN across ~1,100 cell
-    lines, and whether the dependency is SELECTIVE or universal. That second half is what the
-    graph could not express before. `common` means nearly every line dies without it -- the
-    ribosome, the proteasome, the spliceosome -- and a dependency with no discrimination is not
-    a target, however real it is. On this release USP39, URI1, PRC1 and DNAJC17 all sit above
-    99%, which is a different claim from the one "dependency" usually carries.
-
-    TWO CAVEATS, both large enough to state on the node rather than in a footnote.
-
-    A `common` gene is not automatically a bad target: MYC scores 95% and EWSR1 94% because
-    almost every cultured line needs them, yet both are drivers. What `common` rules out is
-    SELECTIVITY IN VITRO, not therapeutic interest -- MYC's case rests on tumour maintenance in
-    vivo, which no cell-line screen measures.
-
-    A `none` gene may simply have no representative in the panel. PRDM14 scores 0.3% (4 lines of
-    1,178), and its biology is germ-cell and ESC-like, which DepMap barely covers. That is weak
-    evidence of absence, not evidence of no addiction.
-    """
-    out = {}
-    try:
-        with open(DEPMAP, encoding="utf-8", newline="") as fh:
-            for r in csv.DictReader(fh, delimiter="	"):
-                try:
-                    out[r["gene"]] = (float(r["frac_dep"]), r["class"])
-                except (KeyError, ValueError):
-                    continue
-    except OSError:
-        return {}
-    return out
-
-
-# ChimerDB records symbols as the source paper wrote them, so one partner arrives under several
-# names: FLI1's two "partners" are EWS and EWSR1, which is one gene written twice, and BRD4's are
-# C15orf55 and NUTM1, likewise. Counting raw strings therefore inflates `fn`, and `fn` is what the
-# ranking weights (>=5 partners +2, 2-4 +1.25, one +0.5) -- so FLI1, whose single partner is the
-# most famous fusion in sarcoma, was scoring as a two-partner gene.
-#
-# Two symbols ChimerKB uses that HGNC cannot resolve, bridged by hand rather than by a fuzzy rule.
-# A rule loose enough to catch either would merge genuinely distinct family members:
-#   TMP3   a transposition of TPM3 in ALK's partner list; not an alias of anything
-#   PTC6   a fusion nickname (RET/PTC6), not a gene symbol; TRIM24 is the gene
-CURATED_SYMBOL = {"TMP3": "TPM3", "PTC6": "TRIM24"}
-
-
-def _hgnc_alias():
-    """{alias or previous symbol -> approved symbol}, built from the staged HGNC set.
-
-    Approved symbol wins over anyone else's alias, the same precedence map_gene() uses in stage 2:
-    prev_symbol and alias_symbol collide with live symbols often enough that the naive map renames
-    real genes. A token two different genes claim is dropped rather than guessed. The index is also
-    keyed without punctuation, because HGNC writes AF-1P where the papers write AF1P."""
-    hits = sorted(Path(HGNC_DIR).glob("hgnc_complete_set_*.json")) if HGNC_DIR else []
-    if not hits:
-        return {}, set()
-    docs = json.loads(hits[-1].read_text(encoding="utf-8"))["response"]["docs"]
-    approved = {d["symbol"].upper() for d in docs if d.get("symbol")}
-    claim = collections.defaultdict(set)
-    for d in docs:
-        sym = (d.get("symbol") or "").upper()
-        if not sym:
-            continue
-        for field in ("prev_symbol", "alias_symbol"):
-            for a in d.get(field) or []:
-                a = a.strip().upper()
-                if a and a not in approved:
-                    claim[a].add(sym)
-    alias = {a: next(iter(v)) for a, v in claim.items() if len(v) == 1}
-    squashed = {}
-    for a, g in alias.items():
-        k = a.replace("-", "").replace("_", "").replace(" ", "")
-        if k not in alias:
-            squashed.setdefault(k, set()).add(g)
-    alias.update({k: next(iter(v)) for k, v in squashed.items() if len(v) == 1 and k not in alias})
-    alias.update(CURATED_SYMBOL)
-    return alias, approved
-
-
-def _fusion_partners():
-    """gene -> (side, partners, n_partners, seq_samples, diseases) from ChimerDB 4.0.
-
-    WHICH SIDE OF THE JUNCTION a gene sits on is the whole point of carrying this, because it
-    decides whether there is anything to inhibit. The 5' partner contributes a promoter and
-    keeps none of its protein -- TMPRSS2 is 26x 5' and 0x 3' in ChimerKB, and TMPRSS2-ERG is
-    treated as an ERG lesion for exactly that reason -- while the 3' partner contributes the
-    kinase or DNA-binding domain that the fusion is named for (ERG: 3x 5', 48x 3').
-
-    THE FLAG COMES FROM ChimerKB ONLY. ChimerSeq is called from TCGA RNA-seq and is algorithmic:
-    it lists TP53 in 65 rows, CTNNB1 in 50 and USP39 in 40, none of which fuse in any meaningful
-    sense, against 3, 9 and 0 in the curated set. Recurrence does not rescue it -- measured over
-    the 32,172 In-Frame rows, requiring the same pair in >=3 TCGA samples still admits USP39
-    while already losing PAX3, FOXO1, YAP1 and MYB, and >=5 loses more. No threshold separates
-    signal from noise here, so ChimerSeq contributes a COUNT (`fseq`, In-Frame samples touching
-    the gene) and never the flag itself.
-
-    EVERY SYMBOL IS NORMALISED to its HGNC-approved form first -- see _hgnc_alias(). Without it a
-    partner recorded under two names counts twice, and `fn` is a scoring term.
-    """
-    side, partners, disease, seq = {}, collections.defaultdict(set), collections.defaultdict(set), {}
-    supp = set()                        # genes owing a partner to FUSION_SUPPLEMENT
-    alias, approved = _hgnc_alias()     # empty if HGNC is not staged: symbols pass through as-is
-
-    def norm(g):
-        g = (g or "").strip().upper()
-        if not g or g in approved:
-            return g
-        if g in alias:
-            return alias[g]
-        return alias.get(g.replace("-", "").replace("_", "").replace(" ", ""), g)
-    try:
-        with open(CHIMER_KB, encoding="utf-8", newline="") as fh:
-            for r in csv.DictReader(fh, delimiter="	"):
-                h, t = norm(r.get("H_gene")), norm(r.get("T_gene"))
-                if not h or not t:
-                    continue
-                for g, other, s in ((h, t, "5p"), (t, h, "3p")):
-                    side[g] = s if side.get(g, s) == s else "both"
-                    partners[g].add(other)
-                    if r.get("Disease"):
-                        disease[g].add(r["Disease"].strip())
-    except OSError:
-        return {}
-    for h0, t0, _why in FUSION_SUPPLEMENT:  # a known gap in ChimerKB, closed by hand
-        h, t = norm(h0), norm(t0)
-        for g, other, sd in ((h, t, "5p"), (t, h, "3p")):
-            side[g] = sd if side.get(g, sd) == sd else "both"
-            partners[g].add(other)
-            supp.add(g)
-    try:                                    # evidence only: how much TCGA RNA-seq touches the gene
-        with open(CHIMER_SEQ, encoding="utf-8", newline="") as fh:
-            hit = collections.defaultdict(set)
-            for r in csv.DictReader(fh, delimiter="	"):
-                if r.get("Frame") != "In-Frame":      # only these can make a chimeric PROTEIN
-                    continue
-                bc = r.get("BarcodeID") or ""
-                for g in (norm(r.get("H_gene")), norm(r.get("T_gene"))):
-                    if g:
-                        hit[g].add(bc)
-            seq = {g: len(v) for g, v in hit.items()}
-    except OSError:
-        seq = {}
-    return {g: (side[g], sorted(partners[g]), len(partners[g]), seq.get(g, 0),
-                sorted(disease.get(g, ())), 1 if g in supp else 0) for g in side}
-
-
 def graph_payload_multi(triples, flags):
     """Gene + disease + chemical graph. One edge per unordered node pair, best-supported
     (direction, relation) wins, one record per sentence; nodes are typed and identified by
@@ -905,8 +655,6 @@ def graph_payload_multi(triples, flags):
     except Exception:
         years = {}
     tgt, chems_by_gene, tsrc, tcat = _drug_targets()
-    fusion = _fusion_partners()
-    depend = _dependency()
     dir_sent = collections.defaultdict(set)            # (a,b,cat) -> sentences
     pair_sent = collections.defaultdict(dict)          # pair -> {sentence: [score, pmid, cat, spec, src]}
     pair_src = collections.defaultdict(set)            # pair -> model roles behind ANY of its triples
@@ -931,9 +679,16 @@ def graph_payload_multi(triples, flags):
         for nd in (ka, kb):
             if node_sent[nd].get(sent, -1) < sc:
                 node_sent[nd][sent] = sc
+    # group the directed (a, b, cat) records by their unordered pair ONCE: scanning all of
+    # dir_sent for every pair was quadratic (~125k pairs x ~200k records = hours on the
+    # full corpus). Each pair gets the same candidates as before, and the sort key
+    # (count, from, to, cat) is unique, so the chosen edge is identical.
+    by_pair = collections.defaultdict(list)
+    for (f, to, cat), ss in dir_sent.items():
+        by_pair[frozenset((f, to))].append((len(ss), f, to, cat))
     edges = []
     for pr, sd in pair_sent.items():
-        cands = [(len(ss), f, to, cat) for (f, to, cat), ss in dir_sent.items() if frozenset((f, to)) == pr]
+        cands = by_pair[pr]
         cands.sort(reverse=True)
         _, ff, ft, fcat = cands[0]
         sents = [{"pmid": pm, "text": sent[:300], "sc": round(sc, 4), "yr": years.get(pm),
@@ -953,26 +708,7 @@ def graph_payload_multi(triples, flags):
                       "target": tgt.get(nd, 0) if k == "gene" else 0,
                       "chems": chems_by_gene.get(nd, []) if k == "gene" else [],
                       "tsource": tsrc.get(nd, "") if k == "gene" else "",
-                      "tcat": tcat.get(nd, "other"),
-                      # curated addiction class (see ADDICTION): "" for genes nobody has
-                      # placed and for every non-gene node, so the HTML can test it directly
-                      "acat": ADDICTION.get(nd, ("", ""))[0] if k == "gene" else "",
-                      "agrp": ADDICTION.get(nd, ("", ""))[1] if k == "gene" else "",
-                      "abord": 1 if (k == "gene" and nd in _BORDERLINE) else 0,
-                      # ChimerDB: which side of the junction, who with, and how much TCGA
-                      # RNA-seq backs it. "" for a gene nobody has seen fused, and for every
-                      # non-gene node, so the HTML can test the field directly.
-                      "fus": fusion.get(nd, ("", (), 0, 0, (), 0))[0] if k == "gene" else "",
-                      "fpart": fusion.get(nd, ("", (), 0, 0, (), 0))[1][:8] if k == "gene" else [],
-                      "fn": fusion.get(nd, ("", (), 0, 0, (), 0))[2] if k == "gene" else 0,
-                      "fseq": fusion.get(nd, ("", (), 0, 0, (), 0))[3] if k == "gene" else 0,
-                      # 1 when a partner came from FUSION_SUPPLEMENT rather than ChimerKB, so the
-                      # HTML can say which claims the database backs and which this project does
-                      "fsup": fusion.get(nd, ("", (), 0, 0, (), 0))[5] if k == "gene" else 0,
-                      # DepMap: how many cell lines depend on this gene, and whether that
-                      # dependency discriminates. "" when the gene was never screened.
-                      "dep": round(depend.get(nd, (0.0, ""))[0], 4) if k == "gene" else 0,
-                      "depcls": depend.get(nd, (0.0, ""))[1] if k == "gene" else ""})
+                      "tcat": tcat.get(nd, "other")})
     return {"nodes": nodes, "edges": edges}
 
 
@@ -1148,13 +884,11 @@ __LIBTAG__
  select,#search,#genefilter,#drugsearch,#textfilter{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
  #search,#genefilter,#drugsearch,#textfilter{width:200px}
  mark{background:#ffe680;color:inherit;border-radius:2px;padding:0 1px}
- #catfilters label,#acatfilters label,#fusfilters label,#depfilters label{display:block;cursor:pointer;white-space:nowrap;font-size:12px;margin:1px 0}
+ #catfilters label{display:block;cursor:pointer;white-space:nowrap;font-size:12px;margin:1px 0}
  /* no inner scroller: the relation list is a dozen rows at most, and a box that scrolls inside
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
- /* the four tick-box filters share one box style: border, padding and 12px labels, so a
-    reader meets relation type, addiction class, dependency and fusion status as one family */
- #catfilters,#acatfilters,#fusfilters,#depfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
- #catfilters .cnt,#acatfilters .cnt,#fusfilters .cnt,#depfilters .cnt{color:#5b6677;font-size:11px}
+ #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
+ #catfilters .cnt{color:#5b6677;font-size:11px}
  #siglist{margin-top:5px}
  #siglist .sig{display:flex;align-items:center;gap:6px;padding:1px 2px;font-size:12px;cursor:pointer;border-radius:3px}
  #siglist .sig:hover{background:#eef2f7}
@@ -1204,7 +938,6 @@ __LIBTAG__
  /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
     carry a trailing margin -- 6px of it would push Fit onto a second line */
  #zoom button:last-child{margin-right:0}
- #comention{width:100%}
  #srcbtns button.on,#labelbtns button.on,#orbtns button.on,#orbtns2 button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  #srcbtns button:disabled{opacity:.45;cursor:default}
  .vis-tooltip{max-width:480px!important;white-space:normal!important;background:#fff!important;color:#1a1a1a!important;border:1px solid #999!important;border-radius:8px!important;padding:8px 10px!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;font:12px/1.45 Segoe UI,Arial,sans-serif!important}
@@ -1234,8 +967,6 @@ __LIBTAG__
   <div class="mut help">Blows the crowded core outward and carries the rest along, thinning the hairball without moving anything past its neighbours. Both reshape the drawn layout only &mdash; radially, from the stabilized positions, so nothing changes order and returning a slider to 0% restores the layout exactly.</div></div>
  <div class="row" id="tissuerow"><label><input type=checkbox id="tissuestack" checked> Stack same-tissue diseases</label> <button class="ihelp" aria-label="About tissue stacking" aria-expanded="false">i</button>
   <div class="mut help">Drops the disease nodes naming one tissue onto a single spot, overlapping, so <em>lung cancer</em>, <em>lung adenocarcinoma</em> and <em>non-small cell lung carcinoma</em> read as one place on the canvas instead of three. They stay separate nodes with their own edges and tooltips &mdash; only their positions are pooled, after the layout settles. Tissue is read from the name (<span id="tissuen"></span>).</div></div>
- <div class="row" id="cmrow">Co-mention links: <button class="ihelp" aria-label="About co-mention links" aria-expanded="false">i</button><br><select id="comention"><option value="">(off)</option></select>
-  <div class="mut help">Draws a dashed grey link from every node whose <em>visible</em> sentences name that disease &mdash; its full name or its acronym &mdash; even where no model predicted a relation. Nodes already wired to it by a drawn relation keep that edge and get no second one, so a dashed link reads &ldquo;co-mentioned, nothing predicted&rdquo;. Co-occurrence only, never a claim; added after all filtering, so it changes nothing the thresholds keep.</div></div>
  <div class="row" id="disrow">Keep diseases: <button class="ihelp" aria-label="About the disease keep-list" aria-expanded="false">i</button>
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
   <div class="legend" id="disfilters"></div>
@@ -1251,7 +982,7 @@ __LIBTAG__
   <div id="sighdr">publications &nbsp;&nbsp;z</div>
   <div id="siglist"></div>
   <button id="sigtab">Full table view</button>
-  <div class="mut help" id="sighelp">The top six of whatever the graph is <em>currently drawing</em>: every control reshapes this too &mdash; score, year, text, node and relation type, training set, the support thresholds and the structural pruning &mdash; and it is recomputed on every redraw, so the ranking and the picture can never disagree. Widen the filters to read it as the corpus; narrow them to ask the same question of a slice. Co-mention links are excluded, since this counts relations. <b>Publications</b> counts the distinct papers behind a node's relations &mdash; the measure the edge thicknesses use; <b>partners</b> counts the distinct entities it is related to (breadth, not weight); <b>sentences</b> counts the unique sentences supporting them. The second column is <b>z</b>: standard deviations above the mean on a log&#8321;&#8320; scale, <em>among its own kind</em>, since a gene is only remarkable among genes. The percentile is there too (hover a row), but it saturates &mdash; every one of a top six reads 99.9%, while z still separates them. In the panel list, click a row to select and centre that node; if the current filters have removed it, the details box says so rather than moving the view. Table rows do not navigate &mdash; they are there to be read and sorted. <b>Bootstrap CIs</b>, in the table, resamples the view's <em>publications</em> with replacement 300 times and reports 95% intervals for each count and each rank &mdash; papers, because that is the independent unit; resampling sentences would give intervals several times too tight. Ranks at the top are firm (1&ndash;2) and the tail is not (a gene ranked 500th may belong anywhere from 264th to 1447th), which is the honest width of &ldquo;top ten&rdquo;. <b>OR vs corpus</b> and <b>q</b> ask a different question: is this entity over-represented in the current view compared with the whole normalized corpus? A 2&times;2 over publications &mdash; in view or not, mentions it or not &mdash; by Fisher's exact test, with a Haldane-corrected odds ratio, a Woolf interval and Benjamini-Hochberg q-values over the entities with at least 5 corpus papers. Type &ldquo;immunotherapy&rdquo; and PDCD1, CD274 and CTLA4 come out at OR 5&ndash;9; EGFR comes out <em>depleted</em>. It cannot say an entity is specific to lung adenocarcinoma &mdash; every paper here is a lung paper, so the contrast is view-against-corpus, never corpus-against-literature. <b>Full table view</b> opens the whole ranking &mdash; every node of that kind, all three counts, both statistics and a bar, sortable by any column, with its own year handles.</div></div>
+  <div class="mut help" id="sighelp">The top six of whatever the graph is <em>currently drawing</em>: every control reshapes this too &mdash; score, year, text, node and relation type, training set, the support thresholds and the structural pruning &mdash; and it is recomputed on every redraw, so the ranking and the picture can never disagree. Widen the filters to read it as the corpus; narrow them to ask the same question of a slice. <b>Publications</b> counts the distinct papers behind a node's relations &mdash; the measure the edge thicknesses use; <b>partners</b> counts the distinct entities it is related to (breadth, not weight); <b>sentences</b> counts the unique sentences supporting them. The second column is <b>z</b>: standard deviations above the mean on a log&#8321;&#8320; scale, <em>among its own kind</em>, since a gene is only remarkable among genes. The percentile is there too (hover a row), but it saturates &mdash; every one of a top six reads 99.9%, while z still separates them. In the panel list, click a row to select and centre that node; if the current filters have removed it, the details box says so rather than moving the view. Table rows do not navigate &mdash; they are there to be read and sorted. <b>Bootstrap CIs</b>, in the table, resamples the view's <em>publications</em> with replacement 300 times and reports 95% intervals for each count and each rank &mdash; papers, because that is the independent unit; resampling sentences would give intervals several times too tight. Ranks at the top are firm (1&ndash;2) and the tail is not (a gene ranked 500th may belong anywhere from 264th to 1447th), which is the honest width of &ldquo;top ten&rdquo;. <b>OR vs corpus</b> and <b>q</b> ask a different question: is this entity over-represented in the current view compared with the whole normalized corpus? A 2&times;2 over publications &mdash; in view or not, mentions it or not &mdash; by Fisher's exact test, with a Haldane-corrected odds ratio, a Woolf interval and Benjamini-Hochberg q-values over the entities with at least 5 corpus papers. Type &ldquo;immunotherapy&rdquo; and PDCD1, CD274 and CTLA4 come out at OR 5&ndash;9; EGFR comes out <em>depleted</em>. It cannot say an entity is specific to lung adenocarcinoma &mdash; every paper here is a lung paper, so the contrast is view-against-corpus, never corpus-against-literature. <b>Full table view</b> opens the whole ranking &mdash; every node of that kind, all three counts, both statistics and a bar, sortable by any column, with its own year handles.</div></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
 <div id="panel">
@@ -1262,7 +993,7 @@ __LIBTAG__
   <div class="mut help">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
  <div class="row">Font size: <b id="fsv">50%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="50" aria-label="Label font size"></div>
  <div class="row">Min cluster size: <select id="mincluster"><option value="2" selected>2 (off)</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select> <button class="ihelp" aria-label="About min cluster size" aria-expanded="false">i</button><div class="mut help">Drops connected components smaller than this. <b>2 is off, not a floor</b>: the components are built from the edges that survive every other filter, so the smallest one possible already has two nodes and a pair joined by a single edge always passes. Raise it to 3 or more to peel the small islands a loose score leaves behind &mdash; and note it runs AFTER min-connections, so a node that drops below that bar can take its whole component with it.</div></div>
- <div class="row">Min connections: <select id="mindeg"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. A single pass: nodes that lose links in it can finish below the bar. <b>1</b> turns it off and keeps that fringe &mdash; the only way to see a node whose whole evidence is one edge, which on the reference run is 42 of the 177 addiction-classified genes (LMO1, GLI2, PAX3, PPARG, MIR21, MIR17HG among them). Expect a denser canvas: it is the setting that admits every hapax in the corpus.</div></div>
+ <div class="row">Min connections: <select id="mindeg"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. A single pass: nodes that lose links in it can finish below the bar. <b>1</b> turns it off and keeps that fringe &mdash; the only way to see a node whose whole evidence is one edge. Expect a denser canvas: it is the setting that admits every hapax in the corpus.</div></div>
  <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
@@ -1270,15 +1001,6 @@ __LIBTAG__
  <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
   <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
 __KINDROW__
- <div class="row" id="acathdr">Addiction class <button class="ihelp" data-help="acat" aria-label="About the addiction class" aria-expanded="false">i</button></div>
- <div class="row" id="acatfilters"></div>
- <div class="row" id="dephdr">CRISPR dependency <button class="ihelp" data-help="dep" aria-label="About DepMap dependency" aria-expanded="false">i</button></div>
- <div class="row" id="depfilters"></div>
- <div class="row mut help" id="dephelp" data-help="dep">From <b>DepMap</b> (CRISPR, ~1,178 cell lines): the share of lines that die without the gene. <b>Selective</b> is the band that matches what "addiction" is supposed to mean &mdash; some tumours need it, others do not &mdash; and is where EGFR (21%), ERBB2 (19%), KRAS (38%) and MDM2 (40%) sit. <b>Common essential</b> (&ge;90%) is the ribosome, the proteasome, the spliceosome: real dependencies with no therapeutic window. Two cautions. A common gene is not automatically a bad target &mdash; MYC scores 95% and EWSR1 94% because almost every cultured line needs them, so what the label rules out is <em>selectivity in vitro</em>, not therapeutic interest. And <b>no dependent line</b> can mean the panel has no representative of the gene's context rather than no addiction: PRDM14 scores 0.3%, and its germ-cell/ESC-like biology is barely in DepMap. Cell lines are not tumours &mdash; for immune and stromal genes (CTLA4, CD274, TIGIT, CD40) a null here means nothing at all.</div>
- <div class="row" id="fushdr">Fusion partner <button class="ihelp" data-help="fus" aria-label="About fusion status" aria-expanded="false">i</button></div>
- <div class="row" id="fusfilters"></div>
- <div class="row mut help" id="fushelp" data-help="fus">From <b>ChimerDB 4.0</b>, curated set only (ChimerKB); genes carrying a thicker ring are in it. <b>5&prime;</b> means the gene donates the promoter and keeps none of its own protein &mdash; TMPRSS2 in TMPRSS2-ERG, which is why that lesion is treated as an ERG event. <b>3&prime;</b> means it contributes the kinase or DNA-binding domain the fusion is named for. A junction exists in no normal cell, so it is a selectivity handle even where the protein has no drug pocket. <b>Read it as "appears in a curated fusion pair", not "makes a chimeric protein":</b> MYC and BCL6 are flagged through their IGH/IGK partners, which substitute a promoter rather than fusing two proteins, and BCL6's 21 partners are the signature of exactly that. The TCGA count in the tooltip is In-Frame RNA-seq evidence from ChimerSeq, which is algorithmic and never sets the flag &mdash; no recurrence threshold makes it safe, since requiring 3 samples still admits USP39 while losing PAX3 and YAP1.</div>
- <div class="row mut help" id="acathelp" data-help="acat">A <b>hand curation</b>, not a corpus or database read-out &mdash; the only claim in this graph nothing upstream produced. <b>Oncogene addiction</b>: an activating lesion (mutation, amplification, fusion) the tumour cannot survive losing. <b>Non-oncogene addiction</b>: a dependency the transformed state creates with no lesion in the gene itself &mdash; chaperone load, mitotic and replicative stress, metabolic rewiring, apoptotic priming. Loss-of-function tumour suppressors are in <em>neither</em> and sit under <b>unclassified</b>: their loss opens synthetic-lethal vulnerabilities elsewhere, which is a different claim. Hover a node for its group, marked <em>(borderline)</em> where the call could reasonably go the other way. Counts read <em>total &middot; in view</em>: the total is every gene node the curation placed, the second is how many are drawn now. The gap is normal and often large &mdash; a classified gene still has to survive the score, min-connections and min-cluster settings, and this filter's own both-endpoints rule drops a driver whose only partners are unclassified. An edge survives only when BOTH its gene endpoints are ticked, so unticking <b>unclassified</b> leaves the curated subnetwork alone; disease and chemical nodes are never filtered here.</div>
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
  <div class="row mut help" data-help="rel">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels. Thickness and arrowhead size follow the number of <b>independent publications</b> behind the edge, not its sentence count &mdash; one paper repeating itself never thickens a line.</div>
@@ -1316,31 +1038,7 @@ const MAXTGT=Math.max(1,...DATA.nodes.map(n=>n.target||0));
 // and chemical nodes take their type colour, and every node its type SHAPE, so the three
 // kinds stay distinguishable without relying on colour alone.
 function nodeColor(n){if(n.kind&&n.kind!=='gene')return {background:n.bg,border:n.border};if(!n.target)return {background:n.bg||'#cfe3ff',border:n.border||'#2b6cb0'};const t=n.target/MAXTGT,L=(a,b)=>Math.round(a+(b-a)*t);if(n.tcat==='green')return {background:'rgb('+L(200,27)+','+L(230,120)+','+L(201,55)+')',border:'#145a28'};if(n.tcat==='amber')return {background:'rgb('+L(255,224)+','+L(231,134)+','+L(179,0)+')',border:'#9a6700'};return {background:'rgb('+L(255,194)+','+L(217,24)+','+L(232,91)+')',border:'#7a0f3a'};}
-// Curated ADDICTION class (payload acat/agrp/abord). This is the one claim in the graph that
-// comes from neither the corpus nor a database -- a human placed each gene -- so every place it
-// is shown says which of the two addictions it means, and marks the shaky calls "borderline"
-// instead of letting a clean label imply a certainty the curation does not have.
-const ACAT_LAB={driver:'oncogene addiction',noa:'non-oncogene addiction'};
-function addTip(n){return n.acat?(' · '+(ACAT_LAB[n.acat]||n.acat)+': '+n.agrp+(n.abord?' (borderline)':'')):'';}
-// ChimerDB, curated set. The side is the informative half: 5' donates a promoter and keeps
-// none of its protein, 3' contributes the domain the fusion is named for.
-const FUS_LAB={'5p':"5' partner",'3p':"3' partner",both:"5' and 3' partner"};
-// `fsup` marks a gene whose partner this project added rather than ChimerDB, and the tooltip
-// says so: a curated claim and a database claim should never look identical.
-// DepMap. `common` is the one that changes a reading: a gene nearly every line needs is a
-// dependency without discrimination, which is not the same as a target. It is stated on the node
-// rather than left to the panel, because the number alone invites the opposite conclusion.
-const DEP_LAB={common:'common essential',selective:'selective',rare:'rare',none:'no dependent line'};
-function depTip(n){return n.depcls?(' · DepMap: '+DEP_LAB[n.depcls]
-  +(n.depcls==='none'?'':' ('+Math.round(n.dep*1000)/10+'% of lines)')):'';}
-function fusTip(n){return n.fus?(' · fusion: '+(FUS_LAB[n.fus]||n.fus)+' of '+n.fn+(n.fsup?' (curated)':'')+' ('
-  +(n.fpart||[]).slice(0,4).join(', ')+(n.fn>4?', …':'')+')'
-  +(n.fseq?' · '+n.fseq+' In-Frame TCGA samples':'')):'';}
 const KIND={};DATA.nodes.forEach(n=>{KIND[n.id]=n.kind||'gene';});
-// '' (nobody placed this gene) becomes 'none' so it can be a tick box like the other two
-const ACAT={};DATA.nodes.forEach(n=>{ACAT[n.id]=n.acat||'none';});
-const FUS={};DATA.nodes.forEach(n=>{FUS[n.id]=n.fus||'none';});
-const DEPC={};DATA.nodes.forEach(n=>{DEPC[n.id]=n.depcls||'unscreened';});
 // --- training-set provenance ---------------------------------------------------------
 // Every SENTENCE records which corpus produced it: 'ppi' (BioInfer only), 'biored' (BioRED
 // only, i.e. a reading the binary model never claimed) or 'both' (the merge corroborated it).
@@ -1367,14 +1065,6 @@ function buildSrcButtons(){
    +'run step&nbsp;2 with both models (<code>--route-mode additive</code>) to split them.';
 }
 function activeKinds(){const b=[...document.querySelectorAll('.kindf')];return b.length?new Set(b.filter(c=>c.checked).map(c=>c.value)):null;}
-// null when every box is ticked: the filter then costs nothing per edge, and a run whose
-// curation placed no gene at all never renders the row to begin with
-function activeDeps(){const b=[...document.querySelectorAll('.depf')];if(!b.length)return null;
- const on=b.filter(c=>c.checked);return on.length===b.length?null:new Set(on.map(c=>c.value));}
-function activeFus(){const b=[...document.querySelectorAll('.fusf')];if(!b.length)return null;
- const on=b.filter(c=>c.checked);return on.length===b.length?null:new Set(on.map(c=>c.value));}
-function activeAcats(){const b=[...document.querySelectorAll('.acatf')];if(!b.length)return null;
- const on=b.filter(c=>c.checked);return on.length===b.length?null:new Set(on.map(c=>c.value));}
 const net=document.getElementById('net'); let network=null, NODEDS=null;
 // the layout exactly as physics left it, plus the tissue groups of what is on screen; every
 // position control replays from these, so they compose and none of them accumulates drift
@@ -1467,34 +1157,6 @@ function edgeHead(e,vis,cat){const np=new Set(vis.map(s=>s.pmid)).size;return '<
 // edge -- would otherwise be invisible). "?" marks a speculated statement.
 function relTag(s){return s.rc?' <span class=mut style="color:'+(CCOLOR[s.rc]||'#888')+'">['+esc(s.rc)+(s.sp?' ?':'')+']</span>'+(s.sr?' <span class=mut>'+esc(SRCLAB[s.sr]||s.sr)+'</span>':''):'';}
 function edgeTip(e,vis,cat){const d=document.createElement('div');let h=edgeHead(e,vis,cat);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span>'+relTag(s)+' '+hl(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
-// --- co-mention links -----------------------------------------------------------------
-// Sentences name a disease far more often than the models emit a relation for it: 1195 edges
-// in this corpus mention NSCLC, yet 70 of their endpoint nodes carry no NSCLC edge at all --
-// the triple went to "lung cancer" while the sentence said "the lung cancer of NSCLC". These
-// links show that co-occurrence for what it is: dashed, grey, undirected, never given a
-// relation colour, so nothing here can be misread as something a checkpoint predicted.
-// Aliases come from the label itself -- words separated by any run of spaces/hyphens, an
-// interchangeable cancer/carcinoma/tumour/neoplasm tail, and the initials when they spell an
-// acronym of three or more letters ("non-small cell lung carcinoma" -> NSCLC).
-const CM_STOP=new Set(['of','the','and','with','in','a','to']);
-const CM_TAIL='(?:carcinomas?|cancers?|tumou?rs?|neoplasms?)';
-function diseaseAliases(label){
- const words=(label||'').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
- if(!words.length)return null;
- const alts=[words.map((w,i)=>(i===words.length-1&&new RegExp('^'+CM_TAIL+'$').test(w))?CM_TAIL:reEsc(w)).join('[-\\s]+')];
- const ac=words.filter(w=>!CM_STOP.has(w)).map(w=>w[0]).join('').toUpperCase();
- if(ac.length>=3)alts.push('\\b'+ac+'s?\\b');
- return new RegExp(alts.join('|'),'i');
-}
-function cmTip(link,dis){
- const d=document.createElement('div');const lim=20;
- let h='<div class=eth><b>'+esc(labelById[link.nd]||link.nd)+' &middot;&middot;&middot; '+esc(labelById[dis]||dis)+'</b> ('
-  +link.sents.length+' sentences &middot; co-mentioned, no relation predicted)</div>';
- link.sents.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>';});
- if(link.sents.length>lim)h+='<div class=more>+'+(link.sents.length-lim)+' more</div>';
- d.innerHTML=h;return d;
-}
-function activeComention(){return (document.getElementById('comention')||{}).value||'';}
 // --- the disease keep-list ------------------------------------------------------------------
 // A WHITELIST over disease nodes: empty means no constraint (the default), and any tick means
 // "these diseases only". It touches nothing else -- a gene-gene edge has no disease endpoint and
@@ -1667,7 +1329,7 @@ function focusKeep(edges,seeds,hops){
 function build(thr){
  const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
  const txt=activeText(), tm=textMatcher(txt); TM=tm;
- const kinds=activeKinds(), acats=activeAcats(), fuss=activeFus(), deps=activeDeps();
+ const kinds=activeKinds();
  let edges=[];
  // The text query is a LENS, not a threshold input: an edge's support is what survives the
  // score, year, relation and source settings, and the thresholds below judge THAT. Feeding the
@@ -1687,16 +1349,6 @@ function build(thr){
  DATA.edges.forEach(e=>{
    const kf=!kinds||(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to]));
    if(kf)kindOK=true;
-   // The curated class judges GENE endpoints only -- a chemical has no addiction class, and
-   // making it fail the test would delete every drug edge the moment you narrowed to drivers.
-   // Unlike the node-type filter this drops the edge outright rather than feeding the orphan
-   // path: that path exists for node TYPES the corpus never relates to each other, which is a
-   // statement about the data; an unticked class is a statement about what you asked to see.
-   if(acats&&[e.from,e.to].some(nd=>KIND[nd]==='gene'&&!acats.has(ACAT[nd])))return;
-   // same rule as the class row: gene endpoints only, both of them, so unticking a class
-   // removes the edges that reached it rather than leaving half-connected neighbours
-   if(fuss&&[e.from,e.to].some(nd=>KIND[nd]==='gene'&&!fuss.has(FUS[nd])))return;
-   if(deps&&[e.from,e.to].some(nd=>KIND[nd]==='gene'&&!deps.has(DEPC[nd])))return;
    const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
    const np=new Set(sup.map(s=>s.pmid)).size;
    if(mp>1&&np<mp)return;
@@ -1767,23 +1419,7 @@ function build(thr){
  sigRender();
  if(SIGTAB_OPEN)sigTable();
  updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text, q)
- // co-mentions ride on the edges that survived: every endpoint whose visible sentences name the
- // chosen disease gets one dashed link to it, with those sentences (deduped) as its evidence
- const cmDis=activeComention();
- let cmLinks=[];
- if(cmDis){
-   const re=diseaseAliases(labelById[cmDis]||cmDis), by={};
-   // a node already wired to the disease by a drawn relation needs no second, weaker link:
-   // the dashed one means "co-mentioned, and nothing predicted it" for the view you are in
-   const linked=new Set();edges.forEach(o=>{if(o.e.from===cmDis)linked.add(o.e.to);if(o.e.to===cmDis)linked.add(o.e.from);});
-   edges.forEach(o=>{const ms=o.vis.filter(s=>re.test(s.text));if(!ms.length)return;
-     [o.e.from,o.e.to].forEach(nd=>{if(nd!==cmDis&&!linked.has(nd))(by[nd]=by[nd]||[]).push(...ms);});});
-   cmLinks=Object.keys(by).map(nd=>{const seen=new Set(),ss=[];
-     by[nd].forEach(s=>{if(!seen.has(s.text)){seen.add(s.text);ss.push(s);}});
-     ss.sort((a,b)=>b.sc-a.sc);return {nd:nd,sents:ss};});
- }
  const keep=new Set();edges.forEach(o=>{keep.add(o.e.from);keep.add(o.e.to);});
- if(cmLinks.length)keep.add(cmDis);   // the disease itself may have no surviving relation edge
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  // the edgeless fallback, sized by the same measure as everything else: unique sentences in view
  const isoSz={}, isoPub=new Set();
@@ -1795,23 +1431,15 @@ function build(thr){
  const nsz=id=>(nss[id]?nss[id].size:(isoSz[id]||0));
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
   const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
-  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+addTip(n)+fusTip(n)+depTip(n),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
-   borderWidth:(n.fus?3:1),borderWidthSelected:(n.fus?5:2)};});
- updateAcatCounts(nodes,acats);   // nodes is final here: every filter, including this one, has run
- updateFusCounts(nodes,fuss);
- updateDepCounts(nodes,deps);
+  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
+   borderWidth:1,borderWidthSelected:2};});
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:true,scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
- // undirected and unarrowed: a shared sentence has no subject and object
- const _cm={};
- cmLinks.forEach((L,k)=>{const id='cm'+k;_cm[id]=L;
-   eds.push({id:id,from:L.nd,to:cmDis,width:1,dashes:[3,4],color:{color:'#9aa4b2',opacity:0.45},
-             arrows:{to:{enabled:false}},title:cmTip(L,cmDis)});});
  const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));isoPub.forEach(p=>vpub.add(p));
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
  // name what is actually on screen: "378 diseases" beats "378 genes" in a disease-only view
  const KLAB={gene:'genes',disease:'diseases',chemical:'chemicals'};
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(nIso?' &middot; <b>'+nIso+'</b> drawn unconnected: nothing in the corpus relates these node types to each other':'')+(cmLinks.length?' &middot; <b>'+cmLinks.length+'</b> co-mention links to <b>'+esc(labelById[cmDis]||cmDis)+'</b>':'');
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(nIso?' &middot; <b>'+nIso+'</b> drawn unconnected: nothing in the corpus relates these node types to each other':'');
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  NODEDS=data.nodes;
  const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
@@ -1830,13 +1458,7 @@ function build(thr){
  fitLeftPanel();    // self-correcting: a panel narrowed by anything recovers on the next redraw
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
-   if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)'
-     +(n.acat?'<div class=mut>'+ACAT_LAB[n.acat]+' &mdash; '+esc(n.agrp)+(n.abord?' (borderline)':'')+'; curated by hand, not read off the corpus or a database</div>':'')
-     +(n.depcls?'<div class=mut>DepMap: '+DEP_LAB[n.depcls]+', '+Math.round(n.dep*1000)/10+'% of ~1,178 cell lines'
-        +(n.depcls==='common'?' &mdash; a dependency without discrimination, which is not the same as a target':'')
-        +(n.depcls==='none'?' &mdash; or no line in the panel represents its context':'')+'</div>':'')
-     +(n.fus?'<div class=mut>'+(n.fsup?'ChimerDB + curated supplement':'ChimerDB')+': '+FUS_LAB[n.fus]+' of '+n.fn+' &mdash; '+esc((n.fpart||[]).join(', '))+(n.fseq?'; '+n.fseq+' In-Frame TCGA samples':'')+'</div>':'');}
-   else if(p.edges.length&&_cm[p.edges[0]]){const L=_cm[p.edges[0]];info.innerHTML=INFO_HEAD+cmTip(L,cmDis).innerHTML;}
+   if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
    else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=INFO_HEAD+edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
 }
 const thr=document.getElementById('thr');
@@ -1846,21 +1468,6 @@ let CATTOT={};
 // than the edge count -- they answer "how many edges can show me this label", which is the
 // question the tick boxes and the "in view" half answer too.
 function catsOf(e){const c={};e.sents.forEach(s=>c[sentCat(e,s)]=1);return Object.keys(c);}
-// The class row is drawn from the payload, so a run whose ADDICTION table places nothing
-// (a corpus of genes nobody curated) shows no row at all rather than three empty boxes.
-const ACAT_BOX=[['driver','oncogene addiction'],['noa','non-oncogene addiction'],['none','unclassified']];
-let ACATTOT={};
-function buildAcatFilters(){
- const n={};DATA.nodes.forEach(x=>{if((x.kind||'gene')==='gene')n[x.acat||'none']=(n[x.acat||'none']||0)+1;});
- ACATTOT=n;
- const box=ACAT_BOX.filter(([k])=>n[k]);
- const row=document.getElementById('acatfilters');
- // one class (or none) is not a filter -- hide the whole block, heading and help with it
- if(box.length<2){['acatfilters','acathdr','acathelp'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});return;}
- row.innerHTML=box.map(([k,lab])=>'<label><input type=checkbox class=acatf value="'+k+'" checked> '
-   +lab+' <span class=cnt data-acat="'+k+'">('+n[k]+')</span></label>').join(' ');
- document.querySelectorAll('.acatf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
-}
 function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>CATTOT[c]=(CATTOT[c]||0)+1));const cats=Object.keys(CATTOT).sort((a,b)=>CATTOT[b]-CATTOT[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+esc(c)+'" checked> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+esc(c)+' <span class=cnt data-cat="'+esc(c)+'">('+CATTOT[c]+')</span></label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
 // Counts are LIVE: "(total · N in view)" is recomputed from the sentences actually drawn, so
 // "N in view" is exactly the number of drawn edges that can show you a sentence tagged with
@@ -1870,56 +1477,6 @@ function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>
 // and min-cluster size all prune afterwards. A category pruned to nothing reads 0 (in red)
 // instead of looking available: ticking it alone would leave the canvas blank, typically
 // because its edges form components smaller than "Min cluster size".
-// The class counts read "total · in view" for the same reason the relation ones do, and the
-// gap between the two halves is bigger here than anywhere else in the panel: the curation places
-// 177 of 424 genes, but ticking driver+noa alone draws 102 of them at score 0.5. The missing 75
-// are not a filter bug -- 42 hold a single edge and min-connections (floor 2) peels them, 17 have
-// only UNCLASSIFIED partners so the both-endpoints rule removes their last edge, and 16 fall
-// below degree or cluster once the class filter has thinned the edge set. Showing the payload
-// total alone read as a promise the view could not keep.
-const DEP_BOX=[['selective','selective'],['common','common essential'],['rare','rare'],['none','no dependent line'],['unscreened','not screened']];
-let DEPTOT={};
-function buildDepFilters(){
- const n={};DATA.nodes.forEach(x=>{if((x.kind||'gene')==='gene')n[x.depcls||'unscreened']=(n[x.depcls||'unscreened']||0)+1;});
- DEPTOT=n;
- const box=DEP_BOX.filter(([k])=>n[k]);
- const row=document.getElementById('depfilters');
- if(box.length<2){['depfilters','dephdr','dephelp'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});return;}
- row.innerHTML=box.map(([k,lab])=>'<label><input type=checkbox class=depf value="'+k+'" checked> '
-   +lab+' <span class=cnt data-dep="'+k+'">('+n[k]+')</span></label>').join(' ');
- document.querySelectorAll('.depf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
-}
-function updateDepCounts(nodes,deps){const seen={};
- nodes.forEach(n=>{if(KIND[n.id]==='gene')seen[DEPC[n.id]]=(seen[DEPC[n.id]]||0)+1;});
- document.querySelectorAll('#depfilters .cnt').forEach(el=>{const k=el.getAttribute('data-dep');
-  const on=!deps||deps.has(k);
-  el.textContent=on?('('+(DEPTOT[k]||0)+' · '+(seen[k]||0)+' in view)'):('('+(DEPTOT[k]||0)+' · off)');
-  el.style.color=(on&&!seen[k])?'#b3243b':'';});}
-const FUS_BOX=[['5p',"5′ partner"],['3p',"3′ partner"],['both',"5′ and 3′"],['none','not recorded']];
-let FUSTOT={};
-function buildFusFilters(){
- const n={};DATA.nodes.forEach(x=>{if((x.kind||'gene')==='gene')n[x.fus||'none']=(n[x.fus||'none']||0)+1;});
- FUSTOT=n;
- const box=FUS_BOX.filter(([k])=>n[k]);
- const row=document.getElementById('fusfilters');
- // nothing to filter on when ChimerDB was never staged: hide the block rather than show 1 box
- if(box.length<2){['fusfilters','fushdr','fushelp'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display='none';});return;}
- row.innerHTML=box.map(([k,lab])=>'<label><input type=checkbox class=fusf value="'+k+'" checked> '
-   +lab+' <span class=cnt data-fus="'+k+'">('+n[k]+')</span></label>').join(' ');
- document.querySelectorAll('.fusf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
-}
-function updateFusCounts(nodes,fuss){const seen={};
- nodes.forEach(n=>{if(KIND[n.id]==='gene')seen[FUS[n.id]]=(seen[FUS[n.id]]||0)+1;});
- document.querySelectorAll('#fusfilters .cnt').forEach(el=>{const k=el.getAttribute('data-fus');
-  const on=!fuss||fuss.has(k);
-  el.textContent=on?('('+(FUSTOT[k]||0)+' · '+(seen[k]||0)+' in view)'):('('+(FUSTOT[k]||0)+' · off)');
-  el.style.color=(on&&!seen[k])?'#b3243b':'';});}
-function updateAcatCounts(nodes,acats){const seen={};
- nodes.forEach(n=>{if(KIND[n.id]==='gene')seen[ACAT[n.id]]=(seen[ACAT[n.id]]||0)+1;});   // the id maps, not a scan per node
- document.querySelectorAll('#acatfilters .cnt').forEach(el=>{const k=el.getAttribute('data-acat');
-  const on=!acats||acats.has(k);
-  el.textContent=on?('('+(ACATTOT[k]||0)+' · '+(seen[k]||0)+' in view)'):('('+(ACATTOT[k]||0)+' · off)');
-  el.style.color=(on&&!seen[k])?'#b3243b':'';});}
 function updateCatCounts(edges,cats){const seen={};edges.forEach(o=>{const c={};o.vis.forEach(s=>c[sentCat(o.e,s)]=1);for(const k in c)seen[k]=(seen[k]||0)+1;});
  document.querySelectorAll('#catfilters .cnt').forEach(el=>{const c=el.getAttribute('data-cat');
   el.textContent=cats.has(c)?('('+CATTOT[c]+' · '+(seen[c]||0)+' in view)'):('('+CATTOT[c]+' · off)');
@@ -1999,8 +1556,7 @@ txtEl.addEventListener('keydown',ev=>{if(ev.key==='Enter'){clearTimeout(txtTimer
 // Computed from the edges the graph is actually DRAWING, so the ranking is always an answer
 // about the picture in front of you: every control that shapes the graph -- score, year, text,
 // relation type, training set, node type, the support thresholds and the structural pruning --
-// reshapes this too, and build() recomputes it on every pass. Co-mention links are excluded:
-// they are co-occurrence, and this counts relations.
+// reshapes this too, and build() recomputes it on every pass.
 let SIG=[];
 function sigCompute(drawn){
  const acc={};
@@ -2447,10 +2003,10 @@ function yearChanged(fromTable){
 [yl2,yh2].forEach(el=>{if(el)el.addEventListener('input',()=>yearChanged(true));});
 updYr();   // the ranking follows from build(), which runs once at the end of this script
 const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
-// disease list for the co-mention picker; the gene-only graph has none, so the row hides itself
-(function(){const sel=document.getElementById('comention');const ds=DATA.nodes.filter(n=>(n.kind||'gene')==='disease').sort((a,b)=>a.label.localeCompare(b.label));
+// disease list for the tissue controls; the gene-only graph has none, so the row hides itself
+(function(){const ds=DATA.nodes.filter(n=>(n.kind||'gene')==='disease').sort((a,b)=>a.label.localeCompare(b.label));
  const trow=document.getElementById('tissuerow');
- if(!ds.length){const r=document.getElementById('cmrow');if(r)r.style.display='none';if(trow)trow.style.display='none';return;}
+ if(!ds.length){if(trow)trow.style.display='none';return;}
  // say up front how much of the disease list the name-based tissue reading actually covers
  const tg={};ds.forEach(n=>{const t=tissueOf(n.label);if(t)(tg[t]=tg[t]||[]).push(n.label);});
  const multi=Object.keys(tg).filter(t=>tg[t].length>1);
@@ -2459,8 +2015,7 @@ const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]
  if(el)el.textContent=hit+' of '+ds.length+' disease nodes fall into '+multi.length+' tissues; the rest are left where the layout puts them';
  // also a position control: replay from BASEPOS instead of rebuilding the whole network
  document.getElementById('tissuestack').addEventListener('change',applyLayoutShape);
- ds.forEach(n=>{const o=document.createElement('option');o.value=n.id;o.textContent=n.label;sel.appendChild(o);});
- sel.addEventListener('change',()=>build(+thr.value));})();
+})();
 const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
 // The left panel is exactly as wide as its zoom row: measured at runtime rather than guessed in
 // CSS, because the buttons' width depends on the font that actually resolved. Fit's right edge
@@ -2494,7 +2049,7 @@ document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>b
 (function(){const lp=document.getElementById('lpanel');
  const kids=lp?Array.prototype.slice.call(lp.children||[]):[];   // HTMLCollection, not an array
  if(kids.length&&!kids.some(c=>!c.style||c.style.display!=='none'))lp.style.display='none';})();
-buildAcatFilters();buildFusFilters();buildDepFilters();buildCatFilters();buildSrcButtons();build(1);
+buildCatFilters();buildSrcButtons();build(1);
 </script></body></html>"""
 
 
@@ -2613,16 +2168,6 @@ def main():
               + (f"; not yet run: {', '.join(bg['missing'])}" if bg['missing'] else ""))
         universe = kept if args.score <= GRAPH_BASE else [t for t in d if keep_fn(t, GRAPH_BASE)]
         payload = graph_payload_multi(universe, flags)
-        nfus = sum(1 for n in payload["nodes"] if n.get("fus"))
-        if nfus:
-            side = collections.Counter(n["fus"] for n in payload["nodes"] if n.get("fus"))
-            nsup = sum(1 for n in payload["nodes"] if n.get("fsup"))
-            print(f"  fusion partners: {nfus} gene nodes "
-                  f"(ChimerKB{f' + {nsup} from FUSION_SUPPLEMENT' if nsup else ''}) "
-                  f"({side.get('5p', 0)} 5', {side.get('3p', 0)} 3', {side.get('both', 0)} both)")
-        ndep = collections.Counter(n.get("depcls") for n in payload["nodes"] if n.get("depcls"))
-        if ndep:
-            print(f"  DepMap dependency: " + ", ".join(f"{k} {v}" for k, v in ndep.most_common()))
         if N_FALSE_DROPPED:
             print(f"  drug targets: dropped {N_FALSE_DROPPED} curated false gene-chemical "
                   f"pair(s) (FALSE_TARGETS)")
