@@ -171,11 +171,12 @@ later stage reads &mdash; after the corpus that stage&nbsp;2 consumes has been a
   <td class='num'>4</td>
   <td><code>ncbi_pdf.py</code></td>
   <td>The <code>high_impact_xmls/PMC*.xml</code> files <strong>lacking a <code>&lt;body&gt;</code></strong>
-      <span class='dim'>(env: <code>RETRY_FAILED</code>, <code>TIME_BUDGET</code>)</span></td>
+      <span class='dim'>(env: <code>RETRY_FAILED</code>, <code>TIME_BUDGET</code>, <code>FRESH</code>)</span></td>
   <td><code>ncbi_pdfs_grobid/PMC*.pdf</code><br><code>ncbi_pdfs_grobid/ncbi_pdf_download_summary.tsv</code><br><code>ncbi_pdfs_grobid/_failed.tsv</code> <span class='dim'>(append-only failure journal)</span><br><code>summaries/ncbi_pdf.html</code></td>
   <td>For each no-<code>&lt;body&gt;</code> record, downloads the PDF via a cascade (PMC proof-of-work
       &rarr; OpenAlex &rarr; CrossRef), resolving PMCID&rarr;PMID/DOI through the NCBI ID Converter.
-      <strong>Empties <code>ncbi_pdfs_grobid/</code> before writing.</strong></td>
+      <strong>Keeps resume:</strong> PDFs and journal rows for current targets are kept, those for
+      PMCIDs no longer targeted are pruned; <code>FRESH=1</code> empties <code>ncbi_pdfs_grobid/</code> instead.</td>
 </tr>
 <tr>
   <td class='num'>5</td>
@@ -358,7 +359,7 @@ python subtract.py</pre>
 <div class='warn'>These scripts are <strong>not executed automatically</strong>: most reach external
 services (NCBI E-utilities, OpenAlex, CrossRef) and step 5 needs a running GROBID container. Set
 <code>NCBI_API_KEY</code> to lift the 3&nbsp;req/s rate limit. Each run starts clean (the bulk output
-dir is emptied before writing) <em>except</em> <code>grobid_xml.py</code>, which resumes; bound the
+dir is emptied before writing) <em>except</em> <code>ncbi_pdf.py</code> and <code>grobid_xml.py</code>, which resume; bound the
 network stages with <code>TIME_BUDGET</code> if needed. <strong>Step&nbsp;8 deletes</strong> the five
 intermediate directories &mdash; everything re-downloadable, and the corpus, <code>pmids/</code> and
 <code>summaries/</code> are kept &mdash; so run <code>--stop 7</code> (or <code>DRY_RUN=1

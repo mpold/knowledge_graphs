@@ -34,6 +34,10 @@ AUTO-RECOVERY (resume after interruption / time-out / crash)
   (``%PDF-`` header, >1 KB), then ``os.replace``'d into place -- a killed curl
   never leaves a truncated PDF that looks complete. Stray ``.part`` files are
   swept on start-up.
+* Stale output is pruned, not wiped: on start-up, PDFs and journal rows for
+  PMCIDs that are no longer targets (left over from a different query /
+  percentile) are removed, and everything for the current targets is kept.
+  ``FRESH=1`` empties ``ncbi_pdfs_grobid/`` instead, for a from-scratch run.
 * Wall-clock cap: ``TIME_BUDGET=<seconds>`` makes a run self-exit cleanly before a
   CI/command time-out; re-run to finish (0 = unlimited, the default).
 * Ctrl-C / unexpected exit is caught: the summary TSV is always (re)written in a
@@ -78,6 +82,7 @@ DELAY = 0.35
 # Auto-recovery knobs (env-overridable).
 TIME_BUDGET = float(os.environ.get("TIME_BUDGET", "0"))    # seconds; 0 = unlimited
 RETRY_FAILED = os.environ.get("RETRY_FAILED", "").strip() in ("1", "true", "yes")
+FRESH = os.environ.get("FRESH", "").strip() in ("1", "true", "yes")
 
 CURL_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
@@ -111,6 +116,31 @@ def load_log(path):
                 if row and row[0] not in ("", "PMCID", "Total_attempted", "Total"):
                     out[row[0]] = row
     return out
+
+
+def prune_stale(output_dir, targets):
+    """Drop PDFs and journal rows whose PMCID is not in ``targets``.
+
+    Keeps resume working while still stopping a previous query's PDFs from
+    leaking into GROBID: output for current targets survives, the rest goes.
+    """
+    removed = 0
+    for pmcid in get_already_downloaded(output_dir) - targets:
+        os.remove(os.path.join(output_dir, f"{pmcid}.pdf"))
+        removed += 1
+    for path in (DONE_LOG, FAILED_LOG):
+        rows = load_log(path)
+        keep = [row for pmcid, row in rows.items() if pmcid in targets]
+        if len(keep) == len(rows):
+            continue
+        tmp = path + ".part"
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f, delimiter="	")
+            w.writerow(LOG_HEADER)
+            w.writerows(keep)
+        os.replace(tmp, path)
+    if removed:
+        print(f"Pruned {removed} stale PDFs (not in the current target set)")
 
 
 def sweep_partials(output_dir):
@@ -696,7 +726,11 @@ def main():
     records, xml_meta = load_no_body_records(XML_DIR)
     total_targets = len(records)
     print(f"Loaded {total_targets} no-<body> PMC*.xml records from {XML_DIR}")
-    _empty_content_dir(OUTPUT_DIR)           # fresh run: clear stale PDFs before writing
+    if FRESH:
+        _empty_content_dir(OUTPUT_DIR)       # FRESH=1: start from scratch
+    else:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        prune_stale(OUTPUT_DIR, {pmcid for _, pmcid in records})
     sweep_partials(OUTPUT_DIR)               # auto-recovery: clear half-written downloads
 
     # Resume: skip PDFs already on disk and PMCIDs already journalled as failed.
