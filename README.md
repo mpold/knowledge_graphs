@@ -6,7 +6,7 @@ A biomedical relation-extraction pipeline: from a single **PubMed query** to an 
 | Stage | What | Where it runs | Entry point |
 |------:|------|---------------|-------------|
 | **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (10 stages over 9 root scripts) |
-| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (19-step chain) |
+| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (20-step chain) |
 | **3** | Triples → high-confidence gene / disease / chemical **graph** | local | `high_confidence_g.py` |
 
 Each stage hands off to the next **by files**. Rendered walk-throughs of every stage ship with
@@ -143,9 +143,9 @@ always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` 
   project's `gpu_bundle/experimental_ner/` against another corpus. See `step_1_publications.html`.
 
 ### Stage 2 — triples / GPU bundle (Kaggle or local GPU)
-`gpu_bundle/gpu.py` orchestrates a 19-step chain (RE-model training ×2 → **drug lexicon** →
+`gpu_bundle/gpu.py` orchestrates a 20-step chain (RE-model training ×2 → **drug lexicon** →
 BioBERT NER → GENETIC/DISEASE/CHEMICAL normalization → rule triples → learned relation extraction
-→ model comparison → **zip**) in one working directory. See
+→ model comparison → scores by publication year → **zip**) in one working directory. See
 [`Step_2_updated_triples.html`](Step_2_updated_triples.html) for the two BioRED steps and
 [`step_2_triples.html`](step_2_triples.html) for the original 16.
 
@@ -389,7 +389,7 @@ it is modified. Without one, stage 1 simply downloads everything.
 ├── high_confidence_g.py                         # stage 3: the graph (typed edges + --merge)
 ├── audit_drug_targets.py                        # stage 3: regression test for false drug targets
 ├── gpu_bundle/                                  # stage 2: the GPU pipeline
-│   ├── gpu.py                                   #   orchestrator (19 steps)
+│   ├── gpu.py                                   #   orchestrator (20 steps)
 │   ├── drug_lexicon.py                          #   NCIt drug lexicon: builder + matcher (step 3)
 │   ├── requirements.txt                         #   GPU deps: torch/transformers/datasets<4/numpy/lxml
 │   ├── *.py                                     #   the step scripts
