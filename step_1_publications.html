@@ -43,7 +43,7 @@ into a de-duplicated, full-text corpus ready for named-entity recognition, then 
 intermediate directories that produced it.</p>
 
 <div class='stat-grid'>
-  <div class='stat'><div class='v'>9</div><div class='k'>scripts in the pipeline (8 + <code>from_archive.py</code>)</div></div>
+  <div class='stat'><div class='v'>10</div><div class='k'>scripts in the pipeline (8 + <code>from_archive.py</code> + <code>pub_year_xml.py</code>)</div></div>
   <div class='stat'><div class='v'>2</div><div class='k'>STDIN inputs (PubMed query, impact percentile)</div></div>
   <div class='stat'><div class='v'>9</div><div class='k'>HTML summaries produced</div></div>
   <div class='stat'><div class='v'>linear</div><div class='k'>each step feeds the next</div></div>
@@ -88,6 +88,9 @@ run with <code>--stop 7</code> to keep the intermediates too.</div>
   <div class='node'><span class='s'>6b. from_archive.py</span> <span class='pill'>re-seed</span>
     <div class='io'>in: <code>archive_xmls/</code> &nbsp;&rarr;&nbsp; out: <code>gpu_bundle/experimental_ner/</code> <span class='dim'>(restores the archive contribution step 6 wiped)</span></div></div>
   <div class='arrow'>&darr;&nbsp; gpu_bundle/experimental_ner/ <span class='dim'>(downloaded &cup; archive)</span></div>
+  <div class='node'><span class='s'>6c. pub_year_xml.py</span> <span class='pill'>year stamp</span> <span class='pill'>offline</span>
+    <div class='io'>in: <code>gpu_bundle/experimental_ner/</code> + <code>pmids/pmid_pmc_ids.tsv</code> &nbsp;&rarr;&nbsp; out: <code>gpu_bundle/experimental_ner/</code> <span class='dim'>(each file stamped in place with <code>&lt;?pub-year YYYY?&gt;</code>)</span></div></div>
+  <div class='arrow'>&darr;&nbsp; gpu_bundle/experimental_ner/ <span class='dim'>(every file dated)</span></div>
   <div class='node'><span class='s'>7. pre_ner_xml_structure.py</span>
     <div class='io'>in: <code>gpu_bundle/experimental_ner/</code> &nbsp;&rarr;&nbsp; out: <code>summaries/pre_ner_xml_structure.html</code></div></div>
   <div class='arrow'>&darr;&nbsp; corpus complete <span class='dim'>(the intermediates are now dead weight)</span></div>
@@ -207,6 +210,24 @@ later stage reads &mdash; after the corpus that stage&nbsp;2 consumes has been a
       guarded so a no-op re-run never wipes the corpus).</td>
 </tr>
 <tr>
+  <td class='num'>6c</td>
+  <td><code>pub_year_xml.py</code> <span class='pill'>year stamp</span></td>
+  <td><code>gpu_bundle/experimental_ner/PMC*.xml</code> and <code>*.grobid.tei.xml</code><br><code>pmids/pmid_pmc_ids.tsv</code>
+      <span class='dim'>(options: <code>--check</code> reports only; <code>--xml-dir</code>, <code>--pmid-tsv</code>)</span></td>
+  <td><code>gpu_bundle/experimental_ner/PMC*.{xml,grobid.tei.xml}</code> <span class='dim'>(stamped in place)</span></td>
+  <td>Writes one processing instruction, <code>&lt;?pub-year YYYY?&gt;</code>, into the prolog of every
+      corpus file (right after the XML declaration) &mdash; valid in both PMC JATS and GROBID TEI, and
+      ignored by every parser &mdash; so the year <strong>travels with the document</strong> and stage&nbsp;2
+      (<code>gpu_bundle/pub_years.py</code>) dates papers offline. Year source, first hit wins: the
+      <code>year</code> column of <code>pmids/pmid_pmc_ids.tsv</code> (PubMed), else the date in the XML
+      itself (JATS <code>&lt;pub-date&gt;&lt;year&gt;</code>, TEI <code>&lt;publicationStmt&gt;&lt;date when&gt;</code>).
+      The table wins because it is the year the rest of stage&nbsp;1 reports against. Offline and
+      idempotent (an existing stamp is replaced; a file already correct is not rewritten).
+      <strong>Exits non-zero, listing the files, if any document stays undated</strong> &mdash; which aborts
+      the orchestrator. On the current corpus: 3,769 XML, all dated from the table, 411 of them stating a
+      different year themselves (table kept), range 1949&ndash;2026.</td>
+</tr>
+<tr>
   <td class='num'>7</td>
   <td><code>pre_ner_xml_structure.py</code></td>
   <td><code>gpu_bundle/experimental_ner/PMC*.xml</code> and <code>*.grobid.tei.xml</code></td>
@@ -255,18 +276,19 @@ later stage reads &mdash; after the corpus that stage&nbsp;2 consumes has been a
 <h2>3. How to run</h2>
 
 <h3>One command &mdash; the orchestrator</h3>
-<p><code>step_1_orchestrator.py</code> runs all ten stages &mdash; the eight core scripts plus
-<code>from_archive.py</code> at <strong>1b</strong> and <strong>6b</strong> &mdash; in the order above,
+<p><code>step_1_orchestrator.py</code> runs all eleven stages &mdash; the eight core scripts plus
+<code>from_archive.py</code> at <strong>1b</strong> and <strong>6b</strong> and <code>pub_year_xml.py</code>
+at <strong>6c</strong> &mdash; in the order above,
 in one process. It collects two inputs on <code>STDIN</code> up front &mdash; the <strong>PubMed
 query</strong> for step&nbsp;1, then the <strong>publication impact percentile</strong> for
 step&nbsp;2 &mdash; and feeds each to the stage that consumes it. It <strong>aborts the moment any
 stage exits non-zero</strong> (so a failed stage never silently poisons the next). Every path is
 script-relative, so it can be launched from any working directory.</p>
 <p>Steps are addressed by <strong>label</strong>, not position &mdash; <code>1</code>, <code>1b</code>,
-<code>2</code>&hellip;<code>6</code>, <code>6b</code>, <code>7</code>, <code>8</code> &mdash; so the core
+<code>2</code>&hellip;<code>6</code>, <code>6b</code>, <code>6c</code>, <code>7</code>, <code>8</code> &mdash; so the core
 stages keep the numbers they always had (<code>--start 4</code> still resumes at <code>ncbi_pdf.py</code>).
 Steps&nbsp;1b/6b are <strong>skipped automatically, with a printed notice, when the archive directory
-does not exist</strong>, so a checkout with no local corpus still runs the plain eight-stage pipeline;
+does not exist</strong>, so a checkout with no local corpus still runs the plain pipeline (the eight core stages plus 6c);
 naming one explicitly (<code>--archive</code> or <code>ARCHIVE_DIR</code>) that is missing is a hard
 error instead, since that is a typo rather than an absence. <code>--no-archive</code> skips them
 outright and downloads the whole selection.</p>
@@ -325,6 +347,10 @@ the network stages still reach out and step&nbsp;5 still needs Docker + GROBID.<
       <span class='dim'>&mdash; only if step&nbsp;1b was run: step&nbsp;6 clean-rebuilds
       <code>gpu_bundle/experimental_ner/</code>, so re-run this to restore the archive contribution
       from <code>archive_xmls/</code>. Cheap and idempotent.</span></li>
+  <li><span class='step-no'>6c</span><code>python pub_year_xml.py</code>
+      <span class='dim'>&mdash; stamp every corpus XML with <code>&lt;?pub-year YYYY?&gt;</code> for
+      stage&nbsp;2; run it after 6/6b, since both rewrite the corpus. <code>--check</code> reports coverage
+      without writing. Offline and idempotent.</span></li>
   <li><span class='step-no'>7</span><code>python pre_ner_xml_structure.py</code></li>
   <li><span class='step-no'>8</span><code>python clean_up.py</code> <span class='pill'>deletes</span>
       <span class='dim'>&mdash; removes <code>archive_xmls/</code>, <code>grobid_xmls/</code>,
@@ -383,7 +409,9 @@ python clean_up.py</code>) if you want to inspect them first.</div>
       <code>clean_up.html</code>) &mdash; plus <code>from_archive.html</code> when steps&nbsp;1b/6b run.
       <code>summaries/</code> survives the step&nbsp;8 clean-up.</li>
   <li><strong>Hand-off to step 2.</strong> The assembled NER corpus in <code>gpu_bundle/experimental_ner/</code>
-      is the input to the GPU bundle (<code>gpu_bundle/gpu.py</code>); see step&nbsp;2.</li>
+      is the input to the GPU bundle (<code>gpu_bundle/gpu.py</code>); see step&nbsp;2. Thanks to
+      step&nbsp;6c every file carries its own <code>&lt;?pub-year?&gt;</code> stamp, so stage&nbsp;2 needs
+      neither <code>pmids/pmid_pmc_ids.tsv</code> nor NCBI to date a paper.</li>
   <li><strong>Clean-up is the last step, not a stage of the data flow.</strong> <code>clean_up.py</code>
       (step&nbsp;8) produces no corpus: it deletes <code>archive_xmls/</code>, <code>grobid_xmls/</code>,
       <code>high_impact_xmls/</code>, <code>named_entity_xmls/</code> and <code>ncbi_pdfs_grobid/</code>
