@@ -16,58 +16,34 @@ plus a per-year table (n, publications, min/P5/Q1/median/Q3/P95/max/mean).
 Step 19 of gpu.py (optional; after relation_extraction writes the triples, before zip_work
 bundles the run). Standalone it works on any finished run tree via --root.
 
-YEARS come from databases/pmc_years.json, the PMC -> year cache pub_years.py (step 16)
-builds, topped up from the stage-1 table pmids/pmid_pmc_ids.tsv (pubmed_query.py) when one
-is found near the run -- the table has a year for every document in the corpus, unlike the
-XML itself, where half the GROBID TEI files carry no date. Nothing here goes to the
-network. A triple's pmid is reduced to its bare PMC accession first, since GROBID-derived
-documents carry ids like "PMC123.grobid.tei". Triples whose article has no year in either
-source are counted as undated and left off the plots; the page reports how many.
+YEARS come from databases/pmc_years.json, which pub_years.py (step 4) harvests from the
+<?pub-year?> stamps stage 1 writes into every corpus XML. Nothing here goes to the network.
+A triple's pmid is reduced to its bare PMC accession first, since GROBID-derived documents
+carry ids like "PMC123.grobid.tei". Triples whose article has no year are counted as
+undated and left off the plots; the page reports how many.
 
-Run::  python triples_per_year.py [--root kaggle_working] [--triples FILE] [--pmid-tsv FILE] [--out FILE] [--min-n 100]
+Run::  python triples_per_year.py [--root kaggle_working] [--triples FILE] [--out FILE] [--min-n 100]
 """
 import argparse
 import collections
-import csv
 import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 # relative to the run root (--root), the working dir gpu.py runs every step in
 TRIPLES = "TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"   # relation_extraction.py (step 17)
-YEARS_CACHE = "databases/pmc_years.json"                                   # pub_years.py (step 16)
-PMID_TSV = "pmids/pmid_pmc_ids.tsv"                                        # stage-1 table (pubmed_query.py)
+YEARS_CACHE = "databases/pmc_years.json"                                   # pub_years.py (step 4)
 OUT = "summaries/triples_per_year.html"
 NBINS = 40   # histogram bins over [0, 1]
 
 
-def find_tsv(explicit, root):
-    """The stage-1 table, or None -- searched where pub_years.py looks for it."""
-    if explicit:
-        p = Path(explicit)
-        return p if p.exists() else None
-    for base in (root, root.parent, ROOT, ROOT.parent):
-        if (base / PMID_TSV).exists():
-            return base / PMID_TSV
-    return None
-
-
-def load_years(root, tsv):
-    """PMC accession -> publication year: the step-16 cache first, the table for the rest."""
-    years, cache = {}, root / YEARS_CACHE
-    if cache.exists():
-        years = {k: int(v) for k, v in json.loads(cache.read_text(encoding="utf-8")).items() if v}
-        print(f"  {YEARS_CACHE}: {len(years):,} accessions with a year")
-    if tsv:
-        with open(tsv, encoding="utf-8", newline="") as fh:
-            table = {r["pmc_id"]: int(r["year"]) for r in csv.DictReader(fh, delimiter="\t")
-                     if r.get("pmc_id") and (r.get("year") or "").strip().isdigit()}
-        added = {k: v for k, v in table.items() if k not in years}
-        years.update(added)
-        print(f"  {tsv.name}: {len(table):,} accessions with a year; {len(added):,} not in the cache")
-    if not years:
-        raise SystemExit(f"no publication years: neither {cache} nor {PMID_TSV} was found "
-                         f"(run pub_years.py first, or pass --pmid-tsv)")
+def load_years(root):
+    """PMC accession -> publication year, from the step-4 cache."""
+    cache = root / YEARS_CACHE
+    if not cache.exists():
+        raise SystemExit(f"no publication years: {cache} not found (run pub_years.py first)")
+    years = {k: int(v) for k, v in json.loads(cache.read_text(encoding="utf-8")).items() if v}
+    print(f"  {YEARS_CACHE}: {len(years):,} accessions with a year")
     return years
 
 
@@ -116,9 +92,6 @@ def main():
     ap.add_argument("--root", "--data-root", default=str(ROOT),
                     help="run tree holding TRIPLES/ and databases/ (default: next to this script)")
     ap.add_argument("--triples", help=f"triples JSON to plot (default: <root>/{TRIPLES})")
-    ap.add_argument("--pmid-tsv", default=None,
-                    help=f"stage-1 table with pmc_id and year columns, topping up <root>/{YEARS_CACHE} "
-                         f"(default: {PMID_TSV} found near the root or this script)")
     ap.add_argument("--out", help=f"HTML to write (default: <root>/{OUT})")
     ap.add_argument("--min-n", type=int, default=100, help="years with fewer triples are drawn faded (default 100)")
     args = ap.parse_args()
@@ -129,7 +102,7 @@ def main():
         raise SystemExit(f"no triples file at {src} (relation_extraction.py writes it)")
     with open(src, encoding="utf-8") as fh:
         triples = json.load(fh)
-    data = collect(triples, load_years(root, find_tsv(args.pmid_tsv, root)))
+    data = collect(triples, load_years(root))
     if not data["rows"]:
         raise SystemExit(f"no dated triples with a score in {src}")
 

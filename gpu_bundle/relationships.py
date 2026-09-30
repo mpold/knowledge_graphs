@@ -69,7 +69,7 @@ IN = OUT_DIR / "triples_GENETIC_DISEASE_CHEMICAL_normalized.json"
 TRIPLES_BASE = OUT_DIR / "triples.json"
 GG_OUT = OUT_DIR / "genetic_genetic.json"
 HTML_OUT = OUT_DIR / "relationships.html"
-# PMC accession -> publication year, populated by pub_years.py (NCBI E-utilities)
+# PMC accession -> publication year, harvested by pub_years.py from the corpus <?pub-year?> stamps
 YEARS_CACHE = ROOT / "databases" / "pmc_years.json"
 
 DC_TYPES = ("DISEASE", "CHEMICAL")
@@ -264,8 +264,9 @@ filter (see below).</li>
 <li><code>"chemicals"</code> &mdash; the sorted ChEBI chemical labels of any CHEMICAL
 entity in the triple's sentence (enables chemical-specific filtering).</li>
 <li><code>"year"</code> &mdash; the publication year of the source article, resolved
-from its PMC accession via NCBI E-utilities and cached in
-<code>databases/pmc_years.json</code> (built by <code>pub_years.py</code>);
+from its PMC accession via <code>databases/pmc_years.json</code>, which
+<code>pub_years.py</code> harvests from the <code>&lt;?pub-year?&gt;</code> stamp stage 1
+writes into every corpus XML;
 <code>null</code> if not in the cache.</li>
 </ul>
 

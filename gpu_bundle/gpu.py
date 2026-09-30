@@ -13,19 +13,19 @@ Orchestrates twenty steps in dependency order:
                           (BigBIO biored -> biored-biobert-re/)  GPU, internet [gated]
     3  drug_lexicon.py --build   NCIt drug names -> databases/ncit_drugs.json
                          CPU  [optional, internet]
-    4  sentences.py      BioBERT result-sentence selection + NER (experimental_ner/ -> sentences/)  GPU
-    5  roman.py          GENETIC -> HGNC (roman key)                 CPU
-    6  greek.py          GENETIC -> HGNC (greek key)                 CPU
-    7  keys_values.py    HGNC coverage reports                       CPU
-    8  controls.py       control-gene flag                           CPU
-    9  disease.py        DISEASE -> MONDO                            CPU
-    10 phenotypes.py     phenotype flag                              CPU
-    11 chemical.py       CHEMICAL -> ChEBI, then NCIt for the rest   CPU
-    12 nonchemical.py    non-chemical flag                           CPU
-    13 target_pharm.py   chemical<->gene-target cross-links          CPU
-    14 triples.py        base triples + normalized variants          CPU
-    15 relationships.py  gene-gene slice (genetic_genetic.json)      CPU  [optional]
-    16 pub_years.py      PMC->year, table first (pmc_years.json)     CPU  [optional, internet if no table]
+    4  pub_years.py      <?pub-year?> stamps in experimental_ner/ -> pmc_years.json  CPU  [optional]
+    5  sentences.py      BioBERT result-sentence selection + NER (experimental_ner/ -> sentences/)  GPU
+    6  roman.py          GENETIC -> HGNC (roman key)                 CPU
+    7  greek.py          GENETIC -> HGNC (greek key)                 CPU
+    8  keys_values.py    HGNC coverage reports                       CPU
+    9  controls.py       control-gene flag                           CPU
+    10 disease.py        DISEASE -> MONDO                            CPU
+    11 phenotypes.py     phenotype flag                              CPU
+    12 chemical.py       CHEMICAL -> ChEBI, then NCIt for the rest   CPU
+    13 nonchemical.py    non-chemical flag                           CPU
+    14 target_pharm.py   chemical<->gene-target cross-links          CPU
+    15 triples.py        base triples + normalized variants          CPU
+    16 relationships.py  gene-gene slice (genetic_genetic.json)      CPU  [optional]
     17 relation_extraction.py --normalize --route-mode additive
                          BioBERT-scored triples, every applicable model  GPU
     18 compare_re.py     PPI vs BioRED on the same pairs             CPU  [optional]
@@ -43,7 +43,13 @@ THE DRUG LEXICON (step 3 -- why it is optional, and what is lost without it)
   regex alone ("-mab", "-tug", "-bart", "-mig", "-cept"), which still recognises antibody
   names but cannot resolve brand names, code names or synonyms, and chemical.py cannot
   normalize any of them. Run it once with internet on and upload the JSON with the dataset
-  thereafter, exactly like pmc_years.json.
+  thereafter.
+
+PUBLICATION YEARS (step 4)
+  Stage 1 (pub_year_xml.py) stamps every experimental_ner/ XML with <?pub-year YYYY?>, so
+  the corpus carries its own dates. pub_years.py only harvests those stamps into
+  databases/pmc_years.json -- offline, before sentences.py, so every later step that dates
+  a paper (relationships 16, triples_per_year 19) finds the cache already built.
 
 THE TRAINING GATE (steps 1-2 are not run unconditionally)
   Neither training step reads the corpus: they fine-tune BioBERT on fixed public
@@ -58,12 +64,12 @@ THE TRAINING GATE (steps 1-2 are not run unconditionally)
       biored_data/
 
   All four complete    -> steps 1 AND 2 are dropped from the plan; the checkpoints
-                          already on disk are staged and exported to step 16 instead.
+                          already on disk are staged and exported to step 17 instead.
   Anything missing/empty -> both training steps run, and the gate prints exactly which
                           entries were absent.
 
-  It is all four or none, deliberately: step 16 routes between the two checkpoints and
-  step 17 compares them, so a run must not mix a reused PPI model with a freshly trained
+  It is all four or none, deliberately: step 17 routes between the two checkpoints and
+  step 18 compares them, so a run must not mix a reused PPI model with a freshly trained
   BioRED one (or the reverse). An empty file counts as missing, so a half-copied bundle
   retrains rather than loading a truncated checkpoint. The *_data/ TSVs are gated too --
   they are what makes a reused bundle re-calibratable without a re-download.
@@ -73,14 +79,14 @@ THE TRAINING GATE (steps 1-2 are not run unconditionally)
 
 Dependency / strategy notes:
   * run_re_pipeline.py (1, MOST UPSTREAM) trains the relation-extraction model the
-    learned RE step (16) depends on. It is itself a three-script pipeline, run here
+    learned RE step (17) depends on. It is itself a three-script pipeline, run here
     as ONE subprocess, that fine-tunes BioBERT into ppi-biobert-re/:
         bigbio_to_re.py  BigBIO KB corpus (HF `datasets`) -> entity-blinded TSVs
         train_re.py      fine-tune BioBERT -> ppi-biobert-re/ checkpoint (imports calibration.py)
         calibration.py   evaluate on test + fit a probability calibrator
                          (-> ppi-biobert-re/calibration.json, summaries/calibration_ppi.html)
     GPU; needs internet + the `datasets` library to download BigBIO bioinfer on
-    first use. Its output, ppi-biobert-re/, is exactly what step 16 loads via
+    first use. Its output, ppi-biobert-re/, is exactly what step 17 loads via
     RE_MODEL_PPI -- so the model dir no longer has to be uploaded. When it IS
     uploaded (with the three dirs above), the gate skips this step by itself; --steps
     still works as the manual equivalent, mirroring how the 'sentences' step can be
@@ -90,26 +96,26 @@ Dependency / strategy notes:
     downregulator/inhibitor, binds and associated instead of a bare "interacts", and
     one checkpoint covers every entity-type pair this corpus produces. It runs
     ALONGSIDE the PPI model rather than replacing it (BioRED_task_mapping.md section
-    6/8): step 16 scores each pair with both, step 17 compares them, and only then is
+    6/8): step 17 scores each pair with both, step 18 compares them, and only then is
     the replace-or-not decision worth making. OPTIONAL -- if the download or training
     fails, the run continues with the PPI model alone and nothing is lost. Its two
     output dirs are half of what the training gate above tests for.
-  * sentences.py (3) runs BioBERT over experimental_ner/ (XML) to select
+  * sentences.py (5) runs BioBERT over experimental_ner/ (XML) to select
     original-result sentences and tag DISEASE/GENE/CHEMICAL entities, writing
     sentences/*.json -- the input every later step reads. GPU; needs the HF BioBERT
     models (dmis-lab/biobert-v1.1 + alvaroalon2/biobert_{diseases,genetic,chemical}_ner),
     fetched on first use (internet) or cached.
-  * Steps 4-12 build the GENETIC/DISEASE/CHEMICAL normalization libraries. Steps 5-12
+  * Steps 5-13 build the GENETIC/DISEASE/CHEMICAL normalization libraries. Steps 6-13
     run as three lanes side by side -- GENETIC (roman -> greek -> keys_values ->
     controls), DISEASE (disease -> phenotypes), CHEMICAL (chemical -> nonchemical) --
     because each reads only sentences/ + databases/ and writes only its own dir. Within a
     lane the order is kept: controls, phenotypes and nonchemical rewrite their lane's
-    libraries in place. target_pharm (13) waits for all
+    libraries in place. target_pharm (14) waits for all
     three. A failed step stops only its lane; the others finish, then the run stops.
     NORM_PARALLEL_CPU=0 runs them in turn. Watch memory: chemical.py's ChEBI load overlaps
     the MONDO and HGNC loads.
-  * triples.py (14) reads those libraries; relationships.py (15) reads triples.py's
-    output; pub_years.py (16) reads relationships.py's genetic_genetic.json.
+  * triples.py (15) reads those libraries; relationships.py (16) reads triples.py's
+    output and dates each gene-gene triple from step 4's pmc_years.json.
   * relation_extraction.py (17) is a GPU step (BioBERT inference, auto CUDA) that loads
     the step-1 model via RE_MODEL_PPI and, when step 2 produced it, the step-2 model
     via RE_MODEL_BIORED; --route-mode additive makes BOTH score every pair they cover,
@@ -121,10 +127,9 @@ Dependency / strategy notes:
     summaries/compare_re.html: coverage, label agreement, how many edges gained a sign,
     and samples to hand-read. This is the evidence for the replace-or-not decision.
   * triples_per_year.py (19) dates step 17's normalized triples by publication year
-    (databases/pmc_years.json from step 16, topped up from pmids/pmid_pmc_ids.tsv when it
-    is shipped) and writes summaries/triples_per_year.html: a per-year box plot of the
+    (databases/pmc_years.json from step 4) and writes summaries/triples_per_year.html: a per-year box plot of the
     composite score, triple counts per year, and a score histogram. Offline.
-  * Steps 2, 3, 15, 16, 18 and 19 are OPTIONAL: if any fails (internet off, missing input,
+  * Steps 2, 3, 4, 16, 18 and 19 are OPTIONAL: if any fails (internet off, missing input,
     only one model trained) the orchestrator warns and CONTINUES.
   * zip_work.py (20, LAST) packs the whole working dir into kaggle_working.zip so the
     entire run is one download; it must run after every other step has written its output.
@@ -148,12 +153,12 @@ KAGGLE USAGE
      by steps 1 and 2 on a first run -- but once you have them, upload all four with
      the dataset and the training gate drops both steps automatically (no --steps
      needed), which is the normal case for every corpus after the first.
-     sentences/ is likewise generated by step 4.
-     pmc_years.json is produced by step 16, ncit_drugs.json by step 3; upload both under
-     databases/ to run the year filter and the drug lexicon with internet OFF.
-  2. Notebook Settings -> Accelerator -> GPU (steps 1, 2, 4 and 17 use CUDA); enable
-     Internet so steps 1-2 can download the BigBIO corpora, step 3 the BioBERT NER
-     models, and step 15 the publication years. Setup cell:
+     sentences/ is likewise generated by step 5, and databases/pmc_years.json by step 4
+     (from the XML stamps, offline). ncit_drugs.json is built by step 3; upload it under
+     databases/ to run the drug lexicon with internet OFF.
+  2. Notebook Settings -> Accelerator -> GPU (steps 1, 2, 5 and 17 use CUDA); enable
+     Internet so steps 1-2 can download the BigBIO corpora, step 3 the NCI Thesaurus
+     and step 5 the BioBERT NER models. Setup cell:
          !pip install -q 'datasets<4' bioc
   3. Cell:  !python /kaggle/input/<ds>/gpu.py
      Outputs go to /kaggle/working/{ppi-biobert-re,biored-biobert-re,sentences,summaries,GENETIC,DISEASE,CHEMICAL,TRIPLES}/.
@@ -161,9 +166,9 @@ KAGGLE USAGE
   Read-only input is handled automatically: scripts/modules are copied,
   experimental_ner/ is symlinked, databases/ is copied (writable), model + *_data dirs
   the gate is reusing are symlinked/copied across, and the dirs a selected step
-  generates (the two model dirs from steps 1-2, sentences/ from step 3) plus the
+  generates (the two model dirs from steps 1-2, sentences/ from step 5) plus the
   output dirs are created in /kaggle/working (the run root). RE_MODEL_PPI and
-  RE_MODEL_BIORED are set automatically for step 16 -- each only if that model dir
+  RE_MODEL_BIORED are set automatically for step 17 -- each only if that model dir
   actually exists, so a skipped or failed training step never breaks the RE step.
 
 LIBRARIES
@@ -175,11 +180,9 @@ LIBRARIES
                   script also imports `bioc`, which the image does not carry:
                       !pip install -q 'datasets<4' bioc
                   (`bioc` is needed only for step 2; bioinfer does not use it.)
-  Steps 4-15,17 : Python standard library only; pub_years.py needs internet
-                  (NCBI E-utilities) ONLY for accessions pmids/pmid_pmc_ids.tsv
-                  does not cover -- ship that table beside the run and it is offline.
-  Steps 3 & 16  : torch + transformers (+ lxml for step 3); preinstalled on Kaggle
-                  GPU images. Step 3 also pulls BioBERT models from Hugging Face.
+  Steps 4, 6-16 : Python standard library only, offline.
+  Steps 5 & 17  : torch + transformers (+ lxml for step 5); preinstalled on Kaggle
+                  GPU images. Step 5 also pulls BioBERT models from Hugging Face.
 
 OPTIONS / ENV
   --list / --dry-run        show the plan (roots, inputs, accelerator, steps) --
@@ -192,13 +195,13 @@ OPTIONS / ENV
   NORM_PARALLEL_TRAIN=0     with >= 2 GPUs, steps 1 and 2 run side by side (one GPU
                             each, output lines prefixed with the step name); this env
                             runs them one after the other instead
-  NORM_PARALLEL_CPU=0       steps 5-12 normally run as three lanes side by side (GENETIC:
+  NORM_PARALLEL_CPU=0       steps 6-13 normally run as three lanes side by side (GENETIC:
                             roman -> greek -> keys_values -> controls |
                             DISEASE: disease -> phenotypes | CHEMICAL: chemical ->
                             nonchemical; each writes only its own dir); this env runs them
                             one after the other instead
-  BIOBERT_GPUS / RE_GPUS    cap the GPUs steps 4 / 17 spread over (default: all visible)
-  BIOBERT_PARSE_WORKERS     processes step 4 parses XML with, ahead of the GPU (default
+  BIOBERT_GPUS / RE_GPUS    cap the GPUs steps 5 / 17 spread over (default: all visible)
+  BIOBERT_PARSE_WORKERS     processes step 5 parses XML with, ahead of the GPU (default
                             min(4, cores - 1); 0 = inline)
   --re-args "..."           extra args for step 1 (also env RE_PIPELINE_ARGS);
                             implies --retrain for that step
@@ -221,6 +224,7 @@ from pathlib import Path
 # `models` = checkpoints the step READS (staged + exported via MODEL_ENV); optional keys:
 # support=[modules staged with the step], produces_model="dir it generates", optional=True,
 # reads_sentences=False for a step that does not consume sentences/ (default True),
+# reads_xml=True for a step that reads the experimental_ner/ corpus (staged when present),
 # lane="DIR" for a normalization step that reads sentences/ + databases/ and writes ONLY
 # under DIR/ (see run_lanes). Steps sharing a lane run in plan order -- controls, phenotypes
 # and nonchemical rewrite their lane's libraries in place -- while different lanes overlap.
@@ -237,7 +241,11 @@ STEPS = [
          models=[], optional=True, reads_sentences=False,
          desc="[internet] distil the NCI Thesaurus into databases/ncit_drugs.json: the drug names "
               "the BioBERT chemical model misses (biologics) and ChEBI cannot represent [optional]"),
-    dict(name="sentences", script="sentences.py", args=[], dbs=[], gpu=True, models=[],
+    dict(name="pub_years", script="pub_years.py", args=[], dbs=[], gpu=False, models=[], optional=True,
+         reads_sentences=False, reads_xml=True,
+         desc="harvest the stage-1 <?pub-year?> stamps from experimental_ner/ -> "
+              "databases/pmc_years.json (offline) [optional]"),
+    dict(name="sentences", script="sentences.py", args=[], dbs=[], gpu=True, models=[], reads_xml=True,
          support=["drug_lexicon.py"],
          desc="[GPU] BioBERT result-sentence selection + NER over experimental_ner/ -> sentences/ "
               "(needs HF BioBERT models; adds an INN-stem + NCIt lexicon pass when the lexicon is present)"),
@@ -264,9 +272,6 @@ STEPS = [
          desc="extract base triples + normalized variants (triples.json, triples_*_normalized.json, triples.html)"),
     dict(name="relationships", script="relationships.py", args=[], dbs=[], gpu=False, models=[], optional=True,
          desc="gene-gene slice in disease/chemical sentences (genetic_genetic.json) [optional]"),
-    dict(name="pub_years", script="pub_years.py", args=[], dbs=[], gpu=False, models=[], optional=True,
-         desc="PMC->publication year from pmids/pmid_pmc_ids.tsv, NCBI only for what it lacks; "
-              "caches databases/pmc_years.json [optional]"),
     dict(name="relation_extraction", script="relation_extraction.py",
          args=["--normalize", "--route-mode", "additive"],
          dbs=[], gpu=True, models=["ppi-biobert-re", "biored-biobert-re"],
@@ -292,13 +297,14 @@ DB_FILES = {                    # hard requirements: a selected step aborts if o
 # so up front -- absent is a quieter result, not a broken one.
 # read_by: steps that consume the file; built_by: the step that writes it; without: what is lost.
 OPTIONAL_DBS = {
-    "ncit_drugs": dict(file="ncit_drugs.json", built_by="drug_lexicon",
+    "ncit_drugs": dict(file="ncit_drugs.json", built_by="drug_lexicon", internet=True,
                        read_by=("sentences", "chemical"),
                        without="INN-stem regex only -- no brand/code names, and chemical.py "
                                "cannot normalize the biologics"),
     "pmc_years": dict(file="pmc_years.json", built_by="pub_years",
-                      read_by=("pub_years", "triples_per_year"),
-                      without="every PMC id is re-fetched from NCBI (needs internet)"),
+                      read_by=("relationships", "triples_per_year"),
+                      without="triples stay undated -- include step 'pub_years' "
+                              "(it reads the stage-1 <?pub-year?> stamps)"),
 }
 RAW_DIR = "experimental_ner"   # sentences.py input (XML); sentences/ is generated from it
 OUT_DIRS = ["GENETIC", "DISEASE", "CHEMICAL", "TRIPLES"]
@@ -578,8 +584,8 @@ def optional_db_report(input_root: Path, steps):
 
     One line per OPTIONAL_DBS entry a selected step actually reads, so a plan that
     cannot use a cache does not report on it. Three verdicts: OK (uploaded with the
-    dataset), BUILD (absent, but the step that writes it is in the plan -- needs
-    internet), ABSENT (absent and nothing will build it, so say what the run loses).
+    dataset), BUILD (absent, but the step that writes it is in the plan), ABSENT
+    (absent and nothing will build it, so say what the run loses).
     """
     names = {st["name"] for st in steps}
     lines = []
@@ -590,8 +596,8 @@ def optional_db_report(input_root: Path, steps):
         if (input_root / "databases" / spec["file"]).exists():
             lines.append(f" {key:<11}: OK     {where}")
         elif spec["built_by"] in names:
-            lines.append(f" {key:<11}: BUILD  {where} -- step '{spec['built_by']}' writes it "
-                         f"(needs internet)")
+            lines.append(f" {key:<11}: BUILD  {where} -- step '{spec['built_by']}' writes it"
+                         + (" (needs internet)" if spec.get("internet") else ""))
         else:
             lines.append(f" {key:<11}: ABSENT {where} -- {spec['without']}")
     return lines
@@ -649,11 +655,12 @@ def stage_work(input_root: Path, work_root: Path, steps):
         for f in (input_root / "databases").glob("*"):
             if f.is_file():
                 shutil.copy2(f, ddst / f.name)
-        # sentence source: when the 'sentences' step runs it generates sentences/
-        # from read-only experimental_ner/; otherwise symlink the prebuilt sentences/.
-        if any(st["name"] == "sentences" for st in steps):
+        # corpus: symlinked for the steps that read it (sentences generates sentences/
+        # from it, pub_years reads its year stamps); without the 'sentences' step the
+        # prebuilt sentences/ is symlinked instead.
+        if any(st.get("reads_xml") for st in steps) and (input_root / RAW_DIR).is_dir():
             link_or_copy(input_root / RAW_DIR, work_root / RAW_DIR)
-        else:
+        if not any(st["name"] == "sentences" for st in steps):
             link_or_copy(input_root / "sentences", work_root / "sentences")
         # models: stage only those NOT generated this run (steps 1-2 produce theirs) and
         # actually present -- an absent optional checkpoint is simply not exported. The
@@ -719,7 +726,7 @@ def main():
     work_root = resolve_work_root(args.work_root, input_root)
     if any(st["name"] == "sentences" for st in steps):
         nfiles = len(list((input_root / RAW_DIR).glob("*.xml")))
-        src_line = f" input      : {nfiles:,} XML in {RAW_DIR}/ (sentences/ generated by step 2)"
+        src_line = f" input      : {nfiles:,} XML in {RAW_DIR}/ (sentences/ generated by step 5)"
     else:
         nfiles = len(list((input_root / "sentences").glob("*.json")))
         src_line = f" sentences  : {nfiles:,} *.json files"

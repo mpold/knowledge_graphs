@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Step 1 orchestrator -- runs the publications pipeline in order.
 
-Executes the eight scripts of the Step 1 publications pipeline in the exact
+Executes the scripts of the Step 1 publications pipeline in the exact
 order given by section "1. Order of execution (data flow)" of
 ``step_1_publications.html``. Each stage consumes the files the previous one
 wrote; the whole thing turns one PubMed query into a de-duplicated, full-text
@@ -27,15 +27,16 @@ Usage
     # both inputs piped in (query first, percentile second)
     printf 'your pubmed query\n0.01\n' | python step_1_orchestrator.py
 
-    # re-seed the archive contribution after a manual step 6
-    python step_1_orchestrator.py --only 6b
+    # re-seed the archive contribution after a manual step 6 (and re-stamp its years:
+    # 6b replaces stamped files with the unstamped archive copies)
+    python step_1_orchestrator.py --start 6b --stop 6c
 
     # keep the intermediate directories (stop before the clean-up step)
     python step_1_orchestrator.py --stop 7 "your pubmed query"
 
 Options
 -------
-    --start S     start from step S (1, 1b, 2 .. 6, 6b, 7, 8) instead of step 1
+    --start S     start from step S (1, 1b, 2 .. 6, 6b, 6c, 7, 8) instead of step 1
     --stop  S     stop after step S
     --only  S     run only step S
     --archive D   local XML archive for steps 1b/6b (default: ../../xmls)
@@ -75,6 +76,15 @@ plain eight-stage pipeline. Naming an archive explicitly (``--archive`` or the
 ``ARCHIVE_DIR`` env var) makes a missing directory a hard error instead, since
 that is a typo rather than an absence. ``--no-archive`` skips them outright.
 
+The publication-year stamp (6c)
+-------------------------------
+``pub_year_xml.py`` writes a ``<?pub-year YYYY?>`` processing instruction into
+the prolog of every file in ``gpu_bundle/experimental_ner/``, from the year column
+of ``pmids/pmid_pmc_ids.tsv`` (falling back to the date inside the XML). It runs
+after 6/6b because both rewrite the corpus, and it fails the pipeline if any file
+is left undated -- so stage 2 receives a corpus that carries its own dates and
+never needs the PubMed table or NCBI to place a paper in time.
+
 The clean-up step (8)
 ---------------------
 ``clean_up.py`` runs last and deletes the five intermediate directories --
@@ -104,6 +114,7 @@ PIPELINE = [
     ("5",  "grobid_xml.py",            "PDFs (Docker+GROBID) -> grobid_xmls/PMC*.grobid.tei.xml"),
     ("6",  "named_entity_xml.py",      "grobid+high_impact -> gpu_bundle/experimental_ner/ (REBUILD)"),
     ("6b", "from_archive.py",          "archive_xmls/ -> experimental_ner/ (re-seed after the rebuild)"),
+    ("6c", "pub_year_xml.py",          "pmid_pmc_ids.tsv -> <?pub-year?> stamp in every experimental_ner/ XML"),
     ("7",  "pre_ner_xml_structure.py", "experimental_ner/ -> summaries/pre_ner_xml_structure.html"),
     ("8",  "clean_up.py",              "REMOVES the five intermediate XML/PDF dirs (runs last)"),
 ]
@@ -144,6 +155,7 @@ def print_list():
         print("  %-3s %-26s %s" % (key + ".", script, desc))
     print("\n  1b/6b are the same script (from_archive.py): 1b serves the query result")
     print("  from a local XML archive, 6b restores it after step 6 rebuilds the corpus.")
+    print("  6c stamps every corpus XML with <?pub-year YYYY?> for stage 2.")
     print("  8 (clean_up.py) deletes archive_xmls/, grobid_xmls/, high_impact_xmls/,")
     print("  named_entity_xmls/ and ncbi_pdfs_grobid/ -- the corpus in")
     print("  gpu_bundle/experimental_ner/, pmids/ and summaries/ are kept. --stop 7 skips it.")

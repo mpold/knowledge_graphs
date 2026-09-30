@@ -12,8 +12,9 @@ they are 30 MB – 500 MB each (ChEBI alone exceeds GitHub's 100 MB/file limit) 
 
 Optional:
 
-- `pmc_years.json` — produced by step 15 (`pub_years.py`); drop it in only to run the
-  publication-year lookup with the internet off.
+- `pmc_years.json` — produced offline by step 4 (`pub_years.py`) from the `<?pub-year?>`
+  stamps in `experimental_ner/`; drop it in only for a run that reuses `sentences/` without
+  uploading `experimental_ner/`.
 
 - `interactions.tsv` — DGIdb interactions TSV (open drug–gene targets; typed interactions),
   read by `chemical.py` to recover drugs the NER misses **and** ChEBI does not carry

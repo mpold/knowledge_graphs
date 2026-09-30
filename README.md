@@ -57,7 +57,7 @@ intermediate XML/PDF directories once the corpus is built — `--stop 7` keeps t
 | Python   | 3.9+                                                                                  | 3.9+                                                   | 3.9+                 |
 | Packages | `requests`                                                                            | `torch`, `transformers`, `datasets<4`, `numpy`, `lxml` | *stdlib only*        |
 | Hardware | any                                                                                   | **CUDA GPU** (CPU = very slow)                         | any                  |
-| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCBI                    | optional (graph CDN) |
+| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCIt                    | optional (graph CDN) |
 | Extra    | **Docker + GROBID** (for `grobid_xml.py`); *optional* local XML archive (steps 1b/6b) | ontology DB files (below)                              | —                    |
 
 Full details per script are in the `step_*.html` docs and `requirements.html`.
@@ -67,14 +67,15 @@ Full details per script are in the `step_*.html` docs and `requirements.html`.
 ## The three stages
 
 ### Stage 1 — publications (local)
-Nine scripts in the bundle root, run as ten steps by `step_1_orchestrator.py`:
+Ten scripts in the bundle root, run as eleven steps by `step_1_orchestrator.py`:
 `pubmed_query.py` **(1)** → `from_archive.py` **(1b)** → `high_impact_xml.py` **(2)** →
 `xml_structure.py` **(3)** → `ncbi_pdf.py` **(4)** → `grobid_xml.py` **(5)** →
-`named_entity_xml.py` **(6)** → `from_archive.py` **(6b)** → `pre_ner_xml_structure.py` **(7)** →
-`clean_up.py` **(8)**.
+`named_entity_xml.py` **(6)** → `from_archive.py` **(6b)** → `pub_year_xml.py` **(6c)** →
+`pre_ner_xml_structure.py` **(7)** → `clean_up.py` **(8)**.
 
 Steps are addressed by **label**, not position, so the core stages keep the numbers they
-always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` slots in as 1b/6b.
+always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` slots in as 1b/6b
+and `pub_year_xml.py` as 6c.
 
 - Input: a PubMed query (read from **STDIN** by `pubmed_query.py`; the orchestrator's first
   bare argument pipes it in). The EXAMPLE-QUERY used for this project is:
@@ -101,9 +102,21 @@ always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` 
   > `archive_xmls/`. It is idempotent — run it a third time and nothing changes.
 
   Steps 1b/6b are **skipped automatically, with a printed notice, when the archive directory does
-  not exist**, so a checkout with no local corpus still runs the plain eight-stage pipeline.
+  not exist**, so a checkout with no local corpus still runs the plain pipeline (the eight core
+  stages plus 6c).
   Naming one explicitly (`--archive` / `ARCHIVE_DIR`) that is missing is a hard error instead —
   that is a typo, not an absence. `--no-archive` skips them outright.
+- **Publication-year stamp — `pub_year_xml.py` (step 6c).** Runs once the corpus is final (after
+  6/6b, which both rewrite it) and writes one processing instruction, `<?pub-year YYYY?>`, into the
+  prolog of every `gpu_bundle/experimental_ner/*.xml` (right after the XML declaration — valid in
+  both PMC JATS and GROBID TEI, ignored by parsers). The year comes from the `year` column of
+  `pmids/pmid_pmc_ids.tsv` (PubMed; it wins), falling back to the date inside the XML (JATS
+  `<pub-date><year>`, TEI `<publicationStmt><date when>`). Offline and idempotent (an existing
+  stamp is replaced; files already correct are not rewritten); `--check` reports without writing.
+  It **exits non-zero, listing the files, if any document stays undated**, aborting the pipeline —
+  so stage 2 gets a fully dated corpus and never needs the PubMed table or NCBI. On the current
+  corpus: 3,769 XML, all dated from the table (411 state a different year themselves; the table is
+  kept), range 1949–2026.
 - **Impact percentile prompt:** when `step_1_orchestrator.py` runs step 2 it prompts
   `Publication impact percentile (decimal: 0 <= impact <= 1):` on its own line right after
   the query, and hands the entered value to `high_impact_xml.py` on its **STDIN** and as the
@@ -134,9 +147,10 @@ always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` 
   `--dry-run`) reports files and bytes per directory without deleting; `KEEP=archive_xmls` (comma
   separated) spares one; `--stop 7` skips the step entirely. Writes `summaries/clean_up.html`.
   > **Re-running after a clean-up** starts from step 2 — the inputs of steps 3–6b are gone. The
-  > exception is `--only 6b`: `from_archive.py` re-copies the hit set out of the real archive
-  > (`ARCHIVE_DIR`), so it still works, it just pays the file copy again.
-- **Optional — `subtract.py`** (not one of the ten, not run by the orchestrator): reads two
+  > exception is `--start 6b --stop 6c`: `from_archive.py` re-copies the hit set out of the real
+  > archive (`ARCHIVE_DIR`), so it still works, it just pays the file copy again — and 6c
+  > re-stamps the years on the copies it replaced.
+- **Optional — `subtract.py`** (not one of the eleven, not run by the orchestrator): reads two
   directory paths from **STDIN** and moves entries of `directory_1` whose names also appear in
   `directory_2` into `gpu_bundle/removed/` (relocated, not deleted; name collisions get a
   `_1`/`_2` suffix), writing `summaries/subtract_optional.html`. Handy for de-duplicating this
@@ -172,7 +186,7 @@ to configure. With one GPU or none, each step behaves exactly as before.
 | step                                | how it uses two GPUs                                                                                              | opt out                 |
 |-------------------------------------|-------------------------------------------------------------------------------------------------------------------|-------------------------|
 | 1 + 2 `re_pipeline(_biored)`        | the two trainings run **side by side**, PPI on GPU 0 and BioRED on GPU 1; log lines are prefixed with the step name | `NORM_PARALLEL_TRAIN=0` |
-| 4 `sentences.py`                    | one copy of the scorer + NER models per GPU; 16-file chunks go to whichever GPU is free                            | `BIOBERT_GPUS=1`        |
+| 5 `sentences.py`                    | one copy of the scorer + NER models per GPU; 16-file chunks go to whichever GPU is free                            | `BIOBERT_GPUS=1`        |
 | 17 `relation_extraction.py`         | each checkpoint is loaded once per GPU; batches go to whichever GPU is free                                         | `RE_GPUS=1`             |
 
 Results are consumed in input order, so the output files are identical to a single-GPU run. Each
@@ -187,7 +201,7 @@ line.
 (**bioinfer** → `ppi-biobert-re/`, **biored** → `biored-biobert-re/`). The checkpoint is a
 function of (dataset, seed, hyperparams) only, so a run on "<pubmed_query_1>" produces the same
 model as one on "<pubmed_query_2>"; retraining per corpus is wasted GPU time. The same
-holds for the normalization libraries (steps 5–13) — HGNC / ChEBI / MONDO are ontologies, not
+holds for the normalization libraries (steps 6–14) — HGNC / ChEBI / MONDO are ontologies, not
 corpus-derived.
 
 **`gpu.py` therefore gates the two training steps** — they run **only** when the previous training
@@ -362,8 +376,10 @@ under `gpu_bundle/databases/` before running stage 2 (see
 
 `gpu.py --list` preflights the three required ones and names any that are missing; the DGIdb
 table is not preflighted, precisely because it is optional.
-`gpu_bundle/databases/pmc_years.json` and `ncit_drugs.json` are produced by stage 2 (or supply
-them to run the year filter and the drug lexicon offline). The `experimental_ner/` corpus is produced by **stage 1** (or drop in your
+`gpu_bundle/databases/pmc_years.json` and `ncit_drugs.json` are produced by stage 2 (supply
+`ncit_drugs.json` to run the drug lexicon offline; `pmc_years.json` is harvested offline from the
+corpus's `<?pub-year?>` stamps, so supply it only for a run that reuses `sentences/` without
+`experimental_ner/`). The `experimental_ner/` corpus is produced by **stage 1** (or drop in your
 own). The trained checkpoints and their converted TSVs (`gpu_bundle/{ppi-biobert-re,ppi_data,
 biored-biobert-re,biored_data}/`) are generated by stage-2 steps 1–2 on the first run and are
 git-ignored — **keep them in `gpu_bundle/` afterwards**: their presence is what makes the training
@@ -380,10 +396,11 @@ it is modified. Without one, stage 1 simply downloads everything.
 
 ```
 <parent_directory>/
-├── step_1_orchestrator.py                       # stage 1 entry point (chains its 10 steps)
+├── step_1_orchestrator.py                       # stage 1 entry point (chains its 11 steps)
 ├── requirements.txt                             # local deps (stages 1 & 3): requests
 ├── pubmed_query.py … pre_ner_xml_structure.py   # stage 1: the 7 core publications scripts
 ├── from_archive.py                              # stage 1: steps 1b/6b — serve the query from a local XML archive
+├── pub_year_xml.py                              # stage 1: step 6c — stamp <?pub-year YYYY?> into every corpus XML
 ├── clean_up.py                                  # stage 1: step 8 — deletes the intermediate XML/PDF dirs (last)
 ├── subtract.py                                  # stage 1: optional dir-subtract utility (-> gpu_bundle/removed)
 ├── high_confidence_g.py                         # stage 3: the graph (typed edges + --merge)
@@ -431,8 +448,9 @@ it is modified. Without one, stage 1 simply downloads everything.
 │                                                #     OPTIONAL: absent = empty drug set, no error
 │       ├── ncit_drugs.json                      # 5.8 MB  NCIt drug names → sentences.py (NER lexicon pass) and
 │                                                #     chemical.py (non-ChEBI fallback); generated by step 3
-│       └── pmc_years.json                       #   generated by pub_years.py (step 16), read by
-│                                                #     relationships.py and stage 3; supply it to run offline
+│       └── pmc_years.json                       #   generated by pub_years.py (step 4) from the corpus's
+│                                                #     <?pub-year?> stamps (offline); read by relationships.py,
+│                                                #     triples_per_year.py and stage 3
 ├── Graph_description.md                         # what the graph viewer draws and how to read it
 ├── monoclonal_antibody_NER.md                   # why biologics were missed, and what now recognises them
 ├── step_1_publications.html                     # rendered walk-throughs …

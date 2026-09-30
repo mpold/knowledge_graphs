@@ -263,11 +263,11 @@ it is re-run:
 python high_confidence_g.py --data-root kaggle_working   # gene + disease + chemical
 ```
 
-Publication years come from `databases/pmc_years.json`, built by `pub_years.py`; run that first
-if the corpus has grown, or the year slider will silently drop undated evidence. It reads the
-years out of `pmids/pmid_pmc_ids.tsv` — the stage-1 PubMed table, which on this corpus covers
-every article the graph cites — and only calls NCBI for what that table lacks, so
-`pub_years.py --no-fetch` builds the cache with no network at all.
+Publication years come from `databases/pmc_years.json`, built by `pub_years.py` (stage-2
+step 4); re-run it if the corpus has grown, or the year slider will silently drop undated
+evidence. It only harvests the `<?pub-year YYYY?>` stamp that stage 1 (`pub_year_xml.py`,
+step 6c) writes into every `experimental_ner/` XML, so it needs no network, no NCBI and no
+`pmids/pmid_pmc_ids.tsv`.
 
 The enrichment denominator is shared across projects, so a run also writes its own slice to
 `databases/corpus_contrib.json` and merges whatever slices the sibling `lung_*` projects have

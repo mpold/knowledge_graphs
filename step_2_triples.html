@@ -52,8 +52,8 @@ into one downloadable archive.</p>
 <div class='stat-grid'>
   <div class='stat'><div class='v'>20</div><div class='k'>steps in the chain</div></div>
   <div class='stat'><div class='v'>gpu.py</div><div class='k'>the orchestrator</div></div>
-  <div class='stat'><div class='v'>4</div><div class='k'>GPU steps (1, 2, 4, 17)</div></div>
-  <div class='stat'><div class='v'>6</div><div class='k'>optional steps (2, 3, 15, 16, 18, 19)</div></div>
+  <div class='stat'><div class='v'>4</div><div class='k'>GPU steps (1, 2, 5, 17)</div></div>
+  <div class='stat'><div class='v'>6</div><div class='k'>optional steps (2, 3, 4, 16, 18, 19)</div></div>
   <div class='stat'><div class='v'>2</div><div class='k'>RE checkpoints trained (1, 2)</div></div>
   <div class='stat'><div class='v'>kaggle_working.zip</div><div class='k'>final bundle (step 20)</div></div>
 </div>
@@ -65,11 +65,11 @@ scripts you run by hand: <code>gpu.py</code> copies the scripts, symlinks the re
 <code>experimental_ner/</code> corpus, makes a writable copy of <code>databases/</code>, creates the
 output dirs (<code>GENETIC/ DISEASE/ CHEMICAL/ TRIPLES/</code>, plus <code>sentences/</code> and
 <code>summaries/</code>), and sets <code>RE_MODEL_PPI</code> and <code>RE_MODEL_BIORED</code> for the
-learned RE step. Steps&nbsp;1, 2, 4 and 17 use CUDA; steps&nbsp;1&ndash;4 and 16 reach the network.
+learned RE step. Steps&nbsp;1, 2, 5 and 17 use CUDA; steps&nbsp;1&ndash;3 and 5 reach the network.
 Steps&nbsp;1&ndash;2 are <strong>gated</strong>: they train only when the previous training output is
 not already in the bundle, so on every run after the first the chain effectively starts at
 step&nbsp;3 (see the box under section&nbsp;1A).
-Steps&nbsp;2, 3, 15, 16, 18 and 19 are optional &mdash; if they fail the orchestrator warns and
+Steps&nbsp;2, 3, 4, 16, 18 and 19 are optional &mdash; if they fail the orchestrator warns and
 continues. The last step
 (<code>zip_work.py</code>) bundles the whole working directory into
 <code>kaggle_working.zip</code> so the entire run is a single download. Run a subset with
@@ -128,33 +128,32 @@ the <code>kaggle_working/</code> run tree, which is rebuilt on every run.</div>
   <div class='grp'>B. NER: corpus &rarr; result-sentence entities</div>
   <div class='node'><span class='s'>3. drug_lexicon.py --build</span> <span class='pill net'>internet</span> <span class='pill opt'>optional</span>
     <div class='io'>in: the NCI Thesaurus (downloaded) &nbsp;&rarr;&nbsp; out: <code>databases/ncit_drugs.json</code>
-      <span class='dim'>&mdash; the drug names (biologics, brand and code names) that the BioBERT chemical model misses and ChEBI cannot represent; read by steps&nbsp;4 and 11. Reads no corpus</span></div></div>
-  <div class='node'><span class='s'>4. sentences.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span>
+      <span class='dim'>&mdash; the drug names (biologics, brand and code names) that the BioBERT chemical model misses and ChEBI cannot represent; read by steps&nbsp;5 and 12. Reads no corpus</span></div></div>
+  <div class='node'><span class='s'>4. pub_years.py</span> <span class='pill opt'>optional</span>
+    <div class='io'>in: the <code>&lt;?pub-year YYYY?&gt;</code> stamp in every <code>experimental_ner/*.xml</code> &nbsp;&rarr;&nbsp; out: <code>databases/pmc_years.json</code>
+      <span class='dim'>&mdash; harvests the year stage&nbsp;1 (<code>pub_year_xml.py</code>, step&nbsp;6c) wrote into each file; offline, no PubMed table, no NCBI. Runs here so the cache exists before steps&nbsp;16 and 19 read it</span></div></div>
+  <div class='node'><span class='s'>5. sentences.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span>
     <div class='io'>in: <code>experimental_ner/PMC*.xml</code> (+ <code>databases/ncit_drugs.json</code> when present) &nbsp;&rarr;&nbsp; out: <code>sentences/PMC*.json</code> + <code>summaries/sentences.html</code></div></div>
   <div class='arrow'>&darr;&nbsp; sentences/*.json  (every later step reads this)</div>
 
   <div class='grp'>C. Build the GENETIC / DISEASE / CHEMICAL normalization libraries &nbsp;<span class='dim'>(three lanes run side by side)</span></div>
-  <div class='node'><span class='s'>5. roman.py</span> &nbsp;<span class='s'>6. greek.py</span> &nbsp;<span class='s'>7. keys_values.py</span> &nbsp;<span class='s'>8. controls.py</span>
+  <div class='node'><span class='s'>6. roman.py</span> &nbsp;<span class='s'>7. greek.py</span> &nbsp;<span class='s'>8. keys_values.py</span> &nbsp;<span class='s'>9. controls.py</span>
     <div class='io'>GENETIC surfaces &rarr; HGNC &nbsp;(<code>GENETIC/</code>: roman*.json, greek*.json, coverage + control flag)</div></div>
-  <div class='node'><span class='s'>9. disease.py</span> &nbsp;<span class='s'>10. phenotypes.py</span>
+  <div class='node'><span class='s'>10. disease.py</span> &nbsp;<span class='s'>11. phenotypes.py</span>
     <div class='io'>DISEASE surfaces &rarr; MONDO + phenotype flag &nbsp;(<code>DISEASE/</code>)</div></div>
-  <div class='node'><span class='s'>11. chemical.py</span> &nbsp;<span class='s'>12. nonchemical.py</span>
+  <div class='node'><span class='s'>12. chemical.py</span> &nbsp;<span class='s'>13. nonchemical.py</span>
     <div class='io'>CHEMICAL surfaces &rarr; ChEBI, then NCIt for the rest + non-chemical flag &nbsp;(<code>CHEMICAL/</code>)</div></div>
   <div class='arrow'>&darr;&nbsp; all three lanes finished</div>
-  <div class='node'><span class='s'>13. target_pharm.py</span>
+  <div class='node'><span class='s'>14. target_pharm.py</span>
     <div class='io'>chemical&harr;gene-target cross-links &nbsp;(<code>CHEMICAL/</code>; needs the GENETIC and CHEMICAL libraries)</div></div>
   <div class='arrow'>&darr;&nbsp; GENETIC/ + DISEASE/ + CHEMICAL/ lookup libraries</div>
 
   <div class='grp'>D. Triples: extract, normalize, score</div>
-  <div class='node'><span class='s'>14. triples.py</span>
+  <div class='node'><span class='s'>15. triples.py</span>
     <div class='io'>in: <code>sentences/*.json</code> + the libraries &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples.json</code>, <code>triples_*_normalized.json</code>, <code>triples.html</code></div></div>
   <div class='arrow'>&darr;&nbsp; TRIPLES/</div>
-  <div class='node'><span class='s'>15. relationships.py</span> <span class='pill opt'>optional</span>
-    <div class='io'>in: <code>TRIPLES/triples*.json</code> &nbsp;&rarr;&nbsp; out: <code>TRIPLES/genetic_genetic.json</code> + <code>relationships.html</code></div></div>
-  <div class='arrow'>&darr;&nbsp; genetic_genetic.json</div>
-  <div class='node'><span class='s'>16. pub_years.py</span> <span class='pill opt'>optional</span> <span class='pill net'>internet</span>
-    <div class='io'>in: every <code>TRIPLES/triples*.json</code> present + <code>pmids/pmid_pmc_ids.tsv</code> &nbsp;&rarr;&nbsp; out: caches <code>databases/pmc_years.json</code>; adds <code>year</code> to each triple of <code>genetic_genetic.json</code>
-      <span class='dim'>&mdash; the stage-1 table first, NCBI only for the accessions it lacks</span></div></div>
+  <div class='node'><span class='s'>16. relationships.py</span> <span class='pill opt'>optional</span>
+    <div class='io'>in: <code>TRIPLES/triples*.json</code> + <code>databases/pmc_years.json</code> (from step&nbsp;4) &nbsp;&rarr;&nbsp; out: <code>TRIPLES/genetic_genetic.json</code> (a <code>year</code> on each triple) + <code>relationships.html</code></div></div>
   <div class='arrow'>&darr;&nbsp; (independent of step 17)</div>
   <div class='node'><span class='s'>17. relation_extraction.py --normalize --route-mode additive</span> <span class='pill gpu'>GPU</span>
     <div class='io'>in: <code>sentences/*.json</code> + <code>ppi-biobert-re/</code> (RE_MODEL_PPI) + <code>biored-biobert-re/</code> (RE_MODEL_BIORED) &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples_re.json</code> (BioBERT-scored) + normalized variant
@@ -164,27 +163,28 @@ the <code>kaggle_working/</code> run tree, which is rebuilt on every run.</div>
     <div class='io'>in: <code>TRIPLES/triples_re.json</code> (both models, joined on <code>pair_id</code>) &nbsp;&rarr;&nbsp; out: <code>summaries/compare_re.html</code>
       <span class='dim'>&mdash; coverage, label agreement, how many edges gained a sign, score deltas + samples to hand-read: the evidence for the replace-or-not decision</span></div></div>
   <div class='node'><span class='s'>19. triples_per_year.py</span> <span class='pill opt'>optional</span>
-    <div class='io'>in: <code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> + <code>databases/pmc_years.json</code> (topped up from <code>pmids/pmid_pmc_ids.tsv</code> when shipped) &nbsp;&rarr;&nbsp; out: <code>summaries/triples_per_year.html</code>
+    <div class='io'>in: <code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> + <code>databases/pmc_years.json</code> (from step&nbsp;4) &nbsp;&rarr;&nbsp; out: <code>summaries/triples_per_year.html</code>
       <span class='dim'>&mdash; per-year box plot of the composite score, triples per year, score histogram; offline</span></div></div>
 
   <div class='grp'>E. Bundle the run for download &nbsp;<span class='dim'>(most downstream; runs after everything else)</span></div>
   <div class='node'><span class='s'>20. zip_work.py</span>
     <div class='io'>in: the whole working dir (all outputs above) &nbsp;&rarr;&nbsp; out: <code>kaggle_working.zip</code> (single downloadable archive)</div></div>
 </div>
-<p class='dim'>Steps 5&ndash;12 all read the same <code>sentences/*.json</code> and only touch their own type's
-library dir, so <code>gpu.py</code> runs them as three lanes side by side &mdash; GENETIC (5&rarr;8), DISEASE
-(9&rarr;10), CHEMICAL (11&rarr;12) &mdash; and keeps the order within each lane (<code>NORM_PARALLEL_CPU=0</code>
-runs them in turn): <code>roman.py</code> (step&nbsp;5) builds the
+<p class='dim'>Steps 6&ndash;13 all read the same <code>sentences/*.json</code> and only touch their own type's
+library dir, so <code>gpu.py</code> runs them as three lanes side by side &mdash; GENETIC (6&rarr;9), DISEASE
+(10&rarr;11), CHEMICAL (12&rarr;13) &mdash; and keeps the order within each lane (<code>NORM_PARALLEL_CPU=0</code>
+runs them in turn): <code>roman.py</code> (step&nbsp;6) builds the
 GENETIC libraries that <code>greek.py</code>/<code>keys_values.py</code>/<code>controls.py</code> extend or
-report on; <code>controls.py</code> (8) re-annotates those libraries in place, so it runs after
-<code>roman.py</code>/<code>greek.py</code> rewrite them. <code>target_pharm.py</code> (13) waits for all three
-lanes. <code>triples.py</code> (14) reads all three finished
-libraries; <code>relationships.py</code> (15) reads <code>triples.py</code>'s output; <code>pub_years.py</code> (16)
-reads every triples file present, <code>genetic_genetic.json</code> included. The learned RE step (17) depends only on
-the step&nbsp;1&ndash;2 models and step&nbsp;4's sentences, so it is independent of the 15&ndash;16 branch.
+report on; <code>controls.py</code> (9) re-annotates those libraries in place, so it runs after
+<code>roman.py</code>/<code>greek.py</code> rewrite them. <code>target_pharm.py</code> (14) waits for all three
+lanes. <code>triples.py</code> (15) reads all three finished
+libraries; <code>relationships.py</code> (16) reads <code>triples.py</code>'s output and dates each gene&ndash;gene
+triple from the year cache that <code>pub_years.py</code> (4) built from the corpus stamps before any of this ran.
+The learned RE step (17) depends only on
+the step&nbsp;1&ndash;2 models and step&nbsp;5's sentences, so it is independent of the 15&ndash;16 branch.
 <code>compare_re.py</code> (18) reads only step&nbsp;17's output and needs <em>both</em> checkpoints to
 have been produced, so it is skipped when step&nbsp;2 did not run. <code>triples_per_year.py</code> (19)
-reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
+reads step&nbsp;17's normalized triples and step&nbsp;4's year cache.</p>
 
 <h2>2. Per-script inputs &amp; outputs</h2>
 <table>
@@ -195,7 +195,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
   <td><code>run_re_pipeline.py</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span></td>
   <td>BigBIO <code>bigbio/bioinfer</code> KB corpus <span class='dim'>(downloaded via HF <code>datasets&lt;4</code>)</span></td>
   <td><code>ppi-biobert-re/</code> checkpoint (weights, config+label map, tokenizer, <code>calibration.json</code>)<br><code>ppi_data/{train,dev,test}.tsv</code><br><code>summaries/calibration.html</code></td>
-  <td>Fine-tunes BioBERT into the PPI relation model that step&nbsp;16 needs. Itself a 3-script
+  <td>Fine-tunes BioBERT into the PPI relation model that step&nbsp;17 needs. Itself a 3-script
       sub-pipeline run as one subprocess: <code>bigbio_to_re.py</code> (corpus &rarr; entity-blinded TSVs)
       &rarr; <code>train_re.py</code> (fine-tune, <strong><code>--epochs 2</code></strong>) &rarr;
       <code>calibration.py</code> (evaluate on test + fit a <strong>Platt</strong> calibrator).
@@ -230,7 +230,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
   <td><code>databases/ncit_drugs.json</code></td>
   <td>Distils the NCI Thesaurus into a drug-name lexicon. ChEBI is a small-molecule ontology, so
       biologics fall out twice: the BioBERT chemical model tags few of the named antibody mentions, and
-      ChEBI has no id for the ones it does tag. Steps&nbsp;4 (a lexicon pass after the NER models) and 11
+      ChEBI has no id for the ones it does tag. Steps&nbsp;5 (a lexicon pass after the NER models) and 12
       (a fallback after the ChEBI cascade) read the file. Without it both fall back to the INN-stem regex
       alone (&ldquo;-mab&rdquo;, &ldquo;-tug&rdquo;, &ldquo;-bart&rdquo;, &ldquo;-mig&rdquo;,
       &ldquo;-cept&rdquo;), which cannot resolve brand or code names. Build it once with internet on and
@@ -238,6 +238,21 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
 </tr>
 <tr>
   <td class='num'>4</td>
+  <td><code>pub_years.py</code> <span class='pill opt'>optional</span></td>
+  <td><code>experimental_ner/*.xml</code> <span class='dim'>(each carrying the <code>&lt;?pub-year YYYY?&gt;</code>
+      stamp that stage&nbsp;1 step&nbsp;6c, <code>pub_year_xml.py</code>, wrote into its prolog)</span></td>
+  <td><code>databases/pmc_years.json</code> <span class='dim'>(PMC accession &rarr; year)</span></td>
+  <td>Harvests the stamps into the year cache that <code>relationships.py</code> (16),
+      <code>triples_per_year.py</code> (19) and <code>high_confidence_g.py</code> read. <strong>Offline</strong>
+      &mdash; no internet, no <code>pmids/pmid_pmc_ids.tsv</code>, no NCBI: stage&nbsp;1 already dated every
+      document. Runs before <code>sentences.py</code> so the cache exists before any step that reads it. If
+      <code>experimental_ner/</code> is absent (a run reusing a prebuilt <code>sentences/</code>), an uploaded
+      <code>databases/pmc_years.json</code> is kept as-is. Writes the years it found but <strong>exits
+      non-zero, listing the files, if any XML lacks a stamp</strong> (fix it at the source with
+      <code>python pub_year_xml.py</code>). Non-fatal.</td>
+</tr>
+<tr>
+  <td class='num'>5</td>
   <td><code>sentences.py</code> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span></td>
   <td><code>experimental_ner/PMC*.xml</code> (JATS + GROBID TEI, from step&nbsp;1 of the publications pipeline)
       <span class='dim'>(HF BioBERT models fetched on first use)</span><br><code>databases/ncit_drugs.json</code> <span class='dim'>(from step&nbsp;3, when present)</span></td>
@@ -250,7 +265,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       later step reads.</strong></td>
 </tr>
 <tr>
-  <td class='num'>5</td>
+  <td class='num'>6</td>
   <td><code>roman.py</code></td>
   <td><code>sentences/*.json</code><br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
   <td><code>GENETIC/</code>: <code>clean_genetic_ne.tsv</code>, <code>roman_clean_genetic_ne.tsv</code>,
@@ -262,18 +277,18 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       ambiguous &rarr; <code>roman_ambiguous.json</code>.</td>
 </tr>
 <tr>
-  <td class='num'>6</td>
+  <td class='num'>7</td>
   <td><code>greek.py</code></td>
-  <td><code>GENETIC/greek_clean_genetic_ne.tsv</code> (from step&nbsp;5)<br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
+  <td><code>GENETIC/greek_clean_genetic_ne.tsv</code> (from step&nbsp;6)<br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
   <td><code>GENETIC/</code>: <code>full_greek.json</code>, <code>greek.json</code>,
       <code>greek_ambiguous.json</code>, <code>greek_complex.json</code>, <code>greek_cosine.json</code>
       <span class='dim'>(+ HTML)</span></td>
   <td>Expands Greek-symbol-bearing GENETIC surfaces (IFN-&gamma; &rarr; IFN-gamma&hellip;) and links them to
       HGNC, including multi-protein complexes (NF-&kappa;B &rarr; NFKB1+RELA). Each entry keeps the original
-      glyph key and the <code>greek_expanded</code> form &mdash; both are match routes in step&nbsp;14.</td>
+      glyph key and the <code>greek_expanded</code> form &mdash; both are match routes in step&nbsp;15.</td>
 </tr>
 <tr>
-  <td class='num'>7</td>
+  <td class='num'>8</td>
   <td><code>keys_values.py</code></td>
   <td>the seven GENETIC libraries (roman*.json + greek*.json)</td>
   <td><code>GENETIC/hgnc.html</code>, <code>GENETIC/hgnc_1_to_1.html</code>, <code>GENETIC/nested_keys.html</code></td>
@@ -281,7 +296,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       libraries (all, and the 1-to-1 subset), plus a nested-key coverage/type matrix. Transforms no data.</td>
 </tr>
 <tr>
-  <td class='num'>8</td>
+  <td class='num'>9</td>
   <td><code>controls.py</code></td>
   <td><code>GENETIC/clean_genetic_ne.tsv</code> (or rebuilt from <code>sentences/</code>)<br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
   <td><code>GENETIC/controls.html</code><br><em>in-place</em> <code>"control":"yes"/"no"</code> on all seven
@@ -291,7 +306,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       <code>control</code> flag. Re-run after <code>roman.py</code>/<code>greek.py</code> (which rewrite those files).</td>
 </tr>
 <tr>
-  <td class='num'>9</td>
+  <td class='num'>10</td>
   <td><code>disease.py</code></td>
   <td><code>sentences/*.json</code><br><code>databases/mondo-clingen.json</code></td>
   <td><code>DISEASE/</code>: <code>clean_disease_ne.tsv</code>, <code>disease.json</code>,
@@ -300,7 +315,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       multiple &rarr; <code>disease_ambiguous.json</code>).</td>
 </tr>
 <tr>
-  <td class='num'>10</td>
+  <td class='num'>11</td>
   <td><code>phenotypes.py</code></td>
   <td><code>DISEASE/clean_disease_ne.tsv</code> (or rebuilt from <code>sentences/</code>)</td>
   <td><code>DISEASE/phenotypes.html</code><br><em>in-place</em> <code>"phenotype":"yes"/"no"</code> on the disease libraries</td>
@@ -309,7 +324,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       the disease libraries.</td>
 </tr>
 <tr>
-  <td class='num'>11</td>
+  <td class='num'>12</td>
   <td><code>chemical.py</code></td>
   <td><code>sentences/*.json</code><br><code>databases/chebi.json</code><br><code>databases/ncit_drugs.json</code> <span class='dim'>(from step&nbsp;3, when present)</span></td>
   <td><code>CHEMICAL/</code>: <code>clean_chemical_ne.tsv</code>, <code>chemical.json</code>,
@@ -319,7 +334,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       the NCIt drug lexicon for the biologics ChEBI cannot represent.</td>
 </tr>
 <tr>
-  <td class='num'>12</td>
+  <td class='num'>13</td>
   <td><code>nonchemical.py</code></td>
   <td><code>CHEMICAL/clean_chemical_ne.tsv</code> + <code>chemical*.json</code><br><code>databases/hgnc_complete_set_2026-05-01.json</code></td>
   <td><code>CHEMICAL/nonchemical.html</code><br><em>in-place</em> <code>"non_chemical":"yes"/"no"</code> on the chemical libraries</td>
@@ -327,7 +342,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       gene/protein, a nucleic-acid element, or a process/therapy concept rather than a compound.</td>
 </tr>
 <tr>
-  <td class='num'>13</td>
+  <td class='num'>14</td>
   <td><code>target_pharm.py</code></td>
   <td><code>databases/chebi.json</code>, <code>databases/hgnc_complete_set_2026-05-01.json</code><br><code>CHEMICAL/chemical*.json</code>, <code>GENETIC/roman*.json</code> + <code>greek*.json</code></td>
   <td><code>CHEMICAL/</code>: <code>target_pharm.json</code>, <code>chemical_to_target.json</code>, <code>target_pharm.html</code></td>
@@ -336,7 +351,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       gene&rarr;chemicals view.</td>
 </tr>
 <tr>
-  <td class='num'>14</td>
+  <td class='num'>15</td>
   <td><code>triples.py</code></td>
   <td><code>sentences/*.json</code><br>the finished <code>GENETIC/</code>, <code>DISEASE/</code>, <code>CHEMICAL/</code> libraries</td>
   <td><code>TRIPLES/triples.json</code><br><code>TRIPLES/triples_GENETIC_normalized.json</code><br><code>TRIPLES/triples_GENETIC_DISEASE_normalized.json</code><br><code>TRIPLES/triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code><br><code>TRIPLES/triples.html</code></td>
@@ -346,22 +361,13 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
       CHEMICAL&rarr;ChEBI label &mdash; the last file is the fully ID-normalized set.</td>
 </tr>
 <tr>
-  <td class='num'>15</td>
-  <td><code>relationships.py</code> <span class='pill opt'>optional</span></td>
-  <td><code>TRIPLES/triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code><br><code>TRIPLES/triples.json</code></td>
-  <td><code>TRIPLES/genetic_genetic.json</code><br><code>TRIPLES/relationships.html</code></td>
-  <td>Extracts the GENETIC&ndash;GENETIC slice occurring in disease/chemical sentences. Non-fatal: if it fails
-      the orchestrator warns and continues.</td>
-</tr>
-<tr>
   <td class='num'>16</td>
-  <td><code>pub_years.py</code> <span class='pill opt'>optional</span> <span class='pill net'>net</span></td>
-  <td>every <code>TRIPLES/triples*.json</code> present, <code>genetic_genetic.json</code> (from step&nbsp;15) included<br><code>pmids/pmid_pmc_ids.tsv</code> <span class='dim'>(stage-1 table, when shipped beside the run)</span></td>
-  <td><code>databases/pmc_years.json</code> (cache)<br><code>TRIPLES/genetic_genetic.json</code> (adds a <code>year</code> field per triple)</td>
-  <td>Resolves each PMC accession to a publication year: first from the stage-1 table, which has a year
-      for every corpus document, then via NCBI E-utilities (esummary, db=pmc) only for what the table lacks.
-      Caches the result, so existing years are never re-fetched or overwritten. Needs internet only when
-      the table is absent or incomplete (<code>--no-fetch</code> keeps it offline). Non-fatal.</td>
+  <td><code>relationships.py</code> <span class='pill opt'>optional</span></td>
+  <td><code>TRIPLES/triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code><br><code>TRIPLES/triples.json</code><br><code>databases/pmc_years.json</code> <span class='dim'>(from step&nbsp;4, when present)</span></td>
+  <td><code>TRIPLES/genetic_genetic.json</code> <span class='dim'>(a <code>year</code> field per triple)</span><br><code>TRIPLES/relationships.html</code></td>
+  <td>Extracts the GENETIC&ndash;GENETIC slice occurring in disease/chemical sentences, and sets each
+      triple's <code>year</code> from the step-4 cache (<code>null</code> if the accession is not in it).
+      Non-fatal: if it fails the orchestrator warns and continues.</td>
 </tr>
 <tr>
   <td class='num'>17</td>
@@ -394,14 +400,13 @@ reads step&nbsp;17's normalized triples and step&nbsp;16's year cache.</p>
 <tr>
   <td class='num'>19</td>
   <td><code>triples_per_year.py</code> <span class='pill opt'>optional</span></td>
-  <td><code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> (from step&nbsp;17)<br><code>databases/pmc_years.json</code> (from step&nbsp;16)<br><code>pmids/pmid_pmc_ids.tsv</code> <span class='dim'>(when shipped beside the run)</span></td>
+  <td><code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> (from step&nbsp;17)<br><code>databases/pmc_years.json</code> (from step&nbsp;4)</td>
   <td><code>summaries/triples_per_year.html</code></td>
   <td>Dates every scored triple by the publication year of its article and plots the composite
       <code>score</code> per year: a box plot (Q1&ndash;Q3, median, 5th&ndash;95th percentile whiskers;
       years with fewer than 100 triples drawn faded), the number of triples per year, an overall score
-      histogram and a per-year table. Years come from the step-16 cache, topped up from the stage-1 table
-      for accessions the cache lacks; triples with no year in either are reported as undated and left off
-      the plots. Offline. Non-fatal.</td>
+      histogram and a per-year table. Years come from the step-4 cache only; triples whose accession is not in it are
+      reported as undated and left off the plots. Offline. Non-fatal.</td>
 </tr>
 <tr>
   <td class='num'>20</td>
@@ -441,29 +446,29 @@ because it stages inputs, orders the steps, and wires up <code>RE_MODEL_PPI</cod
 
 <div class='warn'>Steps&nbsp;1&ndash;2 (<code>run_re_pipeline.py</code>) need internet +
 <code>datasets&lt;4</code> to download BigBIO bioinfer and biored; step&nbsp;3 (<code>drug_lexicon.py</code>)
-downloads the NCI Thesaurus; step&nbsp;4 (<code>sentences.py</code>)
-pulls the BioBERT NER models from Hugging Face on first use; step&nbsp;16 (<code>pub_years.py</code>)
-calls NCBI for whatever <code>pmids/pmid_pmc_ids.tsv</code> does not cover. Steps&nbsp;1, 2, 4 and 17 run on CUDA (they fall back to CPU &mdash; slow &mdash; if no GPU is
+downloads the NCI Thesaurus; step&nbsp;5 (<code>sentences.py</code>)
+pulls the BioBERT NER models from Hugging Face on first use. Every other step is offline &mdash;
+<code>pub_years.py</code> (4) reads the years stage&nbsp;1 stamped into the XML. Steps&nbsp;1, 2, 5 and 17 run on CUDA (they fall back to CPU &mdash; slow &mdash; if no GPU is
 visible). Those two network dependencies apply only when the training gate lets steps&nbsp;1&ndash;2
 run: ship <code>ppi-biobert-re/</code> + <code>ppi_data/</code> + <code>biored-biobert-re/</code> +
 <code>biored_data/</code> with the bundle and the gate skips them by itself &mdash; no
 <code>--steps</code>, no <code>datasets&lt;4</code>/<code>bioc</code>, no internet for that phase.
-Upload <code>sentences/</code> and skip step&nbsp;4 the same way to reuse a prior NER pass, and
-<code>databases/ncit_drugs.json</code> + <code>databases/pmc_years.json</code> to run steps&nbsp;3 and 16
-without internet.
+Upload <code>sentences/</code> and skip step&nbsp;5 the same way to reuse a prior NER pass (with
+<code>databases/pmc_years.json</code> too if <code>experimental_ner/</code> is not uploaded), and
+<code>databases/ncit_drugs.json</code> to run step&nbsp;3 without internet.
 Skipping step&nbsp;2 <em>without</em> supplying its checkpoint also disables step&nbsp;18.</div>
 
 <h2>4. Notes</h2>
 <ul>
   <li><strong>One orchestrator, one working dir.</strong> <code>gpu.py</code> stages the scripts,
-      <code>experimental_ner/</code> (symlinked), a writable <code>databases/</code> copy, and the output dirs
+      <code>experimental_ner/</code> (symlinked, for the steps that read the XML: <code>pub_years</code> and <code>sentences</code>), a writable <code>databases/</code> copy, and the output dirs
       into a single run root, then runs each step there as a subprocess with the same environment.</li>
-  <li><strong>The hub file is <code>sentences/*.json</code>.</strong> Step&nbsp;4 produces it from the XML
-      corpus; steps&nbsp;5&ndash;14 and 17 all read it. Three parallel normalization branches
+  <li><strong>The hub file is <code>sentences/*.json</code>.</strong> Step&nbsp;5 produces it from the XML
+      corpus; steps&nbsp;6&ndash;15 and 17 all read it. Three parallel normalization branches
       (GENETIC / DISEASE / CHEMICAL) fan out from it and reconverge in <code>triples.py</code>.</li>
-  <li><strong>Two triple producers.</strong> <code>triples.py</code> (14) is rule-based (relation-cue text
+  <li><strong>Two triple producers.</strong> <code>triples.py</code> (15) is rule-based (relation-cue text
       between consecutive entities); <code>relation_extraction.py</code> (17) is the trained BioBERT model.
-      Both write into <code>TRIPLES/</code>; step&nbsp;17's scores are the learned counterpart to step&nbsp;14's
+      Both write into <code>TRIPLES/</code>; step&nbsp;17's scores are the learned counterpart to step&nbsp;15's
       candidates.</li>
   <li><strong>Two relation models, scored additively.</strong> Steps&nbsp;1 and 2 train the same architecture
       on different corpora &mdash; BioInfer (binary &ldquo;interacts&rdquo;, sentence-scoped, cleanly labelled)
@@ -474,12 +479,13 @@ Skipping step&nbsp;2 <em>without</em> supplying its checkpoint also disables ste
   <li><strong>Normalization is layered.</strong> <code>triples.py</code> writes the base triples then three
       progressively normalized files: +HGNC, +MONDO, +ChEBI &mdash; the last
       (<code>triples_GENETIC_DISEASE_CHEMICAL_normalized.json</code>) is the fully ID-normalized set.</li>
-  <li><strong>In-place annotators.</strong> <code>controls.py</code> (8), <code>phenotypes.py</code> (10) and
-      <code>nonchemical.py</code> (12) add yes/no flags <em>onto existing library JSON</em> rather than
+  <li><strong>In-place annotators.</strong> <code>controls.py</code> (9), <code>phenotypes.py</code> (11) and
+      <code>nonchemical.py</code> (13) add yes/no flags <em>onto existing library JSON</em> rather than
       producing new corpora &mdash; so they must run after the libraries they annotate are built.</li>
   <li><strong>Hand-off from step&nbsp;1.</strong> The input <code>experimental_ner/</code> is exactly what the
       publications pipeline (<code>step_1_publications.html</code>) assembled; this bundle is the "step&nbsp;2"
-      referenced there.</li>
+      referenced there. Stage&nbsp;1's step&nbsp;6c stamps every file with <code>&lt;?pub-year YYYY?&gt;</code>,
+      which is why dating papers here needs neither <code>pmids/pmid_pmc_ids.tsv</code> nor the network.</li>
   <li><strong>Single-download bundle.</strong> The last step, <code>zip_work.py</code> (20), packs the whole
       working directory into <code>kaggle_working.zip</code> &mdash; so the entire run (model, sentences,
       normalization libraries, <code>TRIPLES/</code> and the HTML summaries) comes off Kaggle as one file. It
