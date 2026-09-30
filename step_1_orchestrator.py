@@ -39,7 +39,8 @@ Options
     --start S     start from step S (1, 1b, 2 .. 6, 6b, 6c, 7, 8) instead of step 1
     --stop  S     stop after step S
     --only  S     run only step S
-    --archive D   local XML archive for steps 1b/6b (default: ../../xmls)
+    --archive D   local XML archive for steps 1b/6b (default: nearest
+                  ancestor's xmls/, e.g. ../xmls)
     --no-archive  skip steps 1b/6b and download the whole selection
     --list        print the pipeline order and exit
     --dry-run     print what would run without executing anything
@@ -129,10 +130,28 @@ STEP_INDEX = {key: i for i, (key, _script, _desc) in enumerate(PIPELINE)}
 # pipeline can be launched from any working directory.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+
+def find_default_archive(start):
+    """Nearest ``xmls/`` directory in an ancestor of ``start`` (``start`` excluded).
+
+    The shared archive sits beside the project checkout (``PythonProject/xmls``
+    for ``PythonProject/anaerobic``) or, in the older layout, beside
+    ``relationship_graphs/`` two levels up -- so walk upwards rather than hard-code
+    the depth. Falls back to ``../xmls`` (reported as missing) when none exists.
+    """
+    here = os.path.abspath(start)
+    parent = os.path.dirname(here)
+    while parent != here:
+        candidate = os.path.join(parent, "xmls")
+        if os.path.isdir(candidate):
+            return candidate
+        here, parent = parent, os.path.dirname(parent)
+    return os.path.join(os.path.dirname(os.path.abspath(start)), "xmls")
+
+
 # Default archive for steps 1b/6b -- the same default from_archive.py itself uses.
-# Two levels up: this script lives in <project>/relationship_graphs/lung_small/ and
-# the shared archive is <project>/xmls/, a sibling of relationship_graphs/.
-DEFAULT_ARCHIVE = os.path.join(BASE_DIR, os.pardir, os.pardir, "xmls")
+DEFAULT_ARCHIVE = find_default_archive(BASE_DIR)
 
 
 def parse_step(value):
