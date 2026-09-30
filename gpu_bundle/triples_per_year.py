@@ -13,13 +13,18 @@ writes a self-contained HTML page with three panels:
 
 plus a per-year table (n, publications, min/P5/Q1/median/Q3/P95/max/mean).
 
-YEARS come from the stage-1 table pmids/pmid_pmc_ids.tsv (pubmed_query.py), which has a
-year for every document in the corpus -- unlike the XML itself, where half the GROBID TEI
-files carry no date. A triple's pmid is reduced to its bare PMC accession first, since
-GROBID-derived documents carry ids like "PMC123.grobid.tei". Triples whose article is not
-in the table are counted as undated and left off the plots; the page reports how many.
+Step 19 of gpu.py (optional; after relation_extraction writes the triples, before zip_work
+bundles the run). Standalone it works on any finished run tree via --root.
 
-Run::  python triples_per_year.py [--data-root kaggle_working] [--triples FILE] [--pmid-tsv FILE] [--out triples_per_year.html] [--min-n 100]
+YEARS come from databases/pmc_years.json, the PMC -> year cache pub_years.py (step 16)
+builds, topped up from the stage-1 table pmids/pmid_pmc_ids.tsv (pubmed_query.py) when one
+is found near the run -- the table has a year for every document in the corpus, unlike the
+XML itself, where half the GROBID TEI files carry no date. Nothing here goes to the
+network. A triple's pmid is reduced to its bare PMC accession first, since GROBID-derived
+documents carry ids like "PMC123.grobid.tei". Triples whose article has no year in either
+source are counted as undated and left off the plots; the page reports how many.
+
+Run::  python triples_per_year.py [--root kaggle_working] [--triples FILE] [--pmid-tsv FILE] [--out FILE] [--min-n 100]
 """
 import argparse
 import collections
@@ -28,18 +33,42 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-DATA_ROOT = ROOT / "kaggle_working"
-TRIPLES = "TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"   # relative to the data root
-PMID_TABLE = ROOT / "pmids" / "pmid_pmc_ids.tsv"                          # stage-1 table (pubmed_query.py)
-OUT = ROOT / "triples_per_year.html"
+# relative to the run root (--root), the working dir gpu.py runs every step in
+TRIPLES = "TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"   # relation_extraction.py (step 17)
+YEARS_CACHE = "databases/pmc_years.json"                                   # pub_years.py (step 16)
+PMID_TSV = "pmids/pmid_pmc_ids.tsv"                                        # stage-1 table (pubmed_query.py)
+OUT = "summaries/triples_per_year.html"
 NBINS = 40   # histogram bins over [0, 1]
 
 
-def load_years(path):
-    """PMC accession -> publication year, from the stage-1 table."""
-    with open(path, encoding="utf-8", newline="") as fh:
-        return {r["pmc_id"]: int(r["year"]) for r in csv.DictReader(fh, delimiter="\t")
-                if r.get("pmc_id") and r.get("year")}
+def find_tsv(explicit, root):
+    """The stage-1 table, or None -- searched where pub_years.py looks for it."""
+    if explicit:
+        p = Path(explicit)
+        return p if p.exists() else None
+    for base in (root, root.parent, ROOT, ROOT.parent):
+        if (base / PMID_TSV).exists():
+            return base / PMID_TSV
+    return None
+
+
+def load_years(root, tsv):
+    """PMC accession -> publication year: the step-16 cache first, the table for the rest."""
+    years, cache = {}, root / YEARS_CACHE
+    if cache.exists():
+        years = {k: int(v) for k, v in json.loads(cache.read_text(encoding="utf-8")).items() if v}
+        print(f"  {YEARS_CACHE}: {len(years):,} accessions with a year")
+    if tsv:
+        with open(tsv, encoding="utf-8", newline="") as fh:
+            table = {r["pmc_id"]: int(r["year"]) for r in csv.DictReader(fh, delimiter="\t")
+                     if r.get("pmc_id") and (r.get("year") or "").strip().isdigit()}
+        added = {k: v for k, v in table.items() if k not in years}
+        years.update(added)
+        print(f"  {tsv.name}: {len(table):,} accessions with a year; {len(added):,} not in the cache")
+    if not years:
+        raise SystemExit(f"no publication years: neither {cache} nor {PMID_TSV} was found "
+                         f"(run pub_years.py first, or pass --pmid-tsv)")
+    return years
 
 
 def quantile(sorted_vals, p):
@@ -84,30 +113,36 @@ def collect(triples, years):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--data-root", default=str(DATA_ROOT),
-                    help="pipeline output tree to read inputs from (default: kaggle_working/ next to this script)")
-    ap.add_argument("--triples", help=f"triples JSON to plot (default: <data-root>/{TRIPLES})")
-    ap.add_argument("--pmid-tsv", default=str(PMID_TABLE),
-                    help="stage-1 table with pmc_id and year columns (default: pmids/pmid_pmc_ids.tsv)")
-    ap.add_argument("--out", default=str(OUT), help="HTML to write (default: triples_per_year.html next to this script)")
+    ap.add_argument("--root", "--data-root", default=str(ROOT),
+                    help="run tree holding TRIPLES/ and databases/ (default: next to this script)")
+    ap.add_argument("--triples", help=f"triples JSON to plot (default: <root>/{TRIPLES})")
+    ap.add_argument("--pmid-tsv", default=None,
+                    help=f"stage-1 table with pmc_id and year columns, topping up <root>/{YEARS_CACHE} "
+                         f"(default: {PMID_TSV} found near the root or this script)")
+    ap.add_argument("--out", help=f"HTML to write (default: <root>/{OUT})")
     ap.add_argument("--min-n", type=int, default=100, help="years with fewer triples are drawn faded (default 100)")
     args = ap.parse_args()
 
-    src = Path(args.triples) if args.triples else Path(args.data_root) / TRIPLES
+    root = Path(args.root).resolve()
+    src = Path(args.triples) if args.triples else root / TRIPLES
+    if not src.exists():
+        raise SystemExit(f"no triples file at {src} (relation_extraction.py writes it)")
     with open(src, encoding="utf-8") as fh:
         triples = json.load(fh)
-    data = collect(triples, load_years(args.pmid_tsv))
+    data = collect(triples, load_years(root, find_tsv(args.pmid_tsv, root)))
     if not data["rows"]:
         raise SystemExit(f"no dated triples with a score in {src}")
 
     html = (TEMPLATE.replace("__SOURCE__", src.name)
                     .replace("__MIN_N__", str(args.min_n))
                     .replace("__DATA__", json.dumps(data)))
-    Path(args.out).write_text(html, encoding="utf-8")
+    out = Path(args.out) if args.out else root / OUT
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html, encoding="utf-8")
     a = data["all"]
     print(f"{data['total']:,} triples: {a[0]:,} dated, {data['undated'][0]:,} undated; "
           f"median score {a[4]:.3f} (IQR {a[3]:.3f}-{a[5]:.3f}), {data['rows'][0][0]}-{data['rows'][-1][0]}")
-    print(f"wrote {args.out}")
+    print(f"wrote {out}")
 
 
 TEMPLATE = r'''<!doctype html>
@@ -166,7 +201,7 @@ const y0=D.rows[0][0],y1=D.rows[D.rows.length-1][0];
 const rows=[];for(let y=y0;y<=y1;y++)rows.push(byY.get(y)||[y,0,0]);
 const A=D.all;
 document.getElementById('stats').innerHTML=[[fmt(A[0]),'dated triples'],[f3(A[4]),'median score'],[f3(A[3])+'–'+f3(A[5]),'interquartile range'],[f3(A[8]),'mean score'],[fmt(D.undated[0]),'undated (not plotted)']].map(([v,l])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
-document.getElementById('note').textContent=(D.undated[0]?`${fmt(D.undated[0])} triples from articles with no year in pmid_pmc_ids.tsv are left out (their median score is ${f3(D.undated[4])}, IQR ${f3(D.undated[3])}–${f3(D.undated[5])}). `:'Every triple has a publication year. ')+`Scores run from ${f3(A[1])} to ${f3(A[7])}.`;
+document.getElementById('note').textContent=(D.undated[0]?`${fmt(D.undated[0])} triples from articles with no known publication year are left out (their median score is ${f3(D.undated[4])}, IQR ${f3(D.undated[3])}–${f3(D.undated[5])}). `:'Every triple has a publication year. ')+`Scores run from ${f3(A[1])} to ${f3(A[7])}.`;
 document.querySelector('#t tbody').innerHTML=rows.filter(r=>r[2]).map(r=>`<tr><td>${r[0]}</td><td>${fmt(r[2])}</td><td>${fmt(r[1])}</td>${r.slice(3).map(v=>`<td>${f3(v)}</td>`).join('')}</tr>`).join('');
 
 const W=960,m={t:10,r:8,b:28,l:56},iw=W-m.l-m.r;

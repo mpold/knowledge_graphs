@@ -5,7 +5,7 @@ entity normalization -> base triples -> learned relation extraction) as ONE step
 on Kaggle (or locally). GPU-enabled for the model-training, NER and
 relation-extraction steps.
 
-Orchestrates nineteen steps in dependency order:
+Orchestrates twenty steps in dependency order:
 
     1  run_re_pipeline.py train + calibrate the PPI relation model
                           (BigBIO bioinfer -> ppi-biobert-re/)   GPU, internet [gated]
@@ -29,7 +29,8 @@ Orchestrates nineteen steps in dependency order:
     17 relation_extraction.py --normalize --route-mode additive
                          BioBERT-scored triples, every applicable model  GPU
     18 compare_re.py     PPI vs BioRED on the same pairs             CPU  [optional]
-    19 zip_work.py       bundle working dir -> kaggle_working.zip    CPU
+    19 triples_per_year.py  triple scores by publication year        CPU  [optional]
+    20 zip_work.py       bundle working dir -> kaggle_working.zip    CPU
 
 THE DRUG LEXICON (step 3 -- why it is optional, and what is lost without it)
   ChEBI is a small-molecule ontology, so biologics fall out of the pipeline twice: the
@@ -119,9 +120,13 @@ Dependency / strategy notes:
   * compare_re.py (18) joins those two verdicts on pair_id and writes
     summaries/compare_re.html: coverage, label agreement, how many edges gained a sign,
     and samples to hand-read. This is the evidence for the replace-or-not decision.
-  * Steps 2, 3, 15, 16 and 18 are OPTIONAL: if any fails (internet off, missing input,
+  * triples_per_year.py (19) dates step 17's normalized triples by publication year
+    (databases/pmc_years.json from step 16, topped up from pmids/pmid_pmc_ids.tsv when it
+    is shipped) and writes summaries/triples_per_year.html: a per-year box plot of the
+    composite score, triple counts per year, and a score histogram. Offline.
+  * Steps 2, 3, 15, 16, 18 and 19 are OPTIONAL: if any fails (internet off, missing input,
     only one model trained) the orchestrator warns and CONTINUES.
-  * zip_work.py (19, LAST) packs the whole working dir into kaggle_working.zip so the
+  * zip_work.py (20, LAST) packs the whole working dir into kaggle_working.zip so the
     entire run is one download; it must run after every other step has written its output.
 
 Why an orchestrator (not one merged file): the scripts are standalone but resolve
@@ -131,7 +136,7 @@ unmodified.
 
 KAGGLE USAGE
   1. Upload the project as a Kaggle Dataset (read-only at /kaggle/input/<ds>/):
-       the 19 step scripts above PLUS bigbio_to_re.py + train_re.py (run by
+       the 20 step scripts above PLUS bigbio_to_re.py + train_re.py (run by
                                                   run_re_pipeline.py in steps 1 and 2)
                                   AND calibration.py (shared: steps 1, 2 + step 17)
        experimental_ner/                             (XML corpus; sentences.py input)
@@ -269,6 +274,10 @@ STEPS = [
          desc="[GPU] BioBERT-scored relations + normalized variant; every applicable checkpoint scores each pair (RE_MODEL_PPI + RE_MODEL_BIORED)"),
     dict(name="compare_re", script="compare_re.py", args=[], dbs=[], gpu=False, models=[], optional=True,
          desc="PPI vs BioRED on identical pairs -> summaries/compare_re.html (needs both models) [optional]"),
+    dict(name="triples_per_year", script="triples_per_year.py", args=[], dbs=[], gpu=False, models=[],
+         optional=True, reads_sentences=False,
+         desc="triple score distribution per publication year (pmc_years.json) -> "
+              "summaries/triples_per_year.html [optional]"),
     dict(name="zip", script="zip_work.py", args=[], dbs=[], gpu=False, models=[],
          desc="bundle the whole working dir into a downloadable kaggle_working.zip (final step)"),
 ]
@@ -287,7 +296,8 @@ OPTIONAL_DBS = {
                        read_by=("sentences", "chemical"),
                        without="INN-stem regex only -- no brand/code names, and chemical.py "
                                "cannot normalize the biologics"),
-    "pmc_years": dict(file="pmc_years.json", built_by="pub_years", read_by=("pub_years",),
+    "pmc_years": dict(file="pmc_years.json", built_by="pub_years",
+                      read_by=("pub_years", "triples_per_year"),
                       without="every PMC id is re-fetched from NCBI (needs internet)"),
 }
 RAW_DIR = "experimental_ner"   # sentences.py input (XML); sentences/ is generated from it
