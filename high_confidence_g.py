@@ -927,18 +927,16 @@ __LIBTAG__
  #sigclose{margin-left:14px;background:#eef2f7;border:1px solid #cdd5e0;border-radius:6px;padding:3px 12px;cursor:pointer;font-size:13px}
  #sigclose:hover{background:#dde4ee}
  #sighelp2{max-width:640px}
- #zoom button,#srcbtns button,#labelbtns button,#orbtns button,#orbtns2 button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
- #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#orbtns button:hover,#orbtns2 button:hover{background:#dde4ee}
- #srcbtns button,#labelbtns button,#orbtns button{margin-bottom:4px}
- #orbtns{margin-top:5px}
+ #zoom button,#srcbtns button,#labelbtns button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
+ #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover{background:#dde4ee}
+ #srcbtns button,#labelbtns button{margin-bottom:4px}
  #disfilters{max-height:148px;overflow-y:auto;margin-top:4px}
  #disfilters label{display:block}
  #disclear:hover{color:#0969da}
- #orbtns2 button{margin-left:6px;margin-right:0}
  /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
     carry a trailing margin -- 6px of it would push Fit onto a second line */
  #zoom button:last-child{margin-right:0}
- #srcbtns button.on,#labelbtns button.on,#orbtns button.on,#orbtns2 button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
+ #srcbtns button.on,#labelbtns button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  #srcbtns button:disabled{opacity:.45;cursor:default}
  .vis-tooltip{max-width:480px!important;white-space:normal!important;background:#fff!important;color:#1a1a1a!important;border:1px solid #999!important;border-radius:8px!important;padding:8px 10px!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;font:12px/1.45 Segoe UI,Arial,sans-serif!important}
  .eth{font-size:13px;margin-bottom:6px} .stip{padding:3px 0;border-top:1px solid #e3e3e3}
@@ -970,11 +968,8 @@ __LIBTAG__
  <div class="row" id="disrow">Keep diseases: <button class="ihelp" aria-label="About the disease keep-list" aria-expanded="false">i</button>
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
   <div class="legend" id="disfilters"></div>
-  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied, the same rule the significance cut follows: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it.</div></div>
+  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
- <div class="row" id="qrow">Significance: <b id="qsv">off (show all)</b> <button class="ihelp" aria-label="About the significance cutoff" aria-expanded="false">i</button><br><input id="qsig" type="range" min="0" max="9" step="1" value="0" aria-label="Significance cutoff">
-  <div id="orbtns"><button class="orb" data-or="gt1">OR&gt;1</button><button class="orb" data-or="lt1">OR&lt;1</button></div>
-  <div class="mut help" id="qhelp">Hides genes and drugs whose enrichment was <em>tested and missed</em> the cutoff. Entities the test could not reach &mdash; fewer than five corpus papers, or nothing outside the view to contrast against &mdash; are <b>kept</b>: they were never judged, so they cannot have failed, and on this corpus they are over half the ranked genes. The buttons ask a different question &mdash; which side of 1 &mdash; so they <em>do</em> drop the untested, which sit on neither: over-represented in this view (OR&gt;1) or under-represented (OR&lt;1). Each toggles on its own and press a lit one again to clear it. <b>Both lit is not the same as neither</b>: it keeps every entity the test placed on a side and drops the ones it could not place &mdash; the &ldquo;only what was actually measured&rdquo; view. The depleted side is a finding too: in an adenocarcinoma view the small-cell markers DLL3 and ASCL1 land there. Diseases stay throughout: they carry no ranking of their own. <b>A high q is not a small node.</b> The cut asks whether an entity is over-represented <em>against the pooled six-corpus lung background</em>, not whether it matters here: EGFR carries this view at rank 2 by publications, yet sits at OR&nbsp;1.05, q&nbsp;0.88, because it is just as common in the squamous and small-cell papers. Read the ranking for what the view is made of, and this for what is distinctive about it.</div></div>
  <div class="row" id="sigrow">Significance in view <button class="ihelp" aria-label="About significance in view" aria-expanded="false">i</button><br>
   <select id="sigkind"><option value="gene">genes</option><option value="chemical">drugs</option></select>
   <select id="sigmeasure"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
@@ -1015,11 +1010,6 @@ __KINDROW__
 <div id="sigtable"><h2 id="sigttl"></h2><button class="ihelp" data-help="sig" aria-label="About significance in view" aria-expanded="false">i</button>
  <div class="mut help" data-help="sig" id="sighelp2"></div>
  <div class="mut" id="sigsub"></div>
- <div class="row" id="qrow2">Significance: <b id="qsv2">off (show all)</b>
-  <input id="qsig2" type="range" min="0" max="9" step="1" value="0" style="width:160px;vertical-align:middle" aria-label="Significance cutoff">
-  <span id="orbtns2"><button class="orb2" data-or="gt1">OR&gt;1</button><button class="orb2" data-or="lt1">OR&lt;1</button></span>
-  <button class="ihelp" aria-label="About the significance cutoff" aria-expanded="false">i</button>
-  <div class="mut help" id="qhelp2"></div></div>
  <div class="mut" id="signote2" style="display:none"></div>
  <div id="signotest" style="display:none"></div>
  <div id="sigyr" class="row"><select id="sigkind2"><option value="gene">genes</option><option value="chemical">drugs</option></select>
@@ -1167,8 +1157,8 @@ function disPass(id){return !DIS_KEEP.size||KIND[id]!=='disease'||DIS_KEEP.has(i
 // Rebuilt on every redraw from the edges the rest of the controls left, so the menu is always
 // the diseases actually in front of you. Two things it must not do: it must not be built from
 // its OWN leavings, or ticking one disease would empty the list you are ticking from (so the
-// caller passes the pre-filter edges, the same order the q cut uses); and it must not drop a
-// ticked disease that the current filters have starved, or that tick could never be undone --
+// caller passes the pre-filter edges); and it must not drop a ticked disease that the current
+// filters have starved, or that tick could never be undone --
 // those stay listed at (0).
 function buildDiseaseFilter(edges){
  const box=document.getElementById('disfilters'); if(!box)return;
@@ -1391,34 +1381,20 @@ function build(thr){
    const csz={};for(const n in comp)csz[comp[n]]=(csz[comp[n]]||0)+1;
    edges=edges.filter(o=>csz[comp[o.e.from]]>=mc);
  }
- // --- the ranking, then the significance cut -------------------------------------------------
- // Order matters and is deliberate. The enrichment is computed from the view BEFORE the q cut,
- // and the cut only hides what it judged: if the ranking were recomputed on its own survivors,
- // dragging the slider would move the very numbers it filters on, and each notch would be
- // answering a different question than the one it displays. So the q shown next to a node is
- // always the q it was judged by.
+ // --- the ranking ---------------------------------------------------------------------------
  DRAWN_EDGES=edges;BOOT=null;          // a new view invalidates any bootstrap taken of the old one
  (function(){const pm=new Set(), nd=new Set();
   edges.forEach(o=>{nd.add(o.e.from);nd.add(o.e.to);o.vis.forEach(s=>pm.add(s.pmid));});
   VIEW_PUBS=pm.size;VIEW_ENTS=nd.size;})();
  sigCompute(edges);
  ENRICH=enrichCompute(VIEW_PUBS,VIEW_ENTS);
- QMAP=qMapFor(VIEW_PUBS,VIEW_ENTS);    // q for genes AND drugs, so the cut can judge both
- const qcut=activeQ();
- if(qcut!==null||OR_MODE.size){
-  // a node survives if it was tested, reached the threshold and points the way the buttons ask;
-  // diseases carry no ranking of their own, so they stay as context rather than being cut on
-  // evidence they never had
-  const ok=id=>KIND[id]==='disease'||(qPass(id)&&orPass(id));
-  edges=edges.filter(o=>ok(o.e.from)&&ok(o.e.to));
- }
  // the disease keep-list, built from what the controls above left and applied after it, so the
  // menu never filters itself out of existence (see buildDiseaseFilter)
  buildDiseaseFilter(edges);
  if(DIS_KEEP.size)edges=edges.filter(o=>disPass(o.e.from)&&disPass(o.e.to));
  sigRender();
  if(SIGTAB_OPEN)sigTable();
- updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text, q)
+ updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text, disease)
  const keep=new Set();edges.forEach(o=>{keep.add(o.e.from);keep.add(o.e.to);});
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  // the edgeless fallback, sized by the same measure as everything else: unique sentences in view
@@ -1503,24 +1479,6 @@ document.querySelectorAll('.ihelp').forEach(b=>b.addEventListener('click',()=>{
  b.classList.toggle('on',open);
  b.setAttribute('aria-expanded',open?'true':'false');}));
 // the position controls all replay from BASEPOS, so they reshape in place -- no rebuild, no relayout
-// two handles, one cutoff: the panel's and the table's mirror each other and rebuild the view
-function qChanged(fromTable){
- const a=document.getElementById('qsig'), b=document.getElementById('qsig2');
- if(fromTable&&b)a.value=b.value; else if(b)b.value=a.value;
- const t=qLabel();
- ['qsv','qsv2'].forEach(id=>{const e=document.getElementById(id);if(e)e.innerHTML=t;});
- build(+thr.value);
-}
-['qsig','qsig2'].forEach((id,i)=>{const el=document.getElementById(id);
- if(el)el.addEventListener('input',()=>qChanged(i===1));});
-function orPaint(){document.querySelectorAll('.orb,.orb2').forEach(b=>
-  b.classList.toggle('on',OR_MODE.has(b.getAttribute('data-or'))));}
-document.querySelectorAll('.orb,.orb2').forEach(b=>b.addEventListener('click',()=>{
- const m=b.getAttribute('data-or');
- if(OR_MODE.has(m))OR_MODE.delete(m);else OR_MODE.add(m);   // each button toggles on its own
- orPaint();
- build(+thr.value);
-}));
 (function(){const c=document.getElementById('disclear');
  if(c)c.addEventListener('click',()=>{if(!DIS_KEEP.size)return;DIS_KEEP.clear();build(+thr.value);});})();
 const shr=document.getElementById('shrink'), exp=document.getElementById('expand');
@@ -1684,60 +1642,7 @@ function enrichCompute(viewPubs,viewEnts){
 }
 function orStr(e){return e?e.or.toFixed(2)+' <span class=mut>('+e.lo.toFixed(2)+'&ndash;'+e.hi.toFixed(2)+')</span>':'&mdash;';}
 function qStr(e){return e?(e.q<1e-4?e.q.toExponential(1):e.q.toFixed(4)):'&mdash;';}
-let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0, VIEW_ENTS=0, QMAP={}, ORMAP={};
-// --- direction of enrichment --------------------------------------------------------------
-// The q cut says how sure; these two say which way. An odds ratio above 1 means the entity is
-// over-represented in this view against the shared corpus, below 1 under-represented -- and the
-// depleted side is a finding, not a leftover: in an adenocarcinoma view the small-cell markers
-// DLL3 and ASCL1 land there at q well under 0.05. Untested entities have no OR and are hidden by
-// either button, the same rule the q slider follows; diseases carry no ranking and are exempt.
-const OR_TESTS={gt1:{fn:v=>v>1},lt1:{fn:v=>v<1}};
-// A SET, not one mode: the two directions are independent filters, so both can be lit at once.
-// Both on is not the same as neither on -- it keeps every entity the test placed on a side and
-// drops the ones it could not place, which is the "show me only what was actually measured"
-// view. (An odds ratio of exactly 1 is on neither side and falls out too; with the Haldane
-// correction that is a near-empty case, but it is the honest reading of "over" and "under".)
-const OR_MODE=new Set();
-function orPass(id){
- if(!OR_MODE.size)return true;
- const v=ORMAP[id];
- if(v===undefined)return false;      // untested: on neither side of 1, so no button keeps it
- for(const m of OR_MODE)if(OR_TESTS[m].fn(v))return true;
- return false;
-}
-// The q cut hides what the test JUDGED and rejected. An entity that could not be tested at all --
-// corpus count below ENRICH_MIN, or nothing outside the view to contrast against -- was never
-// judged, so it is not "below the cutoff": it has no cutoff to be below. Treating the two alike
-// deleted 1,502 of this corpus' 2,904 ranked genes at q<=0.05 -- more than half the graph, and
-// the whole long tail of it -- on evidence that was never gathered. So the slider keeps the
-// untested and cuts only the judged.
-// The OR buttons ask a DIFFERENT question -- which side of 1 the entity sits on -- and an
-// untested entity sits on neither, so orPass() above still hides it. That asymmetry is the point:
-// "not shown to be enriched" and "shown not to be enriched" are not the same claim.
-function qPass(id){const q=activeQ();return q===null||QMAP[id]===undefined||QMAP[id]<=q;}
-// q for BOTH rankable kinds, so the slider can cut genes and drugs in one pass. The table shows
-// one kind at a time; the graph has to judge whatever it draws.
-function qMapFor(viewPubs,viewEnts){
- const keep=sigKind(), out={};
- ORMAP={};
- ['gene','chemical'].forEach(k=>{
-  const sel=document.getElementById('sigkind');
-  if(sel)sel.value=k;                  // enrichCompute reads the selector; borrow it, then restore
-  const e=enrichCompute(viewPubs,viewEnts);
-  if(e)Object.keys(e.rows).forEach(id=>{out[id]=e.rows[id].q;ORMAP[id]=e.rows[id].or;});
- });
- const sel=document.getElementById('sigkind');
- if(sel)sel.value=keep;
- return out;
-}
-// Stops, not a linear range: q is read on a log scale and the conventional cutoffs are what a
-// reader wants to land on. Index 0 is off, so the graph opens unfiltered.
-const Q_STEPS=[null,0.5,0.2,0.1,0.05,0.01,0.001,1e-4,1e-5,1e-6];
-function activeQ(){const el=document.getElementById('qsig');
- let i=el?parseInt(el.value):0;if(isNaN(i))i=0;
- return Q_STEPS[Math.max(0,Math.min(Q_STEPS.length-1,i))];}
-function qLabel(){const q=activeQ();
- return q===null?'off (show all)':('q &le; '+(q>=0.001?q:q.toExponential(0)));}
+let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0, VIEW_ENTS=0;
 function bootstrapCIs(B){
  const kind=sigKind(), meas=sigMeas();
  const kidx=new Map(), ids=[];
@@ -1888,9 +1793,7 @@ function sigKind(){return (document.getElementById('sigkind')||{}).value||'gene'
 function sigMeas(){return (document.getElementById('sigmeasure')||{}).value||'pub';}
 function sigTable(){
  const kind=sigKind(), meas=SIGTAB_SORT||sigMeas();
- // the same two predicates the graph applies, so the views can never disagree about what survives
  SIGTAB_ROWS=SIG.filter(s=>s.kind===kind)
-   .filter(s=>qPass(s.id)&&orPass(s.id))
    .sort((a,b)=>{
    if(meas==='nm')return a.label.localeCompare(b.label);
    if(meas==='pct'||meas==='z')return (b[meas][sigMeas()]-a[meas][sigMeas()])||a.label.localeCompare(b.label);
@@ -1958,7 +1861,7 @@ function sigOpen(){SIGTAB_OPEN=true;SIGTAB_SORT=null;
 function sigClose(){SIGTAB_OPEN=false;document.getElementById('sigtable').classList.remove('open');layoutTable();}
 // one source for the explanation: the panel's copy is authored in the template, the table's is
 // filled from it at load, so the two can never drift apart
-(function(){[['sighelp','sighelp2'],['qhelp','qhelp2']].forEach(([x,y])=>{
+(function(){[['sighelp','sighelp2']].forEach(([x,y])=>{
  const a=document.getElementById(x),b=document.getElementById(y);
  if(a&&b)b.innerHTML=a.innerHTML;});})();
 // run on demand, not on every redraw: it is the one thing here that costs real work, and it is
