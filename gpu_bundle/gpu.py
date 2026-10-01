@@ -283,7 +283,7 @@ STEPS = [
     dict(name="relation_extraction", script="relation_extraction.py",
          args=["--normalize", "--route-mode", "additive"],
          dbs=[], gpu=True, models=["ppi-biobert-re", "biored-biobert-re"],
-         support=["triples.py", "calibration.py"],
+         support=["triples.py", "calibration.py", "direction.py"],
          desc="[GPU] BioBERT-scored relations + normalized variant; every applicable checkpoint scores each pair (RE_MODEL_PPI + RE_MODEL_BIORED)"),
     dict(name="compare_re", script="compare_re.py", args=[], dbs=[], gpu=False, models=[], optional=True,
          desc="PPI vs BioRED on identical pairs -> summaries/compare_re.html (needs both models) [optional]"),
