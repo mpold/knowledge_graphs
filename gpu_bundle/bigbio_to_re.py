@@ -59,7 +59,7 @@ INPUT
 
 Negative pairs explode in entity-dense sentences; --neg-ratio caps negatives to
 N x positives (random, seeded). Datasets without a dev/test split can be carved
-with --val-frac / --test-frac.
+with --val-frac / --test-frac -- by DOCUMENT, so no sentence is in both train and dev.
 
 Sanity-check the entity/relation type mapping for a corpus BEFORE converting:
     python bigbio_to_re.py --task ppi --dataset bigbio/bioinfer --print-types
@@ -604,24 +604,28 @@ def main():
     out = Path(args.out or f"{args.task}_re_data")
     out.mkdir(parents=True, exist_ok=True)
 
-    # build per-output-split rows
-    converted = {}
+    # group docs by output file
+    by_file = {}
     for split, docs in splits.items():
-        rows = convert_split(docs, args.task, not args.chemprot_all_cpr, args.neg_ratio, rng,
-                             collapse, args.require_cue)
-        fname = SPLIT_FILE.get(split.lower(), "train.tsv")
-        converted.setdefault(fname, []).extend(rows)
+        by_file.setdefault(SPLIT_FILE.get(split.lower(), "train.tsv"), []).extend(docs)
 
-    # carve dev/test from train if requested and missing
-    if (args.val_frac or args.test_frac) and "train.tsv" in converted:
-        pool = converted["train.tsv"]
+    # carve dev/test from train BY DOCUMENT, before any rows exist. One sentence yields a row
+    # per entity pair, so carving rows put near-copies of training sentences in dev (95% of
+    # BioInfer's dev rows) -- inflating dev F1 and the threshold/calibrator fit on it.
+    if (args.val_frac or args.test_frac) and by_file.get("train.tsv"):
+        pool = list(by_file["train.tsv"])
         rng.shuffle(pool)
         n = len(pool)
         n_test = int(args.test_frac * n)
         n_val = int(args.val_frac * n)
-        converted["test.tsv"] = converted.get("test.tsv", []) + pool[:n_test]
-        converted["dev.tsv"] = converted.get("dev.tsv", []) + pool[n_test:n_test + n_val]
-        converted["train.tsv"] = pool[n_test + n_val:]
+        by_file.setdefault("test.tsv", []).extend(pool[:n_test])
+        by_file.setdefault("dev.tsv", []).extend(pool[n_test:n_test + n_val])
+        by_file["train.tsv"] = pool[n_test + n_val:]
+        print(f"carved by document: {n_val:,} dev + {n_test:,} test docs out of {n:,} train docs")
+
+    converted = {fname: convert_split(docs, args.task, not args.chemprot_all_cpr, args.neg_ratio,
+                                      rng, collapse, args.require_cue)
+                 for fname, docs in by_file.items()}
 
     # after the carve, so event-corpus rows never leak into a carved dev/test split
     if args.extra_bind:
