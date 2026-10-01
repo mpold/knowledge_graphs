@@ -27,6 +27,11 @@ for d, files in gate.items():
             if os.path.exists(f"{INPUT_ROOT}/{d}/{f}") and os.path.getsize(f"{INPUT_ROOT}/{d}/{f}")]
     print(("  OK    " if len(have) == len(files) else "  TRAINS"),
           f"{d}/  ({len(have)}/{len(files)} files)")
+# which BioRED model is uploaded: the extra-bind one has ~1,240 Bind rows in train, the old 458
+bt = f"{INPUT_ROOT}/biored_data/train.tsv"
+if os.path.exists(bt):
+    nb = sum(l.rstrip("\n").endswith("\tBind") for l in open(bt, encoding="utf-8"))
+    print(f"  BioRED train Bind rows: {nb:,}", "(extra-bind model)" if nb > 1000 else "(OLD model -- no GE/PC rows)")
 
 CELL 3:
 !nvidia-smi -L
@@ -51,12 +56,24 @@ with zipfile.ZipFile("/kaggle/working/kaggle_working.zip", "a", zipfile.ZIP_DEFL
 # /kaggle/working, and would otherwise bundle a half-written copy. The finished log is then
 # copied to /kaggle/working/run.log (Output panel) and added to kaggle_working.zip once.
 
+CELL 6:
+import collections, json
+T = json.load(open("/kaggle/working/TRIPLES/triples_re.json", encoding="utf-8"))
+c = collections.Counter((t["predicate"].get("model", "").rsplit("/", 1)[-1], t["predicate"]["text"]) for t in T)
+for (m, lab), n in sorted(c.items()):
+    print(f"  {m:20s} {lab:26s} {n:>8,}")
+b = [t for t in T if t["predicate"]["text"] == "binds"]
+print(f"binds: {len(b):,} triples, {sum(t['score'] >= 0.8 for t in b):,} at score >= 0.8")
+# the previous BioRED model produced 5 binds triples (all ~0.5); the extra-bind model should give many more
+
 
 ==============================================================================
 STEP 2 ONLY -- retrain the BioRED model with extra Bind rows from GE/PC events
-(bigbio_to_re.py --extra-bind). Accelerator GPU + Internet ON. Afterwards copy
-biored-biobert-re/ and biored_data/ from kaggle_working.zip into gpu_bundle/ and
-re-upload; the training gate then reuses both models on a normal run.
+(--extra-bind is step 2's default, gpu.py BIORED_EXTRA_BIND). Only needed to
+retrain: gpu_bundle/ already ships the extra-bind model, so the cells above reuse
+it. Accelerator GPU + Internet ON. Afterwards copy biored-biobert-re/ (minus
+checkpoint-*/) and biored_data/ from kaggle_working.zip into gpu_bundle/ and
+re-upload. This run does NOT do NER or relation extraction -- use the cells above.
 ==============================================================================
 
 STEP 2 CELL 1:
@@ -76,18 +93,18 @@ for need in ("gpu.py", "run_re_pipeline.py", "bigbio_to_re.py", "train_re.py",
 # catch a stale upload: the old converter has no --extra-bind and would fail mid-run
 for f, mark in (("bigbio_to_re.py", "def iter_bind_instances"),
                 ("run_re_pipeline.py", "--extra-bind"),
-                ("gpu.py", 'optional=True, reads_sentences=False,\n         support=["bigbio_to_re.py"')):
+                ("gpu.py", "BIORED_EXTRA_BIND")):
     ok = mark in open(f"{INPUT_ROOT}/{f}", encoding="utf-8").read()
     print(("  NEW  " if ok else "  OLD -- re-upload "), f)
 
 STEP 2 CELL 3:
 !nvidia-smi -L
-!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} --list --steps re_pipeline_biored,zip --biored-args "--extra-bind bigbio/bionlp_st_2013_ge,bigbio/bionlp_st_2013_pc"
-# expect:  training   : RUN (re_pipeline_biored) -- forced by --steps, --biored-args
+!python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} --list --steps re_pipeline_biored,zip
+# expect:  training   : RUN (re_pipeline_biored) -- forced by --steps
 #          steps      : re_pipeline_biored, zip
 
 STEP 2 CELL 4:
-!bash -c "set -o pipefail; PYTHONUNBUFFERED=1 TQDM_MININTERVAL=30 python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} --steps re_pipeline_biored,zip --biored-args '--extra-bind bigbio/bionlp_st_2013_ge,bigbio/bionlp_st_2013_pc' 2>&1 | tee /tmp/run.log"
+!bash -c "set -o pipefail; PYTHONUNBUFFERED=1 TQDM_MININTERVAL=30 python {INPUT_ROOT}/gpu.py --input-root {INPUT_ROOT} --steps re_pipeline_biored,zip 2>&1 | tee /tmp/run.log"
 print("pipeline exit code:", _exit_code)   # 0 = step 2 and the zip succeeded
 import shutil, zipfile
 shutil.copy("/tmp/run.log", "/kaggle/working/run.log")
