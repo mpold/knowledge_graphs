@@ -79,11 +79,11 @@ continues. The last step
 <div class='flow'>
   <div class='grp'>A. Train the relation models &nbsp;<span class='dim'>(most upstream; one script, two invocations, each its own 3-script sub-pipeline &mdash; gated: run once, reused by every later corpus)</span></div>
   <div class='node'><span class='s'>1. run_re_pipeline.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span> <span class='pill gate'>gated</span>
-    <div class='io'>in: BigBIO <code>bioinfer</code> corpus (HF <code>datasets</code>) &nbsp;&rarr;&nbsp; out: <code>ppi-biobert-re/</code> checkpoint + <code>ppi_data/*.tsv</code> + <code>summaries/calibration.html</code>
+    <div class='io'>in: BigBIO <code>bioinfer</code> corpus (HF <code>datasets</code>) &nbsp;&rarr;&nbsp; out: <code>ppi-biobert-re/</code> checkpoint + <code>ppi_data/*.tsv</code> + <code>summaries/calibration_ppi.html</code>
       <span class='dim'>&mdash; runs bigbio_to_re.py &rarr; train_re.py &rarr; calibration.py; binary &ldquo;interacts&rdquo;, 2 epochs, Platt calibrator</span></div></div>
   <div class='node'><span class='s'>2. run_re_pipeline.py --task biored</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span> <span class='pill opt'>optional</span> <span class='pill gate'>gated</span>
-    <div class='io'>in: BigBIO <code>biored</code> corpus &nbsp;&rarr;&nbsp; out: <code>biored-biobert-re/</code> checkpoint + <code>biored_data/*.tsv</code>
-      <span class='dim'>&mdash; same script, typed + SIGNED labels (upregulator/activator, downregulator/inhibitor, binds, associated), 3 epochs, Platt calibrator. Runs ALONGSIDE the PPI model, not instead of it; if it fails the run continues with PPI alone</span></div></div>
+    <div class='io'>in: BigBIO <code>biored</code> corpus + the Binding events of BioNLP-ST <code>bionlp_st_2013_ge</code> / <code>bionlp_st_2013_pc</code> &nbsp;&rarr;&nbsp; out: <code>biored-biobert-re/</code> checkpoint + <code>biored_data/*.tsv</code> + <code>summaries/calibration_biored.html</code>
+      <span class='dim'>&mdash; same script, typed + SIGNED labels (upregulator/activator, downregulator/inhibitor, binds, associated), 3 epochs, Platt calibrator; train set adds ~785 <code>Bind</code> rows from the GE/PC events (section&nbsp;8). Runs ALONGSIDE the PPI model, not instead of it; if it fails the run continues with PPI alone</span></div></div>
   <div class='arrow'>&darr;&nbsp; ppi-biobert-re/ + biored-biobert-re/ (loaded by step 17 via RE_MODEL_PPI / RE_MODEL_BIORED)</div>
 
 <div class='key'><strong>The training gate &mdash; why steps&nbsp;1&ndash;2 usually do not run.</strong>
@@ -194,7 +194,7 @@ reads step&nbsp;17's normalized triples and step&nbsp;4's year cache.</p>
   <td class='num'>1</td>
   <td><code>run_re_pipeline.py</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span></td>
   <td>BigBIO <code>bigbio/bioinfer</code> KB corpus <span class='dim'>(downloaded via HF <code>datasets&lt;4</code>)</span></td>
-  <td><code>ppi-biobert-re/</code> checkpoint (weights, config+label map, tokenizer, <code>calibration.json</code>)<br><code>ppi_data/{train,dev,test}.tsv</code><br><code>summaries/calibration.html</code></td>
+  <td><code>ppi-biobert-re/</code> checkpoint (weights, config+label map, tokenizer, <code>calibration.json</code>)<br><code>ppi_data/{train,dev,test}.tsv</code><br><code>summaries/calibration_ppi.html</code></td>
   <td>Fine-tunes BioBERT into the PPI relation model that step&nbsp;17 needs. Itself a 3-script
       sub-pipeline run as one subprocess: <code>bigbio_to_re.py</code> (corpus &rarr; entity-blinded TSVs)
       &rarr; <code>train_re.py</code> (fine-tune, <strong><code>--epochs 2</code></strong>) &rarr;
@@ -208,8 +208,8 @@ reads step&nbsp;17's normalized triples and step&nbsp;4's year cache.</p>
 <tr>
   <td class='num'>2</td>
   <td><code>run_re_pipeline.py --task biored</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span> <span class='pill opt'>optional</span> <span class='pill gate'>gated</span></td>
-  <td>BigBIO <code>bigbio/biored</code> KB corpus <span class='dim'>(downloaded via HF <code>datasets&lt;4</code>)</span></td>
-  <td><code>biored-biobert-re/</code> checkpoint (weights, config+label map, tokenizer, <code>calibration.json</code>)<br><code>biored_data/{train,dev,test}.tsv</code><br><code>summaries/calibration.html</code> <span class='dim'>(overwrites step&nbsp;1's)</span></td>
+  <td>BigBIO <code>bigbio/biored</code> KB corpus, plus <code>bigbio/bionlp_st_2013_ge</code> and <code>bigbio/bionlp_st_2013_pc</code> for extra <code>Bind</code> rows <span class='dim'>(all downloaded via HF <code>datasets&lt;4</code>)</span></td>
+  <td><code>biored-biobert-re/</code> checkpoint (weights, config+label map, tokenizer, <code>calibration.json</code>)<br><code>biored_data/{train,dev,test}.tsv</code><br><code>summaries/calibration_biored.html</code></td>
   <td>The same script with <code>--task biored</code>. BioRED (Luo et al. 2022) is a typed, <strong>signed</strong>
       corpus, so this checkpoint predicts <code>upregulator/activator</code>,
       <code>downregulator/inhibitor</code>, <code>binds</code> and <code>associated</code> instead of a bare
@@ -221,7 +221,12 @@ reads step&nbsp;17's normalized triples and step&nbsp;4's year cache.</p>
       it: <strong>optional</strong>, so if the download or training fails the run continues with PPI alone
       and nothing is lost. These two output dirs are half of what the <strong>training gate</strong>
       tests for &mdash; once all four (with step&nbsp;1's) are complete in <code>gpu_bundle/</code>,
-      steps&nbsp;1&ndash;2 both stop running (section&nbsp;1A).</td>
+      steps&nbsp;1&ndash;2 both stop running (section&nbsp;1A).
+      <strong>Extra <code>Bind</code> data</strong> (since 2026-09-30): <code>gpu.py</code> passes
+      <code>--extra-bind</code> (<code>BIORED_EXTRA_BIND</code>) by default, so the converter appends the
+      Binding events of BioNLP-ST GE&nbsp;2013 and PC&nbsp;2013 to <code>train.tsv</code> only &mdash;
+      BioRED alone has too few <code>Bind</code> rows for <code>binds</code> to be predicted
+      (section&nbsp;8).</td>
 </tr>
 <tr>
   <td class='num'>3</td>
@@ -526,7 +531,7 @@ this is one of them. Essentially the whole gain is in epoch&nbsp;2.
 (recommendation&nbsp;5 in section&nbsp;6); the checkpoint in the bundle predates the change and still has
 three epochs in it.</p>
 
-<h3><code>biored-biobert-re</code> <span class='dim'>(BigBIO biored; 2,119 steps/epoch, 6,357 total)</span></h3>
+<h3><code>biored-biobert-re</code>, original <span class='dim'>(BigBIO biored; 2,119 steps/epoch, 6,357 total; replaced 2026-09-30, see below)</span></h3>
 <table>
 <thead><tr><th class='num'>epoch</th><th class='num'>dev F1</th><th class='num'>&Delta;</th><th class='num'>precision</th><th class='num'>recall</th><th class='num'>accuracy</th><th class='num'>eval loss</th></tr></thead>
 <tbody>
@@ -537,6 +542,21 @@ three epochs in it.</p>
 </table>
 <p><strong>Epoch 3 is marginal but defensible here.</strong> +0.88 F1 points is small, but precision and
 recall are both still climbing, so the model has not turned over on the metric that matters.</p>
+
+<h3><code>biored-biobert-re</code>, current <span class='dim'>(BioRED + GE/PC <code>Bind</code> rows; 2,217 steps/epoch, 6,651 total; trained 2026-09-30)</span></h3>
+<table>
+<thead><tr><th class='num'>epoch</th><th class='num'>dev F1</th><th class='num'>&Delta;</th><th class='num'>precision</th><th class='num'>recall</th><th class='num'>accuracy</th><th class='num'>eval loss</th></tr></thead>
+<tbody>
+<tr><td class='num'>1</td><td class='num'>0.6360</td><td class='num'>&mdash;</td><td class='num'>0.6154</td><td class='num'>0.6580</td><td class='num'>0.6898</td><td class='num'>1.028</td></tr>
+<tr><td class='num'>2</td><td class='num'>0.6277</td><td class='num'>&minus;0.0083</td><td class='num'>0.6374</td><td class='num'>0.6183</td><td class='num'>0.6945</td><td class='num'>1.216</td></tr>
+<tr><td class='num'>3</td><td class='num'><strong>0.6473</strong></td><td class='num'>+0.0196</td><td class='num'>0.6356</td><td class='num'>0.6594</td><td class='num'>0.7010</td><td class='num'><strong>1.447</strong></td></tr>
+</tbody>
+</table>
+<p>Dev and test are the unchanged BioRED splits, so these figures compare directly with the original:
+dev F1 <strong>0.6238 &rarr; 0.6473</strong>. On test, F1 is 0.6779 at argmax and 0.6829 at the
+dev-tuned threshold of 0.6822; Platt brings ECE from 0.2403 to 0.0993. The same pattern holds as before
+&mdash; eval loss rises (1.03 &rarr; 1.45) while F1 improves &mdash; so the epoch/calibrator coupling
+described next still applies.</p>
 
 <div class='key'><strong>The epochs and the calibrator are the same story told twice.</strong> BioRED's
 eval loss rose <strong>35%</strong> (1.11&nbsp;&rarr;&nbsp;1.50) across the three epochs <em>while F1
@@ -549,7 +569,7 @@ calibrator clean up is the better trade, but <em>only</em> because the calibrato
 settings should not be changed independently.</div>
 
 <p class='meta'>Note the dev <code>eval_f1</code> above and the 0.6601 in
-<code>summaries/calibration.html</code> are different metrics &mdash; the latter is micro-averaged over
+<code>summaries/calibration_biored.html</code> (original model; 0.6829 for the current one) are different metrics &mdash; the latter is micro-averaged over
 positive classes only, on <em>test</em>, at a decision threshold of 0.2653 tuned on dev. They are not
 comparable figures.</p>
 
@@ -575,7 +595,7 @@ the GPU step. Everything below comes from that ablation over the 1,247-triple co
     <td class='num'>0.2761</td><td class='num'><strong>0.0734</strong></td></tr>
 </tbody>
 </table>
-<p class='dim'>From <code>summaries/calibration.html</code>. A 73% reduction &mdash; but in-domain, on
+<p class='dim'>From <code>summaries/calibration_biored.html</code> (original model). A 73% reduction &mdash; but in-domain, on
 BioRED's own test split. This corpus is lung-cancer PubMed through GROBID, and there is no gold
 standard for it, so the calibrated score is not a true probability on <em>your</em> data either.</p>
 
@@ -854,13 +874,48 @@ training. <span class='dim'>(<code>TBX3</code> was in fact dropped for having no
 by <code>nonchemical.py</code>'s <code>non_chemical</code> flag &mdash; right outcome, wrong
 mechanism.)</span></p>
 
-<div class='warn'><strong><code>summaries/calibration.html</code> is written once per run, so
-step&nbsp;2 overwrites step&nbsp;1's report.</strong> The file on disk describes whichever invocation
-ran last &mdash; <code>task = biored</code> in the current bundle &mdash; so the PPI test metrics,
-confusion matrix and ECE figures are not recoverable without re-running step&nbsp;1 alone. The
-per-checkpoint <code>calibration.json</code> files are unaffected (one per model dir), and the
-per-epoch curves in section&nbsp;5 survive in each checkpoint's
-<code>checkpoint-*/trainer_state.json</code>. Giving the report a per-task filename would fix it.</div>
+<div class='ok'><strong>Fixed: the calibration report is now per task.</strong> Steps&nbsp;1 and 2
+used to write the same <code>summaries/calibration.html</code>, so step&nbsp;2 overwrote step&nbsp;1's
+report. <code>run_re_pipeline.py</code> now writes <code>summaries/calibration_ppi.html</code> and
+<code>summaries/calibration_biored.html</code>. The per-epoch curves in section&nbsp;5 come from each
+training run's <code>checkpoint-*/trainer_state.json</code> (in the Kaggle output; the bundle keeps only
+the final model files).</div>
+
+<h2>8. <code>binds</code>: extra training data <span class='dim'>(2026-09-30)</span></h2>
+<p class='meta'>Why the original BioRED model almost never predicted <code>binds</code>, what was added,
+and what it changed on this corpus.</p>
+<table>
+<thead><tr><th></th><th class='num'>original model</th><th class='num'>current model</th></tr></thead>
+<tbody>
+<tr><td><code>Bind</code> rows in <code>biored_data/train.tsv</code></td><td class='num'>458 (1.4%)</td><td class='num'>1,243</td></tr>
+<tr><td>dev F1 (all classes)</td><td class='num'>0.6238</td><td class='num'>0.6473</td></tr>
+<tr><td>test <code>Bind</code> pairs predicted <code>binds</code></td><td class='num'>&mdash;</td><td class='num'>5 of 11</td></tr>
+<tr><td><code>binds</code> triples in <code>triples_re.json</code></td><td class='num'>5</td><td class='num'>2,890</td></tr>
+<tr><td>&nbsp;&nbsp;of which score &ge; 0.8</td><td class='num'>0</td><td class='num'>117</td></tr>
+<tr><td>graph edges <code>binds</code> / <code>not binds</code> (<code>high_confidence_g.py</code>)</td><td class='num'>0 / 0</td><td class='num'>300 / 27</td></tr>
+</tbody>
+</table>
+<ul>
+  <li><strong>Cause.</strong> <code>binds</code> is not cue-driven: it is the BioRED <code>Bind</code>
+      class, and with 458 of ~34,000 training rows the classifier almost always preferred a larger
+      class. Sentences mentioning binding were labelled <code>associated</code> or a correlation, and
+      gene&ndash;gene binding surfaced as the PPI model's <code>interacts</code>.</li>
+  <li><strong>Fix.</strong> <code>bigbio_to_re.py --extra-bind</code> reads the Binding events of
+      BioNLP-ST GE&nbsp;2013 (full-text papers, 271 rows) and PC&nbsp;2013 (abstracts, 514 rows, 46 of
+      them chemical&ndash;gene). Two Themes of one Binding event &rarr; <code>Bind</code>; a co-occurring
+      pair linked by no event &rarr; <code>false</code>; a pair linked only by another event
+      (regulation, phosphorylation&hellip;) is skipped, since BioRED would call it a correlation. Rows go
+      into <code>train.tsv</code> only, negatives capped at 1&times; the <code>Bind</code> rows
+      (<code>--extra-bind-neg-ratio</code>). <code>gpu.py</code> passes it by default
+      (<code>BIORED_EXTRA_BIND</code>).</li>
+  <li><strong>Known noise.</strong> BigBIO drops GE's Negation/Speculation modifiers, so a negated binding
+      (&ldquo;X prevented Y from binding Z&rdquo;) is still a <code>Bind</code> row; some rows are
+      dimerisation lists or promoter binding. <code>bionlp_st_2011_ge</code> does not load (its BigBIO
+      script declares an empty validation split).</li>
+  <li><strong>Graph effect.</strong> Gene&ndash;gene <code>interacts</code> edges fell from 5,401 to
+      4,413 as pairs took the typed <code>binds</code> label. BioRED's score ceiling is 0.9194, so
+      <code>binds</code> edges vanish at the 0.95 and 0.99 slider stops.</li>
+</ul>
 
 </body>
 </html>
