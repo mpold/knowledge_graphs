@@ -199,7 +199,7 @@ reused PPI model with a freshly trained BioRED one &mdash; see &sect;1A of
     <div class='io'>PMC &rarr; year from <code>pmids/pmid_pmc_ids.tsv</code>, NCBI only for what it lacks; caches <code>databases/pmc_years.json</code> and adds <code>year</code> to each gene-gene triple</div></div>
   <div class='node new'><span class='s'>17. relation_extraction.py --normalize --route-mode additive</span> <span class='pill gpu'>GPU</span> <span class='pill new'>CHANGED</span>
     <div class='io'>in: <code>sentences/*.json</code> + <strong>both</strong> checkpoints &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples_re.json</code> (+ normalized)
-      <span class='dim'>&mdash; each triple carries <code>predicate.model</code> and <code>pair_id</code>; a pair covered by both models yields two triples</span></div></div>
+      <span class='dim'>&mdash; each triple carries <code>predicate.model</code> and <code>pair_id</code>; a pair covered by both models yields two triples; since 2026-10-01 signed triples are oriented agent-first (<code>direction.py</code>)</span></div></div>
   <div class='node new'><span class='s'>18. compare_re.py</span> <span class='pill opt'>optional</span> <span class='pill new'>NEW</span>
     <div class='io'>in: <code>TRIPLES/triples_re.json</code> &nbsp;&rarr;&nbsp; out: <code>summaries/compare_re.html</code>
       <span class='dim'>&mdash; PPI vs BioRED on identical pairs: coverage, label agreement, signed-edge count, samples</span></div></div>
@@ -298,7 +298,11 @@ cache.)</span></p>
       applicable model scores the pair). Markers are now chosen per <em>(pair, model)</em>, not per
       pair &mdash; the DDI route blinds a chemical as <code>@DRUG$</code> while BioRED needs
       <code>@CHEMICAL$</code> for the very same pair. Every triple gained
-      <code>pair_id</code>.</td>
+      <code>pair_id</code>.
+      <span class='dim'>Since 2026-10-01: signed triples are oriented so the agent is the subject
+      (<code>direction.py</code>, staged with this step), and every triple records
+      <code>direction</code> / <code>direction_cue</code> &mdash; see &ldquo;Direction&rdquo; under
+      &sect;6.</span></td>
 </tr>
 <tr class='changed'>
   <td class='num'>18</td>
@@ -664,6 +668,23 @@ with colour encoding the relation, negated edges dashed, and each sentence's own
 (an edge shows its best-supported relation, so a minority reading stays visible). This is where the
 sign finally lands: <code>A inhibits B</code> and <code>A activates B</code> stopped being the same
 edge.</p>
+<div class='warn'><strong>Direction (fixed 2026-10-01).</strong> The models give a relation's type and
+sign, not who acts on whom, so an edge's arrow used to point from whichever entity the sentence
+mentioned first &mdash; passive sentences came out backwards (&ldquo;lactate &hellip; abolished
+<em>by AZD3965</em>&rdquo; was drawn <em>lactate &rarr; inhibits &rarr; AZD3965</em>). Two changes:
+<ul>
+  <li><strong>Signed triples are oriented agent-first</strong> by <code>gpu_bundle/direction.py</code>:
+      reversed when the text between the entities ends in an agent cue for the second one (<em>by</em>,
+      <em>treated with</em>, <em>in response to</em>, <em>after</em>&hellip;), with exclusions for means
+      clauses, observations and counteracted effects. Hand-checked on 100 cue hits: 0 of 11 wrong flips
+      made, 82 of 85 right flips kept; 5,447 signed triples (~12%) reversed on this corpus. Step&nbsp;17
+      applies it to new runs; <code>high_confidence_g.py</code> applies it to older ones.</li>
+  <li><strong>Arrowheads only on directed relations.</strong> <code>activates</code> /
+      <code>inhibits</code> (and their <code>not</code> forms) keep an arrowhead, agent &rarr; target;
+      <code>interacts</code>, <code>associated</code> and <code>binds</code> are symmetric and are now
+      drawn as plain lines (9,230 of 15,643 edges).</li>
+</ul>
+Full details: &sect;9 of <a href='step_2_triples.html'>step_2_triples.html</a>.</div>
 <p><strong>3. <code>--nodes all</code> &mdash; the multi-type graph.</strong> The gene-only view draws
 an edge only when <em>both</em> endpoints carry a single HGNC symbol, so BioRED's other pair types
 were scored, written to <code>triples_re.json</code>, and then silently discarded at graph-build
