@@ -512,7 +512,13 @@ selects on dev F1.</p>
 <code>train_ner.py</code>, no NER dev split and no NER checkpoint in the bundle. Every epoch count on
 this page refers to <strong>relation extraction only</strong>.</div>
 
-<h3><code>ppi-biobert-re</code> <span class='dim'>(BigBIO bioinfer; 439 steps/epoch, 1,317 total)</span></h3>
+<div class='warn'><strong>The original PPI dev figures below are inflated.</strong> BioInfer has no dev
+split, so <code>--val-frac 0.1</code> carved one out of train &mdash; by <em>row</em>. One sentence yields
+a row per entity pair, so 95% of dev rows (738 of 779) had a near-copy of their sentence in train. Fixed
+2026-10-01: dev is now carved by <em>document</em> (overlap 1%). The current model's honest curve is the
+second PPI table.</div>
+
+<h3><code>ppi-biobert-re</code>, original <span class='dim'>(BigBIO bioinfer; 439 steps/epoch, 1,317 total; leaky dev; replaced 2026-10-01)</span></h3>
 <table>
 <thead><tr><th class='num'>epoch</th><th class='num'>dev F1</th><th class='num'>&Delta;</th><th class='num'>precision</th><th class='num'>recall</th><th class='num'>accuracy</th><th class='num'>eval loss</th></tr></thead>
 <tbody>
@@ -528,8 +534,38 @@ nonetheless selected epoch&nbsp;3, on a margin of 0.0024 measured against BioInf
 <code>BioRED_task_mapping.md:349-352</code> already warns not to read small dev-F1 differences as real;
 this is one of them. Essentially the whole gain is in epoch&nbsp;2.
 <strong>Acted on:</strong> <code>train_re.EPOCH_DEFAULTS["ppi"] = 2.0</code> as of 2026-08-02
-(recommendation&nbsp;5 in section&nbsp;6); the checkpoint in the bundle predates the change and still has
-three epochs in it.</p>
+(recommendation&nbsp;5 in section&nbsp;6). <span class='dim'>Given the leak above, this epoch analysis
+was made on inflated numbers; the decision itself (2 epochs) still holds in the current run.</span></p>
+
+<h3><code>ppi-biobert-re</code>, current <span class='dim'>(dev carved by document; 425 steps/epoch, 850 total; trained 2026-10-01)</span></h3>
+<table>
+<thead><tr><th class='num'>epoch</th><th class='num'>dev F1</th><th class='num'>&Delta;</th><th class='num'>precision</th><th class='num'>recall</th><th class='num'>accuracy</th><th class='num'>eval loss</th></tr></thead>
+<tbody>
+<tr><td class='num'>1</td><td class='num'>0.6582</td><td class='num'>&mdash;</td><td class='num'>0.6894</td><td class='num'>0.6298</td><td class='num'>0.8123</td><td class='num'>0.4150</td></tr>
+<tr><td class='num'>2</td><td class='num'><strong>0.6812</strong></td><td class='num'>+0.0230</td><td class='num'>0.7192</td><td class='num'>0.6471</td><td class='num'>0.8262</td><td class='num'>0.5171</td></tr>
+</tbody>
+</table>
+<p>Train 6,790 / dev 1,007 / test 1,604 rows (dev = 89 of 894 training documents). Dev F1
+<strong>0.8549 &rarr; 0.6812</strong> is the leak removed, not the model getting worse: on the
+untouched test split the model <em>improved</em>.</p>
+<table>
+<thead><tr><th>PPI, test (1,604 rows)</th><th class='num'>leaky dev, 2026-09-30</th><th class='num'>document-carved dev, 2026-10-01</th></tr></thead>
+<tbody>
+<tr><td>F1 at argmax</td><td class='num'>0.7299</td><td class='num'>0.7189</td></tr>
+<tr><td>decision threshold (tuned on dev)</td><td class='num'>0.5458</td><td class='num'>0.1624</td></tr>
+<tr><td>F1 at the tuned threshold</td><td class='num'>0.7208</td><td class='num'><strong>0.7346</strong></td></tr>
+<tr><td>precision / recall at the tuned threshold</td><td class='num'>0.7455 / 0.6976</td><td class='num'>0.6809 / 0.7976</td></tr>
+<tr><td>accuracy</td><td class='num'>0.8585</td><td class='num'>0.8491</td></tr>
+<tr><td>ECE raw &rarr; Platt</td><td class='num'>0.1490 &rarr; 0.0893</td><td class='num'>0.1448 &rarr; 0.1023</td></tr>
+</tbody>
+</table>
+<p>The leaky dev set made threshold tuning <em>hurt</em> on test (0.7299 &rarr; 0.7208); with an honest
+dev set it helps (0.7189 &rarr; 0.7346), trading precision for recall. Platt is now fit on 260 dev
+positives (<code>a = 0.539</code>, <code>b = &minus;0.388</code>), and the calibrated PPI scores are less
+confident: the highest composite score in the triples fell from 1.0000 to <strong>0.9602</strong>. On
+this corpus, triples at score &ge;&nbsp;0.95 went from 13,113 to 12 and at &ge;&nbsp;0.99 from 7,388 to 0
+&mdash; most of the old top band was over-confidence from the leaky calibrator. Score &ge;&nbsp;0.8 is now
+the useful upper cutoff in the graph.</p>
 
 <h3><code>biored-biobert-re</code>, original <span class='dim'>(BigBIO biored; 2,119 steps/epoch, 6,357 total; replaced 2026-09-30, see below)</span></h3>
 <table>
@@ -849,7 +885,9 @@ for.</div>
 <p class='meta'>This is why <code>ppi-biobert-re</code> still reports a ceiling of exactly
 <strong>1.0000</strong> above: those scores came from the un-clipped isotonic map. After the next RE
 step it becomes 0.9990. Re-running <code>high_confidence_g.py</code> alone cannot change it &mdash; the
-clip lives in the scoring step, not the graph step.</p>
+clip lives in the scoring step, not the graph step.
+<span class='dim'>Update 2026-10-01: with the retrained PPI model (Platt, document-carved dev) the PPI
+ceiling is 0.9602 &mdash; see section&nbsp;5.</span></p>
 
 <h3>Incidental: the NER gate is saturated</h3>
 <p class='meta'>Related, since it sets what the composite's other factors can contribute. Over the same
