@@ -99,7 +99,10 @@ Dependency / strategy notes:
     6/8): step 17 scores each pair with both, step 18 compares them, and only then is
     the replace-or-not decision worth making. OPTIONAL -- if the download or training
     fails, the run continues with the PPI model alone and nothing is lost. Its two
-    output dirs are half of what the training gate above tests for.
+    output dirs are half of what the training gate above tests for. Its training set
+    is BioRED plus the Binding events of BioNLP-ST GE 2013 + PC 2013 (BIORED_EXTRA_BIND,
+    passed as --extra-bind): BioRED alone gives too few Bind rows for `binds` to be
+    predicted. Train-only, so BioRED dev/test metrics stay comparable.
   * sentences.py (5) runs BioBERT over experimental_ner/ (XML) to select
     original-result sentences and tag DISEASE/GENE/CHEMICAL entities, writing
     sentences/*.json -- the input every later step reads. GPU; needs the HF BioBERT
@@ -228,13 +231,17 @@ from pathlib import Path
 # lane="DIR" for a normalization step that reads sentences/ + databases/ and writes ONLY
 # under DIR/ (see run_lanes). Steps sharing a lane run in plan order -- controls, phenotypes
 # and nonchemical rewrite their lane's libraries in place -- while different lanes overlap.
+# Extra Bind supervision for step 2 (bigbio_to_re.py --extra-bind): BioRED alone has too few
+# Bind rows (~1.4%) for the model to predict `binds`; these event corpora add ~785 more.
+BIORED_EXTRA_BIND = "bigbio/bionlp_st_2013_ge,bigbio/bionlp_st_2013_pc"
+
 STEPS = [
     dict(name="re_pipeline", script="run_re_pipeline.py", args=[], dbs=[], gpu=True, models=[],
          reads_sentences=False,
          support=["bigbio_to_re.py", "train_re.py", "calibration.py"], produces_model="ppi-biobert-re",
          desc="[GPU][internet] train + calibrate the PPI relation model (BigBIO bioinfer -> ppi-biobert-re/) via bigbio_to_re.py + train_re.py + calibration.py"),
     dict(name="re_pipeline_biored", script="run_re_pipeline.py",
-         args=["--task", "biored"], dbs=[], gpu=True, models=[], optional=True, reads_sentences=False,
+         args=["--task", "biored", "--extra-bind", BIORED_EXTRA_BIND], dbs=[], gpu=True, models=[], optional=True, reads_sentences=False,
          support=["bigbio_to_re.py", "train_re.py", "calibration.py"],
          produces_model="biored-biobert-re",
          desc="[GPU][internet] train + calibrate the BioRED relation model (BigBIO biored -> biored-biobert-re/): typed + SIGNED edges over every entity-type pair [optional]"),
