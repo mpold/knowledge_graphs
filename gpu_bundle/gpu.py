@@ -230,10 +230,11 @@ from pathlib import Path
 # and nonchemical rewrite their lane's libraries in place -- while different lanes overlap.
 STEPS = [
     dict(name="re_pipeline", script="run_re_pipeline.py", args=[], dbs=[], gpu=True, models=[],
+         reads_sentences=False,
          support=["bigbio_to_re.py", "train_re.py", "calibration.py"], produces_model="ppi-biobert-re",
          desc="[GPU][internet] train + calibrate the PPI relation model (BigBIO bioinfer -> ppi-biobert-re/) via bigbio_to_re.py + train_re.py + calibration.py"),
     dict(name="re_pipeline_biored", script="run_re_pipeline.py",
-         args=["--task", "biored"], dbs=[], gpu=True, models=[], optional=True,
+         args=["--task", "biored"], dbs=[], gpu=True, models=[], optional=True, reads_sentences=False,
          support=["bigbio_to_re.py", "train_re.py", "calibration.py"],
          produces_model="biored-biobert-re",
          desc="[GPU][internet] train + calibrate the BioRED relation model (BigBIO biored -> biored-biobert-re/): typed + SIGNED edges over every entity-type pair [optional]"),
@@ -283,7 +284,7 @@ STEPS = [
          optional=True, reads_sentences=False,
          desc="triple score distribution per publication year (pmc_years.json) -> "
               "summaries/triples_per_year.html [optional]"),
-    dict(name="zip", script="zip_work.py", args=[], dbs=[], gpu=False, models=[],
+    dict(name="zip", script="zip_work.py", args=[], dbs=[], gpu=False, models=[], reads_sentences=False,
          desc="bundle the whole working dir into a downloadable kaggle_working.zip (final step)"),
 ]
 DB_FILES = {                    # hard requirements: a selected step aborts if one is missing
@@ -660,7 +661,9 @@ def stage_work(input_root: Path, work_root: Path, steps):
         # prebuilt sentences/ is symlinked instead.
         if any(st.get("reads_xml") for st in steps) and (input_root / RAW_DIR).is_dir():
             link_or_copy(input_root / RAW_DIR, work_root / RAW_DIR)
-        if not any(st["name"] == "sentences" for st in steps):
+        # Only if it exists: a training-only plan never reads sentences/, and a dangling
+        # link would break zip_work's archive walk.
+        if not any(st["name"] == "sentences" for st in steps) and (input_root / "sentences").is_dir():
             link_or_copy(input_root / "sentences", work_root / "sentences")
         # models: stage only those NOT generated this run (steps 1-2 produce theirs) and
         # actually present -- an absent optional checkpoint is simply not exported. The

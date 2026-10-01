@@ -35,6 +35,22 @@ Its eight relation types are also steeply skewed, so the four rare chemical-chem
 ones (Cotreatment / Comparison / Drug_Interaction / Conversion) are folded into
 Association by default; --biored-all-types keeps all eight.
 
+EXTRA BIND SUPERVISION (biored only)
+BioRED's `Bind` class is ~1.4% of its rows, so the trained model almost never predicts
+it. --extra-bind appends Bind rows from BioNLP-ST event corpora, which annotate binding
+as a mention-level EVENT (trigger + Theme/Theme2/... arguments) rather than a relation:
+    bigbio/bionlp_st_2013_ge   GENIA Event 2013 -- full-text papers, Results included
+                               (~270 Bind rows, gene-gene only)
+    bigbio/bionlp_st_2013_pc   Pathway Curation 2013 -- abstracts (~510 Bind rows,
+                               ~45 of them chemical-gene)
+(bigbio/bionlp_st_2011_ge does not load: its BigBIO script declares an empty
+validation split, which `datasets` rejects.)
+Every pair of themes of one Binding event is a `Bind` row. A co-occurring pair linked
+by no event at all is `false`. A pair linked only by some OTHER event (regulation,
+phosphorylation, ...) is skipped: BioRED would call it a correlation, so it must not
+be taught as false. All annotated splits of these corpora go into train.tsv only --
+BioRED's dev/test stay untouched, so dev F1 and calibration stay comparable across runs.
+
 INPUT
     --dataset bigbio/bioinfer [--config bioinfer_bigbio_kb]   (needs `datasets`)
   or
@@ -51,6 +67,8 @@ Sanity-check the entity/relation type mapping for a corpus BEFORE converting:
 Run::  python bigbio_to_re.py --task ppi --dataset bigbio/bioinfer --out ppi_data
        python bigbio_to_re.py --task ppi --input-json docs.json --out ppi_data --neg-ratio 3
        python bigbio_to_re.py --task biored --dataset bigbio/biored --out biored_data --val-frac 0
+       python bigbio_to_re.py --task biored --dataset bigbio/biored --out biored_data --val-frac 0 \
+           --extra-bind bigbio/bionlp_st_2013_ge,bigbio/bionlp_st_2013_pc
 """
 
 import argparse
@@ -59,6 +77,7 @@ import random
 import re
 import sys
 from collections import Counter
+from itertools import combinations
 from pathlib import Path
 
 try:
@@ -243,6 +262,40 @@ def _local_span(ent, ptext, poff):
     return None
 
 
+def _sentence_pairs(doc, entities, mark, valid):
+    """Yield (ea, eb, marked_sentence, connecting) for every pair of `entities` that
+    co-occur in one sentence of `doc`: ordered by reading position, blinded with the
+    markers mark(type) gives, and kept only if valid(marker_a, marker_b)."""
+    for psg in doc.get("passages", []):
+        ptext = (psg.get("text") or [""])[0] if isinstance(psg.get("text"), list) else (psg.get("text") or "")
+        offs = psg.get("offsets") or [[0, len(ptext)]]
+        poff = offs[0][0]
+        located = []
+        for e in entities:
+            sp = _local_span(e, ptext, poff)
+            if sp:
+                located.append((e, sp))
+        for s_text, s0, s1 in sent_spans(ptext):
+            here = [(e, (ls - s0, le - s0)) for e, (ls, le) in located if ls >= s0 and le <= s1]
+            for i in range(len(here)):
+                for j in range(i + 1, len(here)):
+                    ea, (as0, ae0) = here[i]
+                    eb, (bs0, be0) = here[j]
+                    ma, mb = mark(ea.get("type")), mark(eb.get("type"))
+                    if not valid(ma, mb):
+                        continue
+                    if as0 > bs0:                   # order by reading position
+                        ea, eb = eb, ea
+                        as0, ae0, bs0, be0 = bs0, be0, as0, ae0
+                        ma, mb = mb, ma
+                    if bs0 < ae0:                   # overlapping spans -> skip
+                        continue
+                    connecting = s_text[ae0:bs0]
+                    marked = (s_text[:as0] + f"@{ma}$" + connecting
+                              + f"@{mb}$" + s_text[be0:])
+                    yield ea, eb, " ".join(marked.split()), connecting
+
+
 def iter_instances(doc, task, chemprot_eval_only, biored_collapse=True, require_cue=False,
                    with_connecting=False):
     """Yield (marked_sentence, label) for every candidate entity pair in a doc.
@@ -255,44 +308,75 @@ def iter_instances(doc, task, chemprot_eval_only, biored_collapse=True, require_
         a1, a2 = r.get("arg1_id"), r.get("arg2_id")
         if a1 and a2:
             rels[frozenset((a1, a2))] = r.get("type", "") or ""
-    for psg in doc.get("passages", []):
-        ptext = (psg.get("text") or [""])[0] if isinstance(psg.get("text"), list) else (psg.get("text") or "")
-        offs = psg.get("offsets") or [[0, len(ptext)]]
-        poff = offs[0][0]
-        located = []
-        for e in doc.get("entities", []):
-            sp = _local_span(e, ptext, poff)
-            if sp:
-                located.append((e, sp))
-        for s_text, s0, s1 in sent_spans(ptext):
-            here = [(e, (ls - s0, le - s0)) for e, (ls, le) in located if ls >= s0 and le <= s1]
-            for i in range(len(here)):
-                for j in range(i + 1, len(here)):
-                    ea, (as0, ae0) = here[i]
-                    eb, (bs0, be0) = here[j]
-                    ma, mb = marker_for(task, ea.get("type")), marker_for(task, eb.get("type"))
-                    if not valid_pair(task, ma, mb):
-                        continue
-                    if as0 > bs0:                   # order by reading position
-                        ea, eb = eb, ea
-                        as0, ae0, bs0, be0 = bs0, be0, as0, ae0
-                        ma, mb = mb, ma
-                    if bs0 < ae0:                   # overlapping spans -> skip
-                        continue
-                    connecting = s_text[ae0:bs0]
-                    marked = (s_text[:as0] + f"@{ma}$" + connecting
-                              + f"@{mb}$" + s_text[be0:])
-                    marked = " ".join(marked.split())
-                    rel = rels.get(frozenset((ea.get("id"), eb.get("id"))))
-                    label = label_for(task, rel, chemprot_eval_only, biored_collapse)
-                    # BioRED annotates at the DOCUMENT level, so a related pair emits a
-                    # positive row in EVERY sentence where both endpoints co-occur --
-                    # including sentences that merely mention them. --require-cue keeps
-                    # only those whose connecting text asserts something.
-                    if require_cue and rel is not None and not RELCUE.search(connecting):
-                        label = label_for(task, None, chemprot_eval_only, biored_collapse)
-                    yield (marked, label, " ".join(connecting.split())) if with_connecting \
-                        else (marked, label)
+    for ea, eb, marked, connecting in _sentence_pairs(
+            doc, doc.get("entities", []), lambda t: marker_for(task, t),
+            lambda ma, mb: valid_pair(task, ma, mb)):
+        rel = rels.get(frozenset((ea.get("id"), eb.get("id"))))
+        label = label_for(task, rel, chemprot_eval_only, biored_collapse)
+        # BioRED annotates at the DOCUMENT level, so a related pair emits a
+        # positive row in EVERY sentence where both endpoints co-occur --
+        # including sentences that merely mention them. --require-cue keeps
+        # only those whose connecting text asserts something.
+        if require_cue and rel is not None and not RELCUE.search(connecting):
+            label = label_for(task, None, chemprot_eval_only, biored_collapse)
+        yield (marked, label, " ".join(connecting.split())) if with_connecting \
+            else (marked, label)
+
+
+def event_marker(etype):
+    """BioNLP-ST entity type -> BioRED marker, or None if it is not a relation endpoint.
+    GE has Protein; PC has Gene_or_gene_product / Simple_chemical. Binding sites and
+    promoters (GE `Entity`), Complex and Cellular_component are not endpoints BioRED
+    would relate, so they stay as plain text in the sentence."""
+    t = (etype or "").lower()
+    if "protein" in t or "gene" in t:
+        return "GENE"
+    if "chem" in t:
+        return "CHEMICAL"
+    return None
+
+
+def _event_entities(ev, events, seen=None):
+    """Entity ids an event reaches through its arguments, following nested events."""
+    seen = set() if seen is None else seen
+    if ev.get("id") in seen:
+        return set()
+    seen.add(ev.get("id"))
+    out = set()
+    for a in ev.get("arguments", []):
+        ref = a.get("ref_id")
+        if ref in events:
+            out |= _event_entities(events[ref], events, seen)
+        elif ref:
+            out.add(ref)
+    return out
+
+
+def iter_bind_instances(doc):
+    """Yield (marked_sentence, label) Bind/false rows from a BigBIO-KB EVENT document.
+
+    Bind  : the two mentions are both Themes of one Binding event.
+    false : the pair is linked by no event at all (directly or through nesting).
+    A pair linked only by a non-Binding event yields nothing (see EXTRA BIND above).
+    Annotation is per mention, so no document-level artefact and no --require-cue."""
+    ents = [e for e in doc.get("entities", []) if event_marker(e.get("type"))]
+    ids = {e.get("id") for e in ents}
+    events = {ev.get("id"): ev for ev in doc.get("events", [])}
+    bind, linked = set(), set()
+    for ev in events.values():
+        reach = _event_entities(ev, events) & ids
+        linked |= {frozenset(p) for p in combinations(reach, 2)}
+        if (ev.get("type") or "").lower() == "binding":
+            themes = {a.get("ref_id") for a in ev.get("arguments", [])
+                      if (a.get("role") or "").lower().startswith("theme") and a.get("ref_id") in ids}
+            bind |= {frozenset(p) for p in combinations(themes, 2)}
+    for ea, eb, marked, _ in _sentence_pairs(
+            doc, ents, event_marker, lambda ma, mb: frozenset((ma, mb)) in BIORED_PAIRS):
+        key = frozenset((ea.get("id"), eb.get("id")))
+        if key in bind:
+            yield marked, "Bind"
+        elif key not in linked:
+            yield marked, "false"
 
 
 NEG_LABELS = {"0", "false"}
@@ -334,6 +418,14 @@ def print_types(splits, task, chemprot_eval_only, biored_collapse=True):
         lab = label_for(task, t if t is not None else "", chemprot_eval_only, biored_collapse)
         kind = "filtered->false" if lab in ("false", "0") else "POSITIVE"
         print(f"  {str(t):28.28s} {c:>9,}  -> {lab:8s} ({kind})")
+    ev_types = Counter(ev.get("type") for docs in splits.values() for doc in docs
+                       for ev in doc.get("events", []))
+    if ev_types:
+        print(f"\nevent types ({len(ev_types)}) -- only Binding is used, via --extra-bind:")
+        for t, c in ev_types.most_common():
+            print(f"  {str(t):28.28s} {c:>9,}")
+        print("event-corpus endpoints (--extra-bind): "
+              + ", ".join(f"{t} -> @{event_marker(t)}$" for t in ent_types if event_marker(t)))
     markers = sorted({marker_for(task, t) for t in ent_types})
     pairs = [f"{a}-{b}" for i, a in enumerate(markers) for b in markers[i:] if valid_pair(task, a, b)]
     print(f"\nvalid candidate type-pairs for task={task}: "
@@ -382,11 +474,21 @@ SPLIT_FILE = {"train": "train.tsv", "validation": "dev.tsv", "valid": "dev.tsv",
               "dev": "dev.tsv", "test": "test.tsv"}
 
 
+def load_json_docs(path):
+    """{split_name: [docs]} from a local BigBIO-KB JSON (a list, or {split: [docs]})."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {"train": data}
+
+
 def load_docs(args):
     """Return {split_name: [docs]}."""
     if args.input_json:
-        data = json.loads(Path(args.input_json).read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {"train": data}
+        return load_json_docs(args.input_json)
+    return load_bigbio(args.dataset, args.config)
+
+
+def load_bigbio(dataset, config=None):
+    """{split_name: [docs]} from a BigBIO HF dataset in its *_bigbio_kb schema."""
     try:
         import datasets as hfds
         from datasets import load_dataset
@@ -400,26 +502,50 @@ def load_docs(args):
     # the load below fails and we point at the version pin.
     major = int(hfds.__version__.split(".")[0])
     kw = {"trust_remote_code": True} if major < 4 else {}
-    cfg = args.config or f"{args.dataset.split('/')[-1]}_bigbio_kb"
+    cfg = config or f"{dataset.split('/')[-1]}_bigbio_kb"
     try:
-        ds = load_dataset(args.dataset, name=cfg, **kw)
+        ds = load_dataset(dataset, name=cfg, **kw)
     except Exception as e:
         hint = ""
         if major >= 4:
             hint = (f"\n`datasets` {hfds.__version__} no longer runs dataset loading scripts, which "
-                    f"BigBIO ({args.dataset}) relies on. Install a compatible version first:\n"
+                    f"BigBIO ({dataset}) relies on. Install a compatible version first:\n"
                     f"    pip install 'datasets<4'")
         # A BigBIO loading script pulls in the parser for the corpus's native format --
         # e.g. biored is BioC XML and imports `bioc`, which is not on the Kaggle image.
         # That failure surfaces here as a plain ModuleNotFoundError about a package the
         # user never named, so say what to install.
         if isinstance(e, ModuleNotFoundError) and e.name:
-            hint += (f"\nThe loading script for {args.dataset} needs the `{e.name}` package "
+            hint += (f"\nThe loading script for {dataset} needs the `{e.name}` package "
                      f"(it parses the corpus's native format). Install it and re-run:\n"
                      f"    pip install {e.name}")
-        sys.exit(f"could not load {args.dataset} (config {cfg}): {type(e).__name__}: {e}{hint}\n"
+        sys.exit(f"could not load {dataset} (config {cfg}): {type(e).__name__}: {e}{hint}\n"
                  f"Check the config name (try --config) and that the dataset has a *_bigbio_kb schema.")
     return {split: list(ds[split]) for split in ds.keys()}
+
+
+def extra_bind_rows(sources, neg_ratio, rng, max_docs=None):
+    """Bind/false rows from every annotated split of each event corpus in `sources`.
+
+    A split with no events at all is skipped: BioNLP-ST withholds test annotations,
+    and every pair there would otherwise be written as a false negative."""
+    rows = []
+    for src in sources:
+        splits = load_json_docs(src) if src.lower().endswith(".json") else load_bigbio(src)
+        pos, neg = [], []
+        for split, docs in splits.items():
+            docs = docs[:max_docs] if max_docs else docs
+            if not any(doc.get("events") for doc in docs):
+                print(f"  [extra-bind] {src} {split}: no events annotated -- skipped")
+                continue
+            for doc in docs:
+                for sent, label in iter_bind_instances(doc):
+                    (neg if label in NEG_LABELS else pos).append((sent, label))
+        if neg_ratio is not None and len(neg) > int(neg_ratio * len(pos)):
+            neg = rng.sample(neg, int(neg_ratio * len(pos)))
+        print(f"  [extra-bind] {src}: {len(pos):,} Bind + {len(neg):,} false -> train.tsv")
+        rows += pos + neg
+    return rows
 
 
 def main():
@@ -445,11 +571,21 @@ def main():
                     help="print N random positive rows for a hand-read, then exit (no files written)")
     ap.add_argument("--print-types", action="store_true",
                     help="dump distinct entity/relation types + their mapping, then exit (no files written)")
+    ap.add_argument("--extra-bind", type=lambda s: [x.strip() for x in s.split(",") if x.strip()],
+                    default=None, metavar="SRC[,SRC...]",
+                    help="biored: append Bind/false rows from BioNLP-ST event corpora to train.tsv "
+                         "(BigBIO names, e.g. bigbio/bionlp_st_2013_ge,bigbio/bionlp_st_2013_pc, "
+                         "or local BigBIO-KB .json files)")
+    ap.add_argument("--extra-bind-neg-ratio", type=float, default=1.0,
+                    help="cap the extra corpora's false rows to N x their Bind rows (default 1.0; "
+                         "BioRED already supplies plenty of negatives)")
     ap.add_argument("--max-docs", type=int, default=None, help="limit docs per split (quick test)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     if not args.dataset and not args.input_json:
         ap.error("provide --dataset or --input-json")
+    if args.extra_bind and args.task != "biored":
+        ap.error("--extra-bind adds BioRED `Bind` rows; it needs --task biored")
 
     rng = random.Random(args.seed)
     splits = load_docs(args)
@@ -486,6 +622,13 @@ def main():
         converted["test.tsv"] = converted.get("test.tsv", []) + pool[:n_test]
         converted["dev.tsv"] = converted.get("dev.tsv", []) + pool[n_test:n_test + n_val]
         converted["train.tsv"] = pool[n_test + n_val:]
+
+    # after the carve, so event-corpus rows never leak into a carved dev/test split
+    if args.extra_bind:
+        extra = extra_bind_rows(args.extra_bind, args.extra_bind_neg_ratio, rng, args.max_docs)
+        pool = converted.setdefault("train.tsv", [])
+        pool.extend(extra)
+        rng.shuffle(pool)
 
     total = 0
     for fname, rows in converted.items():

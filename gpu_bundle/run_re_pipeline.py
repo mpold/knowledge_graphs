@@ -266,6 +266,8 @@ def convert(args):
         cmd += ["--require-cue"]
     if args.biored_all_types:
         cmd += ["--biored-all-types"]
+    if args.extra_bind:
+        cmd += ["--extra-bind", args.extra_bind]
     run_step("1/3 CONVERT", cmd)
 
 
@@ -501,6 +503,9 @@ def main():
     ap.add_argument("--biored-all-types", action="store_true",
                     help="biored: keep all 8 relation types instead of collapsing the 4 rare "
                          "chemical-chemical ones into Association")
+    ap.add_argument("--extra-bind", default=None, metavar="SRC[,SRC...]",
+                    help="biored: append Bind rows from BioNLP-ST event corpora to train.tsv, e.g. "
+                         "bigbio/bionlp_st_2013_ge,bigbio/bionlp_st_2013_pc (bigbio_to_re.py --extra-bind)")
     ap.add_argument("--tune-threshold", action=argparse.BooleanOptionalAction, default=True,
                     help="tune the positive-decision threshold on dev to maximize micro-F1, then "
                          "report test metrics at that operating point (default on; --no-tune-threshold "
