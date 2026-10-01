@@ -166,11 +166,11 @@ reused PPI model with a freshly trained BioRED one &mdash; see &sect;1A of
 <div class='flow'>
   <div class='grp'>A. Train the relation model(s) &nbsp;<span class='dim'>(most upstream; each is its own 3-script sub-pipeline)</span></div>
   <div class='node'><span class='s'>1. run_re_pipeline.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span>
-    <div class='io'>in: BigBIO <code>bioinfer</code> &nbsp;&rarr;&nbsp; out: <code>ppi-biobert-re/</code> + <code>summaries/calibration.html</code>
+    <div class='io'>in: BigBIO <code>bioinfer</code> &nbsp;&rarr;&nbsp; out: <code>ppi-biobert-re/</code> + <code>summaries/calibration_ppi.html</code>
       <span class='dim'>&mdash; bigbio_to_re.py &rarr; train_re.py &rarr; calibration.py; binary <code>interacts</code></span></div></div>
   <div class='node new'><span class='s'>2. run_re_pipeline.py --task biored</span> <span class='pill gpu'>GPU</span> <span class='pill net'>internet</span> <span class='pill opt'>optional</span> <span class='pill new'>NEW</span>
-    <div class='io'>in: BigBIO <code>biored</code> &nbsp;&rarr;&nbsp; out: <code>biored-biobert-re/</code> + <code>biored_data/{train,dev,test}.tsv</code>
-      <span class='dim'>&mdash; same three scripts, task defaults: <code>--val-frac 0</code>, <code>--calibration platt</code>; typed + signed labels</span></div></div>
+    <div class='io'>in: BigBIO <code>biored</code> + GE/PC 2013 Binding events &nbsp;&rarr;&nbsp; out: <code>biored-biobert-re/</code> + <code>biored_data/{train,dev,test}.tsv</code> + <code>summaries/calibration_biored.html</code>
+      <span class='dim'>&mdash; same three scripts, task defaults: <code>--val-frac 0</code>, <code>--calibration platt</code>; typed + signed labels; <code>--extra-bind</code> by default (since 2026-09-30)</span></div></div>
   <div class='arrow'>&darr;&nbsp; ppi-biobert-re/ (RE_MODEL_PPI) + biored-biobert-re/ (RE_MODEL_BIORED) &rarr; step 17</div>
 
   <div class='grp'>B. NER: corpus &rarr; result-sentence entities <span class='dim'>(unchanged, apart from the drug lexicon added later)</span></div>
@@ -229,7 +229,7 @@ cache.)</span></p>
   <td class='num'>1</td>
   <td><code>run_re_pipeline.py</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span></td>
   <td>BigBIO <code>bigbio/bioinfer</code></td>
-  <td><code>ppi-biobert-re/</code>, <code>ppi_data/*.tsv</code>, <code>summaries/calibration.html</code></td>
+  <td><code>ppi-biobert-re/</code>, <code>ppi_data/*.tsv</code>, <code>summaries/calibration_ppi.html</code></td>
   <td>Behaviour identical &mdash; but the defaults now come from a per-task table instead of being
       hard-coded, and the resolved values are printed as a <code>[task]</code> line. For
       <code>--task ppi</code> that table reproduces the previous defaults exactly
@@ -239,14 +239,17 @@ cache.)</span></p>
 <tr class='changed'>
   <td class='num'>2</td>
   <td><code>run_re_pipeline.py --task biored</code> <span class='pill gpu'>GPU</span> <span class='pill net'>net</span> <span class='pill opt'>optional</span> <span class='pill new'>NEW STEP</span></td>
-  <td>BigBIO <code>bigbio/biored</code> <span class='dim'>(600 PubMed abstracts, 400/100/100 split)</span></td>
-  <td><code>biored-biobert-re/</code> (weights + label map + <code>calibration.json</code>)<br><code>biored_data/{train,dev,test}.tsv</code><br><code>summaries/calibration.html</code></td>
+  <td>BigBIO <code>bigbio/biored</code> <span class='dim'>(600 PubMed abstracts, 400/100/100 split)</span>; since 2026-09-30 also <code>bigbio/bionlp_st_2013_ge</code> + <code>bigbio/bionlp_st_2013_pc</code> <span class='dim'>(Binding events, train only)</span></td>
+  <td><code>biored-biobert-re/</code> (weights + label map + <code>calibration.json</code>)<br><code>biored_data/{train,dev,test}.tsv</code><br><code>summaries/calibration_biored.html</code></td>
   <td>The same three-script sub-pipeline with three task-aware defaults:
       <code>--val-frac 0</code> (BioRED ships its own dev split &mdash; carving another out of train
       would be wrong; BioInfer has none, hence 0.1 there), <code>--calibration platt</code>
       (a 100-abstract dev split is too small for isotonic), and the
       <code>biored-*</code> output names. Pass-throughs: <code>--require-cue</code>,
-      <code>--biored-all-types</code>.</td>
+      <code>--biored-all-types</code>, <code>--extra-bind</code> &mdash; the last one is set by
+      <code>gpu.py</code> by default (<code>BIORED_EXTRA_BIND</code>): it appends ~785 <code>Bind</code>
+      rows from BioNLP-ST GE/PC 2013 Binding events to <code>train.tsv</code>, because BioRED alone has
+      too few for the model to predict <code>binds</code>.</td>
 </tr>
 <tr class='changed'>
   <td class='num'>&mdash;</td>
@@ -374,7 +377,7 @@ composite score. Platt scaling has two parameters and degrades gracefully.</p>
 <tbody>
 <tr><td><code>Positive_Correlation</code></td><td><code>Positive_Correlation</code></td><td><code>upregulator/activator</code></td><td><strong>signed, positive</strong></td></tr>
 <tr><td><code>Negative_Correlation</code></td><td><code>Negative_Correlation</code></td><td><code>downregulator/inhibitor</code></td><td><strong>signed, negative</strong></td></tr>
-<tr><td><code>Bind</code></td><td><code>Bind</code></td><td><code>binds</code></td><td>physical interaction</td></tr>
+<tr><td><code>Bind</code></td><td><code>Bind</code></td><td><code>binds</code></td><td>physical interaction <span class='dim'>(458 BioRED rows, + ~785 from GE/PC 2013 Binding events via <code>--extra-bind</code>)</span></td></tr>
 <tr><td><code>Association</code></td><td><code>Association</code></td><td><code>associated</code></td><td>unsigned, generic</td></tr>
 <tr><td><code>Cotreatment</code> / <code>Comparison</code> / <code>Drug_Interaction</code> / <code>Conversion</code></td>
     <td><code>Association</code> <span class='dim'>(collapsed)</span></td><td><code>associated</code></td>
@@ -469,7 +472,8 @@ python bigbio_to_re.py --task biored --dataset bigbio/biored --print-types</pre>
       looks wrong, fix <code>marker_for()</code> / <code>BIORED_TYPES</code> before converting.
       The config resolves to <code>biored_bigbio_kb</code> by the script's usual convention.</span></li>
   <li><span class='step-no'>2</span><strong>Convert and read 50 positives</strong> (the &sect;8 step-3 decision).
-      <pre>python bigbio_to_re.py --task biored --dataset bigbio/biored --out biored_data --val-frac 0
+      <pre>python bigbio_to_re.py --task biored --dataset bigbio/biored --out biored_data --val-frac 0 \
+    --extra-bind bigbio/bionlp_st_2013_ge,bigbio/bionlp_st_2013_pc
 python bigbio_to_re.py --task biored --dataset bigbio/biored --sample-positives 50</pre>
       <span class='dim'>Read each sampled row and ask: <em>could someone conclude the labelled
       relation from this sentence alone?</em> A row that only co-mentions the two entities
@@ -768,6 +772,12 @@ artefact is severe enough to need <code>--require-cue</code> &mdash; the hand-re
 tool for it now exists. <strong>(e)</strong> BioRED's <em>novelty</em> annotation (&sect;7 of the mapping
 doc) is untouched: whether the BigBIO KB schema carries it through is still open, so nothing in the
 pipeline depends on it.</div>
+<div class='ok'><strong>Since verified on Kaggle</strong> (2026-09-30, with <code>--extra-bind</code>):
+conversion gives 35,459 train rows (1,243 <code>Bind</code>; 271 from GE&nbsp;2013, 514 from PC&nbsp;2013)
+with BioRED's dev/test unchanged; dev F1 0.6473 (was 0.6238), test F1 0.6829 at the tuned threshold,
+5 of 11 test <code>Bind</code> pairs predicted <code>binds</code>. On this corpus <code>binds</code>
+triples went from 5 to 2,890 (117 at score &ge; 0.8). Details in &sect;5 and &sect;8 of
+<a href='step_2_triples.html'>step_2_triples.html</a>.</div>
 <p class='dim'>Model selection is also noisier here than on BioInfer: <code>load_best_model_at_end</code>
 picks an epoch on a 100-abstract dev split, so small dev-F1 differences should not be read as real.
 That is a reason to distrust the metric, not to avoid the corpus &mdash; which is precisely why

@@ -67,6 +67,7 @@ GPU / KAGGLE
 import argparse
 import datetime
 import html
+import json
 import os
 import subprocess
 import sys
@@ -80,6 +81,59 @@ def summary_path(task):
     """Per-task report, so the PPI and BioRED runs (which may run concurrently) never
     overwrite each other's metrics."""
     return SUMMARY_DIR / f"calibration_{task}.html"
+
+
+def metrics_path(task):
+    return SUMMARY_DIR / f"metrics_{task}.json"
+
+
+def _num(x):
+    """JSON-safe number (numpy scalars -> float), rounded; None stays None."""
+    return None if x is None else round(float(x), 4)
+
+
+def write_metrics_json(args, model_dir, labels, cm, metrics, cal, timestamp, splits):
+    """Machine-readable record of one training run: test metrics at the operating point,
+    per-class P/R/F1 from the confusion matrix, the per-epoch dev curve (from the last
+    checkpoint-*/trainer_state.json), and calibration. Written to summaries/metrics_<task>.json
+    and to <model>/metrics.json, so the numbers travel with the checkpoint into gpu_bundle/."""
+    per_class = {}
+    for k, lab in enumerate(labels):
+        tp = cm[k][k]
+        fp = sum(cm[g][k] for g in range(len(labels))) - tp
+        fn = sum(cm[k]) - tp
+        p = tp / (tp + fp) if tp + fp else 0.0
+        r = tp / (tp + fn) if tp + fn else 0.0
+        per_class[lab] = {"precision": _num(p), "recall": _num(r),
+                          "f1": _num(2 * p * r / (p + r) if p + r else 0.0), "support": sum(cm[k])}
+    epochs, best = [], {}
+    states = sorted(model_dir.glob("checkpoint-*/trainer_state.json"),
+                    key=lambda p: int(p.parent.name.split("-")[-1]))
+    if states:
+        st = json.loads(states[-1].read_text(encoding="utf-8"))
+        epochs = [{k.replace("eval_", ""): _num(v) for k, v in e.items()
+                   if k == "epoch" or k in ("eval_loss", "eval_precision", "eval_recall", "eval_f1", "eval_accuracy")}
+                  for e in st.get("log_history", []) if "eval_f1" in e]
+        best = {"dev_f1": _num(st.get("best_metric")), "checkpoint": st.get("best_model_checkpoint")}
+    rec = {
+        "task": args.task, "dataset": args.dataset, "model": model_dir.name,
+        "base_model": args.base_model or "dmis-lab/biobert-base-cased-v1.1",
+        "seed": args.seed, "epochs": args.epochs, "max_len": args.max_len, "timestamp": timestamp,
+        "splits": splits,
+        "test": {"split": metrics["eval_name"], "n": metrics["n"], "threshold": _num(metrics["threshold"]),
+                 "precision": _num(metrics["precision"]), "recall": _num(metrics["recall"]),
+                 "f1": _num(metrics["f1"]), "accuracy": _num(metrics["accuracy"]),
+                 "f1_argmax": _num(metrics["f1_argmax"])},
+        "per_class": per_class,
+        "confusion": {"labels": labels, "rows_gold_cols_pred": cm},
+        "dev_by_epoch": epochs, "best": best,
+        "calibration": {k: (_num(v) if k.startswith("ece") else v) for k, v in cal.items()},
+    }
+    text = json.dumps(rec, indent=2) + "\n"
+    SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
+    metrics_path(args.task).write_text(text, encoding="utf-8")
+    (model_dir / "metrics.json").write_text(text, encoding="utf-8")
+    print(f"metrics -> {metrics_path(args.task)} and {model_dir / 'metrics.json'}")
 
 
 def _fmt_bytes(n):
@@ -456,11 +510,16 @@ def calibrate(args):
                             "entity-blinded TSV (sentence + label)"))
     outputs.append((f"summaries/{summary_path(args.task).name}", "-", "this summary"))
 
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    write_metrics_json(args, model_dir, labels, cm, metrics, cal, timestamp,
+                       {"train": train_n, "dev": len(dev), "test": len(test) if test else None})
+    outputs.append((f"summaries/{metrics_path(args.task).name}", "-", "metrics as JSON (also <model>/metrics.json)"))
+
     write_summary_html({
         "task": args.task, "dataset": args.dataset, "model": str(model_dir),
         "seed": args.seed,
         "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
-        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": timestamp,
         "labels": labels, "neg": NEG, "confusion": cm, "metrics": metrics, "calibration": cal,
         "outputs": outputs,
         "splits": {"train": train_n, "dev": len(dev), "test": len(test) if test else None},
