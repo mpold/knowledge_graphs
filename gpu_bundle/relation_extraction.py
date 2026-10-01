@@ -156,6 +156,7 @@ from pathlib import Path
 # reuse triples.py's helpers so surfaces / normalization stay identical
 import triples as T
 import calibration as Cal
+import direction as D
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -748,10 +749,10 @@ def run(limit=None, route_mode=None):
                 pred = {"text": label, "type": "relation", "score": round(p_raw, 4), "model": name}
                 if cal:
                     pred["score_calibrated"] = round(p_rel, 4)
-                pending.append((k, {
-                    "subject": meta["subject"],
+                trip = {
+                    "subject": dict(meta["subject"]),
                     "predicate": pred,
-                    "object": meta["object"],
+                    "object": dict(meta["object"]),
                     "score": score, "score_2nd": round(p[second], 4),
                     "score_components": comps, "self_pair": self_pair,
                     "polarity": meta["polarity"], "modality": meta["modality"],
@@ -759,7 +760,10 @@ def run(limit=None, route_mode=None):
                     "cues": meta.get("cues"), "result_margin": meta.get("result_margin"),
                     "pair_id": meta.get("pair_id"),
                     "pmid": meta["pmid"], "section": meta["section"], "sentence": meta["sentence"],
-                }))
+                }
+                # subject = the AGENT, not merely the first-mentioned entity ("X reduced by Y")
+                D.orient(trip, meta["connecting"])
+                pending.append((k, trip))
             scored_n += len(idx)
             if FLUSH_SECONDS and time.time() - last_flush >= FLUSH_SECONDS:
                 _flush(triples + [t for _, t in sorted(pending, key=lambda kt: kt[0])])

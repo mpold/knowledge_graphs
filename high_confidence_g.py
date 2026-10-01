@@ -88,8 +88,12 @@ import html
 import json
 import re
 import shutil
+import sys
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "gpu_bundle"))
+import direction as D  # noqa: E402  (shared with relation_extraction.py)
 
 ROOT = Path(__file__).resolve().parent
 # The pipeline outputs (gpu.py's writable run dir) live under kaggle_working/ by default;
@@ -2042,6 +2046,11 @@ def main():
                          f"(run the gpu_bundle pipeline first, or pass --data-root).")
 
     raw = json.loads(RE_FILE.read_text(encoding="utf-8"))
+    # subject = the agent, not merely the first-mentioned entity ("lactate ... reduced by
+    # AZD3965"); a no-op on triples relation_extraction.py already oriented.
+    n_flip = sum(D.orient(t) for t in raw)
+    print(f"direction: {n_flip:,} signed triple(s) reversed to put the agent first "
+          f"(passive/agent cue -- gpu_bundle/direction.py)")
     d, merge_note = merge_models(raw, args.merge, args.typed_model, args.gate_model, args.merge_scale)
     print(merge_note)
     # Ceilings are read from the PRE-merge triples: after the merge a pair keeps the typed
