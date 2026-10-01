@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<title>Next training steps &mdash; relation extraction on Results sentences</title>
+<style>
+ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 2rem auto; max-width: 1100px; color: #222; line-height: 1.45; padding: 0 1rem; }
+ h1 { margin-bottom: .25rem; } h2 { margin-top: 2.25rem; border-bottom: 1px solid #ddd; padding-bottom: .25rem; }
+ h3 { margin: 1.2rem 0 .3rem; }
+ .meta { color: #555; margin-bottom: 1rem; }
+ table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; font-size: .9rem; }
+ th, td { border: 1px solid #e1e4e8; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+ th { background: #f6f8fa; }
+ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+ code { background: #f6f8fa; padding: 1px 4px; border-radius: 3px; font-size: .88em; }
+ .dim { color: #888; font-size: .85em; }
+ .key  { background: #ddf4ff; border-left: 4px solid #0969da; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .warn { background: #fff8c5; border-left: 4px solid #d4a72c; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .ok   { background: #e9f7ef; border-left: 4px solid #1a7f37; padding: .6rem .9rem; margin: 1rem 0; border-radius: 0 4px 4px 0; }
+ .step-no { display:inline-block; min-width:1.5rem; height:1.5rem; line-height:1.5rem; text-align:center;
+            background:#0969da; color:#fff; border-radius:50%; font-size:.82rem; font-weight:600; margin-right:.4rem; }
+ .pill { display: inline-block; background: #eef2f6; border: 1px solid #d6dde4; border-radius: 999px;
+         padding: 0 .5rem; font-size: .8rem; color: #444; margin-left: .35rem; }
+ .pill.rec { background: #e6f4ea; border-color: #b7dfc4; color: #1a7f37; }
+</style>
+</head>
+<body>
+<h1>Next training steps <span class='dim'>(relation extraction, gpu_bundle)</span></h1>
+<p class='meta'>How to get both <strong>training</strong> and <strong>relation extraction</strong> onto
+actual Results sentences. Written 2026-10-01.</p>
+
+<h2>1. The problem: trained on abstracts, applied to Results sections</h2>
+<table>
+<thead><tr><th></th><th>text type</th></tr></thead>
+<tbody>
+<tr><td>BioRED <span class='dim'>(BioRED model)</span></td><td>600 PubMed abstracts</td></tr>
+<tr><td>BioInfer <span class='dim'>(PPI model)</span></td><td>sentences from PubMed abstracts</td></tr>
+<tr><td>BioNLP-ST PC 2013 <span class='dim'>(extra <code>Bind</code> rows, 514)</span></td><td>abstracts</td></tr>
+<tr><td>BioNLP-ST GE 2013 <span class='dim'>(extra <code>Bind</code> rows, 271)</span></td><td>full-text papers &mdash; the only full-text source</td></tr>
+<tr><td><strong>Extraction</strong> <span class='dim'>(step 17)</span></td><td><strong>Results sentences</strong> from 3,822 full-text PMC papers (<code>experimental_ner/</code> &rarr; <code>sentences/</code>)</td></tr>
+</tbody>
+</table>
+<p>The models learn from abstract-style text and are applied to Results-section text. Results
+sentences are longer, mention figures and experimental conditions, and phrase relations differently
+from an abstract's summary. Two consequences:</p>
+<ul>
+  <li>The benchmark test scores (BioRED test F1 0.68, PPI test F1 0.72) are measured on abstracts, so
+      they say little about precision on <em>your</em> corpus &mdash; it may be better or worse.</li>
+  <li>There is no public relation-extraction corpus built from Results sentences. Training labels have
+      to come from your own corpus.</li>
+</ul>
+
+<h2>2. The options</h2>
+
+<h3><span class='step-no'>1</span>A gold-standard set from your own Results sentences <span class='pill rec'>do first</span></h3>
+<ul>
+  <li>Hand-label 500&ndash;1,000 entity pairs drawn from <code>sentences/</code>, with BioRED's label
+      set: activates / inhibits / binds / associated / none.</li>
+  <li>Use it as <strong>dev + test</strong>. It is the first true measure of how the models perform on
+      your text, and the yardstick for every option below.</li>
+  <li>Pre-select with the current models so the sample is balanced, not mostly &ldquo;none&rdquo;.</li>
+  <li><strong>Effort:</strong> a few days of annotation.</li>
+</ul>
+
+<h3><span class='step-no'>2</span>LLM-labelled training data from your Results sentences <span class='pill rec'>do first</span></h3>
+<ul>
+  <li>An LLM labels several thousand entity pairs from your Results sentences with the same label set;
+      a sample (~200) is hand-checked.</li>
+  <li>Fine-tune BioBERT on BioRED + these labels. The fast, cheap BioBERT pipeline still scores all
+      126k+ pairs, but has learned Results-section phrasing.</li>
+  <li><strong>Effort:</strong> API calls over a few thousand sentences, plus the hand-check.</li>
+</ul>
+
+<h3><span class='step-no'>3</span>Labels from curated databases <span class='dim'>(distant supervision)</span></h3>
+<ul>
+  <li>Label pairs in your Results sentences from curated interaction databases:
+    <ul>
+      <li><strong>SIGNOR</strong> &mdash; signed activation / inhibition / binding between genes</li>
+      <li><strong>IntAct / STRING physical</strong> &mdash; binding</li>
+      <li><strong>CTD</strong> &mdash; chemical&ndash;gene, chemical&ndash;disease</li>
+      <li><strong>DGIdb</strong> &mdash; already in <code>gpu_bundle/databases/interactions.tsv</code></li>
+    </ul></li>
+  <li>Cheap and large, but noisy: a database fact does not mean <em>this</em> sentence states it. Best
+      combined with, or filtered by, option&nbsp;2.</li>
+</ul>
+
+<h3><span class='step-no'>4</span>Adapt the base model to Results text <span class='dim'>(no labels needed)</span></h3>
+<ul>
+  <li>Continue BioBERT's pre-training (masked language modelling) on the unlabelled Results sentences of
+      the 3,822 papers before fine-tuning. Domain-adaptive pre-training typically adds a few F1 points
+      in-domain.</li>
+  <li>A simpler partial step: switch the base model to BiomedBERT abstract+fulltext
+      (<code>--base-model microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract-fulltext</code>),
+      pre-trained on full-text PMC.</li>
+</ul>
+
+<h3><span class='step-no'>5</span>Keep the benchmark corpora as a starting point</h3>
+<ul>
+  <li>Train on BioRED / BioInfer first, then fine-tune on in-domain data from options 2&ndash;3.</li>
+  <li>Select the model (epoch, threshold, calibrator) on <strong>your</strong> dev set from option 1,
+      not on BioRED's.</li>
+</ul>
+
+<h2>3. Recommendation</h2>
+<div class='key'><strong>Options 1 and 2 first.</strong> Option&nbsp;1 shows how good the current models
+really are on Results sentences. Option&nbsp;2 is the most direct way to train on them. Options
+3&ndash;4 are add-ons once 1&ndash;2 show where the errors are; option&nbsp;5 is how they fit
+together.</div>
+
+<h2>4. Already ruled out or done</h2>
+<table>
+<thead><tr><th>item</th><th>finding</th></tr></thead>
+<tbody>
+<tr><td>Truncation at 128 tokens</td>
+    <td>Not a limit. The second entity is cut off for 0.6% of BioRED test positives and 0% of PPI test
+    positives; median rows are 49&ndash;77 tokens. Step 17 already scores your corpus at 256 tokens.</td></tr>
+<tr><td>PPI dev/test leak</td>
+    <td>Fixed in <code>bigbio_to_re.py</code>: dev is carved by document, not by row (dev rows with a
+    near-copy in train: 95% &rarr; 1%). PPI needs retraining with the fix.</td></tr>
+<tr><td>Metrics record</td>
+    <td>Each training run now writes <code>summaries/metrics_&lt;task&gt;.json</code> and
+    <code>&lt;model&gt;/metrics.json</code>: test metrics, per-class P/R/F1, confusion matrix, per-epoch
+    dev curve, calibration.</td></tr>
+<tr><td>Comparison with published results</td>
+    <td>Scores are in line with the literature: BioRED pair + relation type F1 0.52&ndash;0.59
+    (document level), BioInfer PPI F1 ~0.74 (BioBERT). No published relation-extraction result on these
+    corpora is near 0.90.</td></tr>
+</tbody>
+</table>
+</body>
+</html>
