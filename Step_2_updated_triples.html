@@ -234,7 +234,10 @@ cache.)</span></p>
       hard-coded, and the resolved values are printed as a <code>[task]</code> line. For
       <code>--task ppi</code> that table reproduces the previous defaults exactly
       (<code>bigbio/bioinfer</code>, <code>ppi_data</code>, <code>ppi-biobert-re</code>,
-      <code>--val-frac 0.1</code>, isotonic).</td>
+      <code>--val-frac 0.1</code>, isotonic).
+      <span class='dim'>Since changed: Platt for every task (2026-08-02), 2 epochs, and &mdash; from
+      2026-10-01 &mdash; the 10% dev split is carved by <em>document</em>, not by row (the row split had
+      put a near-copy of the sentence in train for 95% of dev rows). See &sect;7.</span></td>
 </tr>
 <tr class='changed'>
   <td class='num'>2</td>
@@ -243,7 +246,7 @@ cache.)</span></p>
   <td><code>biored-biobert-re/</code> (weights + label map + <code>calibration.json</code>)<br><code>biored_data/{train,dev,test}.tsv</code><br><code>summaries/calibration_biored.html</code></td>
   <td>The same three-script sub-pipeline with three task-aware defaults:
       <code>--val-frac 0</code> (BioRED ships its own dev split &mdash; carving another out of train
-      would be wrong; BioInfer has none, hence 0.1 there), <code>--calibration platt</code>
+      would be wrong; BioInfer has none, hence 0.1 there, carved by document since 2026-10-01), <code>--calibration platt</code>
       (a 100-abstract dev split is too small for isotonic), and the
       <code>biored-*</code> output names. Pass-throughs: <code>--require-cue</code>,
       <code>--biored-all-types</code>, <code>--extra-bind</code> &mdash; the last one is set by
@@ -336,7 +339,7 @@ call site.</p>
 <tbody>
 <tr><td><code>run_re_pipeline.py</code> <span class='dim'>(step 1)</span></td>
     <td><code>ppi</code> <span class='dim'>(also chemprot / gad / ddi)</span></td>
-    <td><strong>isotonic</strong> <span class='dim'>&mdash; unchanged</span></td></tr>
+    <td><strong>isotonic</strong> <span class='dim'>&mdash; unchanged at the time; <strong>platt</strong> since 2026-08-02 (one scale for both models)</span></td></tr>
 <tr class='changed'><td><code>run_re_pipeline.py --task biored</code> <span class='dim'>(step 2)</span></td>
     <td><code>biored</code></td>
     <td><strong>platt</strong></td></tr>
@@ -353,7 +356,8 @@ always invokes <code>train_re.py --calibration none</code> and fits the calibrat
 <code>calibration.py</code> itself is untouched: Platt was already a supported choice, only the
 default selection is new.</p>
 <p class='dim'>Why: isotonic regression is nonparametric and overfits small calibration sets &mdash;
-fine against BioInfer's ~780-row dev split, but BioRED's dev split is 100 abstracts, where it would
+fine against BioInfer's ~780-row dev split (or so it seemed: that split leaked training sentences, see
+&sect;7), but BioRED's dev split is 100 abstracts, where it would
 fit a step function to a few hundred points and feed confidently wrong <code>p_rel</code> into the
 composite score. Platt scaling has two parameters and degrades gracefully.</p>
 
@@ -778,6 +782,25 @@ with BioRED's dev/test unchanged; dev F1 0.6473 (was 0.6238), test F1 0.6829 at 
 5 of 11 test <code>Bind</code> pairs predicted <code>binds</code>. On this corpus <code>binds</code>
 triples went from 5 to 2,890 (117 at score &ge; 0.8). Details in &sect;5 and &sect;8 of
 <a href='step_2_triples.html'>step_2_triples.html</a>.</div>
+<div class='warn'><strong>PPI dev split leaked &mdash; fixed and retrained 2026-10-01.</strong>
+<code>--val-frac 0.1</code> carved BioInfer's dev split by <em>row</em> after conversion; one sentence
+yields a row per entity pair, so 95% of dev rows (738 of 779) had a near-copy of their sentence in
+train. Dev F1, the epoch, the threshold and the Platt calibrator were all chosen on that optimistic set.
+<code>bigbio_to_re.py</code> now carves by <em>document</em> (89 of 894 documents; overlap 1%).
+Retrained PPI model, on BioInfer's untouched test split (1,604 rows):
+<table>
+<thead><tr><th></th><th class='num'>leaky dev (2026-09-30)</th><th class='num'>document-carved dev (2026-10-01)</th></tr></thead>
+<tbody>
+<tr><td>dev F1 (best epoch)</td><td class='num'>0.8429</td><td class='num'>0.6812</td></tr>
+<tr><td>test F1 at the tuned threshold</td><td class='num'>0.7208</td><td class='num'><strong>0.7346</strong></td></tr>
+<tr><td>test precision / recall</td><td class='num'>0.7455 / 0.6976</td><td class='num'>0.6809 / 0.7976</td></tr>
+<tr><td>decision threshold</td><td class='num'>0.5458</td><td class='num'>0.1624</td></tr>
+<tr><td>highest composite score in the triples</td><td class='num'>1.0000</td><td class='num'>0.9602</td></tr>
+</tbody>
+</table>
+The dev drop is the leak removed; on test the model improved. Calibrated PPI scores are less confident,
+so the graph's &ge;&nbsp;0.95 band went from 13,113 triples to 12 &mdash; score &ge;&nbsp;0.8 is now the
+useful upper cutoff. Details in &sect;5 of <a href='step_2_triples.html'>step_2_triples.html</a>.</div>
 <p class='dim'>Model selection is also noisier here than on BioInfer: <code>load_best_model_at_end</code>
 picks an epoch on a 100-abstract dev split, so small dev-F1 differences should not be read as real.
 That is a reason to distrust the metric, not to avoid the corpus &mdash; which is precisely why
