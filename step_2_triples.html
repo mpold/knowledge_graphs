@@ -157,7 +157,7 @@ the <code>kaggle_working/</code> run tree, which is rebuilt on every run.</div>
   <div class='arrow'>&darr;&nbsp; (independent of step 17)</div>
   <div class='node'><span class='s'>17. relation_extraction.py --normalize --route-mode additive</span> <span class='pill gpu'>GPU</span>
     <div class='io'>in: <code>sentences/*.json</code> + <code>ppi-biobert-re/</code> (RE_MODEL_PPI) + <code>biored-biobert-re/</code> (RE_MODEL_BIORED) &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples_re.json</code> (BioBERT-scored) + normalized variant
-      <span class='dim'>&mdash; additive routing: EVERY applicable checkpoint scores each pair, so the file holds up to two triples per pair, joined by <code>pair_id</code></span></div></div>
+      <span class='dim'>&mdash; additive routing: EVERY applicable checkpoint scores each pair, so the file holds up to two triples per pair, joined by <code>pair_id</code>; signed triples are oriented so the agent is the subject (<code>direction.py</code>, section&nbsp;9)</span></div></div>
   <div class='arrow'>&darr;&nbsp; TRIPLES/triples_re*.json</div>
   <div class='node'><span class='s'>18. compare_re.py</span> <span class='pill opt'>optional</span>
     <div class='io'>in: <code>TRIPLES/triples_re.json</code> (both models, joined on <code>pair_id</code>) &nbsp;&rarr;&nbsp; out: <code>summaries/compare_re.html</code>
@@ -388,7 +388,12 @@ reads step&nbsp;17's normalized triples and step&nbsp;4's year cache.</p>
       <code>pair_id</code> &mdash; filter or merge on those before building a graph
       (<code>high_confidence_g.py --merge</code> does this). The kept <code>score</code> is a
       <em>composite</em>, not the raw softmax: the calibrated <code>p_rel</code> multiplied by NER, cue,
-      margin, section and self-pair factors, clamped to [0,1] &mdash; see section&nbsp;6.</td>
+      margin, section and self-pair factors, clamped to [0,1] &mdash; see section&nbsp;6.
+      <strong>Direction</strong> (since 2026-10-01): the models predict type and sign only, so a signed
+      triple's subject was simply the first-mentioned entity. <code>direction.py</code> (staged with this
+      step) now reverses it when the agent is the second entity (&ldquo;&hellip;reduced <em>by</em>
+      X&rdquo;); each triple records <code>direction</code> and <code>direction_cue</code> &mdash; see
+      section&nbsp;9.</td>
 </tr>
 <tr>
   <td class='num'>18</td>
@@ -953,6 +958,83 @@ and what it changed on this corpus.</p>
   <li><strong>Graph effect.</strong> Gene&ndash;gene <code>interacts</code> edges fell from 5,401 to
       4,413 as pairs took the typed <code>binds</code> label. BioRED's score ceiling is 0.9194, so
       <code>binds</code> edges vanish at the 0.95 and 0.99 slider stops.</li>
+</ul>
+
+<h2>9. Direction of signed relations <span class='dim'>(2026-10-01)</span></h2>
+<p class='meta'>Why arrows pointed the wrong way, the rule that fixes most of them, and how well it
+does.</p>
+
+<h3>The problem</h3>
+<p>Both relation models predict the <strong>type and sign</strong> of a relation, never who acts on
+whom &mdash; BioRED's <code>Positive_Correlation</code> / <code>Negative_Correlation</code> are
+symmetric. <code>relation_extraction.py</code> forms each pair in reading order and wrote the
+first-mentioned entity as <code>subject</code>, so every passive sentence came out backwards:</p>
+<table>
+<thead><tr><th>sentence</th><th>drawn as</th><th>should be</th></tr></thead>
+<tbody>
+<tr><td>&ldquo;Lactate levels were higher in tumors from Ccng2&minus;/&minus; mice &hellip; and the elevation
+    was abolished <strong>by AZD3965</strong> treatment.&rdquo;</td>
+    <td>lactate &rarr; inhibits &rarr; AZD3965</td><td>AZD3965 &rarr; inhibits &rarr; lactate</td></tr>
+</tbody>
+</table>
+<p>Of the 17 lactate&ndash;AZD3965 triples, the drug acts on lactate in nearly every sentence, but 11 had
+lactate as the subject purely through word order.</p>
+
+<h3>The rule <span class='dim'>(<code>gpu_bundle/direction.py</code>)</span></h3>
+<p>A signed triple (<code>upregulator/activator</code>, <code>downregulator/inhibitor</code>) is
+reversed when the text between the two entities ends in a cue that introduces the <em>second</em>
+entity as the agent: <em>by</em>, <em>treated / incubated / exposed &hellip; with</em>, <em>in response
+to</em>, <em>after</em>, <em>following</em>, <em>upon</em> &mdash; unless it is one of the look-alikes
+found while checking:</p>
+<table>
+<thead><tr><th>excluded</th><th>example</th></tr></thead>
+<tbody>
+<tr><td>means clause</td><td>&ldquo;&hellip;promotes tumor growth <strong>by enhancing</strong> lactate formation&rdquo;</td></tr>
+<tr><td>observation</td><td>&ldquo;&hellip;<strong>marked by</strong> E-cadherin downregulation&rdquo;, &ldquo;<strong>accompanied by</strong> enhanced HIF1&alpha;&rdquo;</td></tr>
+<tr><td>counteracted effect</td><td>&ldquo;PS1145 <strong>reduced</strong> MCT4 expression &hellip; <strong>induced by</strong> TIGAR&rdquo;</td></tr>
+<tr><td>first entity is the active agent</td><td>&ldquo;LKB1 knockdown <strong>abolished</strong> activation of AMPK&alpha; by CAB39L&rdquo;</td></tr>
+</tbody>
+</table>
+<p>The text between the entities comes from the exact character offsets in each triple's
+<code>pair_id</code>. Every triple records <code>direction</code> (<code>reading_order</code> or
+<code>agent_cue</code>) and, when reversed, <code>direction_cue</code> &mdash; so flips can be audited
+or filtered. <code>binds</code>, <code>associated</code> and <code>interacts</code> carry no direction
+and are not touched.</p>
+
+<h3>How well it works</h3>
+<table>
+<thead><tr><th></th><th class='num'>value</th></tr></thead>
+<tbody>
+<tr><td>hand-checked triples where the cue fired (two random samples of 50)</td><td class='num'>100</td></tr>
+<tr><td>wrong flips the final rule still makes</td><td class='num'><strong>0 of 11</strong></td></tr>
+<tr><td>right flips the final rule keeps</td><td class='num'><strong>82 of 85</strong></td></tr>
+<tr><td>signed triples reversed on this corpus</td><td class='num'>5,447 (~12%)</td></tr>
+<tr><td>lactate&ndash;AZD3965 signed triples reading AZD3965 &rarr; lactate</td><td class='num'>13 of 14</td></tr>
+</tbody>
+</table>
+<p>The 3 misses are cautious skips (the first entity is the active agent of another verb), not reversed
+arrows. The cue must sit within three words of the second entity, so a distant agent stays unflipped:
+&ldquo;&hellip;attenuated by treatment with SLC16A1 knockdown or specific inhibitor of SLC16A1
+(AZD3965)&rdquo; is the one lactate&ndash;AZD3965 triple left reversed.</p>
+
+<div class='warn'><strong>Direction is still a heuristic.</strong> Arrows on <code>reading_order</code>
+triples remain &ldquo;first mentioned in the sentence&rdquo;; for signed edges, trust the sign more than the
+arrow and check the tooltip sentences. The sign can also be genuinely mixed &mdash; AZD3965 blocks MCT1,
+so it <em>raises</em> intracellular and <em>lowers</em> extracellular lactate, and one edge carries the
+majority sign. A trained fix needs direction-annotated data: a 2025 extension of BioRED adds
+subject/object directionality to its relations (<a href='https://pmc.ncbi.nlm.nih.gov/articles/PMC12261447/'>Enhancing
+biomedical relation extraction with directionality</a>) &mdash; see also
+<a href='next_training_steps.html'>next_training_steps.html</a>.</div>
+
+<h3>Where it runs</h3>
+<ul>
+  <li><strong><code>relation_extraction.py</code> (step 17)</strong> orients each triple as it is created,
+      so new runs write the correct direction into <code>TRIPLES/triples_re*.json</code>.
+      <code>gpu.py</code> stages <code>direction.py</code> with step 17 &mdash; include it in the
+      <code>gpu_bundle/</code> upload.</li>
+  <li><strong><code>high_confidence_g.py</code></strong> applies the same rule to triples from runs made
+      before the change. It is a no-op on triples that already carry <code>direction</code>, so nothing is
+      flipped twice.</li>
 </ul>
 
 </body>
