@@ -77,6 +77,11 @@ SUMMARY_DIR = os.path.join(BASE, "summaries")
 SUMMARY_HTML = os.path.join(SUMMARY_DIR, "ncbi_pdf.html")
 BATCH_SIZE = 200
 EMAIL = "your-email@example.com"
+# OpenAlex meters unkeyed requests against a small per-IP daily budget; a free
+# key (https://help.openalex.org/api/authentication/) gets its own budget.
+OA_API_KEY = os.environ.get("OPENALEX_API_KEY", "").strip()
+OA_HEADERS = {"Authorization": f"Bearer {OA_API_KEY}"} if OA_API_KEY else None
+_oa_budget_warned = False
 DELAY = 0.35
 
 # Auto-recovery knobs (env-overridable).
@@ -398,15 +403,24 @@ def try_openalex(doi, pmid, pmcid, filepath):
     if pmcid:
         identifiers.append(f"pmcid:{pmcid}")
 
+    global _oa_budget_warned
     for ident in identifiers:
         url = f"https://api.openalex.org/works/{ident}?mailto={EMAIL}"
         try:
-            text = curl_get_text(url)
+            text = curl_get_text(url, OA_HEADERS)
             if not text or text.startswith("<!"):
                 continue
             data = json.loads(text)
         except Exception:
             continue
+        if data.get("error") == "Rate limit exceeded":
+            # Budget exhausted: every later lookup fails the same way, so say
+            # it once rather than letting OpenAlex drop out of the chain silently.
+            if not _oa_budget_warned:
+                print("  [openalex] budget exhausted -- skipping OpenAlex "
+                      "(set OPENALEX_API_KEY): " + data.get("message", "")[:160])
+                _oa_budget_warned = True
+            return False, "openalex_budget"
 
         candidates = []
         oa = data.get("open_access", {})

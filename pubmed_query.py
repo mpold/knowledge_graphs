@@ -48,6 +48,11 @@ STRATEGY (also embedded into the HTML report)
    proxy, looked up per ISSN (batched 50/request). If a curated table is supplied
    (env JIF_TABLE=path to a "issn<TAB>jif" file), its values take precedence, so
    true JCR figures can be plugged in without code changes.
+   OpenAlex meters requests per API key; unkeyed requests share a small daily
+   budget per IP address, which a run of this size can exhaust. Set
+   OPENALEX_API_KEY (free: https://help.openalex.org/api/authentication/) to use
+   your own budget. A 429 "budget exhausted" reply aborts at once with the reset
+   time instead of retrying; re-run after the reset (or with a key) to resume.
 
 4. Polite & resumable. Requests are throttled (~3/s NCBI, ~7/s OpenAlex) with
    retries, back-off and tolerant JSON parsing; every phase checkpoints to a TSV
@@ -83,6 +88,7 @@ ESUMMARY = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 OA_SRC   = "https://api.openalex.org/sources"
 
 API_KEY    = os.environ.get("NCBI_API_KEY", "").strip()
+OA_API_KEY = os.environ.get("OPENALEX_API_KEY", "").strip()
 EMAIL      = os.environ.get("CONTACT_EMAIL", "your-email@example.com")
 JIF_TABLE  = os.environ.get("JIF_TABLE", "").strip()      # optional curated issn->jif
 NCBI_DELAY = 0.12 if API_KEY else 0.34
@@ -99,6 +105,10 @@ TIME_BUDGET= float(os.environ.get("TIME_BUDGET", "0"))    # 0 = unlimited
 # --------------------------------------------------------------------------- #
 # HTTP helper (retries, back-off, tolerant JSON)
 # --------------------------------------------------------------------------- #
+class BudgetExhausted(Exception):
+    """A 429 whose Retry-After is too long to wait out (e.g. OpenAlex's daily budget)."""
+
+
 def http_json(url, data=None, tries=6):
     """GET (or POST if data) and parse JSON; tolerant of stray control chars.
 
@@ -114,7 +124,27 @@ def http_json(url, data=None, tries=6):
             with urllib.request.urlopen(req, timeout=120) as r:
                 raw = r.read().decode("utf-8", "replace")
             return json.loads(raw, strict=False)
-        except (urllib.error.URLError, urllib.error.HTTPError,
+        except urllib.error.HTTPError as exc:
+            # A 429 with a long Retry-After (OpenAlex's exhausted daily budget
+            # says ~hours) cannot be fixed by back-off: stop now with the
+            # server's own explanation instead of burning the retries.
+            if exc.code == 429:
+                retry_after = exc.headers.get("Retry-After", "")
+                if not retry_after.isdigit() or int(retry_after) > 60:
+                    try:
+                        msg = json.loads(exc.read().decode("utf-8", "replace")).get("message", "")
+                    except (ValueError, OSError, AttributeError):
+                        msg = ""
+                    raise BudgetExhausted("HTTP 429 from %s (Retry-After %ss): %s"
+                                          % (url.split("?", 1)[0], retry_after or "?",
+                                             msg or exc.reason)) from exc
+            if attempt == tries - 1:
+                raise
+            wait = min(30.0, 1.5 * (2 ** attempt))
+            print("[http] retry %d/%d (HTTPError %s): %s"
+                  % (attempt + 1, tries, exc.code, url[:80]), file=sys.stderr)
+            time.sleep(wait)
+        except (urllib.error.URLError,
                 http.client.IncompleteRead, http.client.HTTPException,
                 ConnectionError, TimeoutError, OSError,
                 json.JSONDecodeError) as exc:
@@ -390,6 +420,8 @@ def impact_factors(issns, deadline):
         i += OA_BATCH
         url = (OA_SRC + "?filter=issn:" + "|".join(batch) +
                "&per_page=%d&mailto=%s" % (OA_BATCH, EMAIL))
+        if OA_API_KEY:
+            url += "&api_key=" + urllib.parse.quote(OA_API_KEY)
         d = http_json(url)
         found = {}
         for s in d.get("results", []):
@@ -719,7 +751,17 @@ def main():
             issns.add(r["issn"])
         if r["essn"]:
             issns.add(r["essn"])
-    if not impact_factors(issns, deadline):
+    print("[jif] OpenAlex: %s" % ("using OPENALEX_API_KEY" if OA_API_KEY else
+          "no OPENALEX_API_KEY -- sharing the per-IP free budget"), file=sys.stderr)
+    try:
+        complete = impact_factors(issns, deadline)
+    except BudgetExhausted as exc:
+        sys.exit("error: OpenAlex refused the impact-factor lookup -- %s\n"
+                 "       Set OPENALEX_API_KEY (free key: "
+                 "https://help.openalex.org/api/authentication/) or wait for the reset, "
+                 "then re-run: the PMID/annotation caches are kept and it resumes here."
+                 % exc)
+    if not complete:
         print("IMPACTFACTOR_INCOMPLETE - re-run to resume", file=sys.stderr)
         return
 
