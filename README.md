@@ -127,7 +127,8 @@ and `pub_year_xml.py` as 6c.
   For example: `echo 0.01 | python high_impact_xml.py`. Decimal = 0 includes all PubMed articles
   regardless of their impact.
 - Reaches NCBI E-utilities, OpenAlex, CrossRef, PMC. Set `NCBI_API_KEY` to lift the
-  3 req/s rate limit. Optional env vars: `TIME_BUDGET`, `IF_THRESHOLD`, `PERCENTILE`,
+  3 req/s rate limit, and `OPENALEX_API_KEY` (free key) so the step-1 impact-factor
+  lookup doesn't run out of OpenAlex's shared per-IP daily budget. Optional env vars: `TIME_BUDGET`, `IF_THRESHOLD`, `PERCENTILE`,
   `RETRY_FAILED`, `ARCHIVE_DIR`, `USE_ARCHIVE_SKIP`, `GROBID_*`, …
   (see `step_1_publications.html`).
 - **`grobid_xml.py` needs Docker + a GROBID server on `:8070`** (it can auto-launch Docker
