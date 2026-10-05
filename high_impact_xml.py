@@ -318,24 +318,32 @@ def fetch_pmc_xml_efetch(pmc_id, email="your-email@example.com"):
 # --------------------------------------------------------------------------- #
 # Export loop (driven by the pmid2pmcid dictionary, with recovery)
 # --------------------------------------------------------------------------- #
-def _empty_content_dir(path):
-    """Empty an output directory of generated content before a fresh run so each
-    run starts clean. Python scripts are never deleted -- only generated content."""
-    if os.path.isdir(path):
-        for root, dirs, files in os.walk(path, topdown=False):
-            for name in files:
-                if not name.endswith(".py"):
-                    os.remove(os.path.join(root, name))
-            for name in dirs:
-                try:
-                    os.rmdir(os.path.join(root, name))   # remove only if now empty
-                except OSError:
-                    pass
+def _prune_stale(path, selected):
+    """Remove XMLs the current selection does not include, so a new query or
+    percentile never leaves stale articles for the later stages -- but keep every
+    finished <PMCID>.xml it *does* include, so a re-run resumes instead of
+    re-downloading. Also drops leftover .part temp files; keeps _failed.tsv (the
+    skip-list for future runs) and Python scripts."""
     os.makedirs(path, exist_ok=True)
+    kept = removed = 0
+    for name in os.listdir(path):
+        full = os.path.join(path, name)
+        if not os.path.isfile(full):
+            continue
+        if name.endswith(".part"):
+            os.remove(full)
+        elif name.endswith(".xml"):
+            if name[:-len(".xml")] in selected:
+                kept += 1
+            else:
+                os.remove(full)
+                removed += 1
+    print("[export] kept %d finished XMLs from earlier runs; removed %d not in this "
+          "selection" % (kept, removed), file=sys.stderr)
 
 
 def export(pmid2pmcid):
-    _empty_content_dir(OUT_DIR)              # fresh run: clear stale exports before writing
+    _prune_stale(OUT_DIR, set(pmid2pmcid.values()))   # keep finished, drop stale
     failed_skip = load_failed()
     deadline = (time.time() + TIME_BUDGET) if TIME_BUDGET > 0 else 0
 

@@ -53,7 +53,9 @@ intermediate directories that produced it.</p>
 previous one wrote, and writes an HTML summary of its own stage into <code>summaries/</code>
 (each summary is <strong>named after its script</strong>). Every script <strong>creates the input
 and output directories it needs</strong> if they are missing, and (except <code>grobid_xml.py</code>)
-<strong>empties its bulk output directory before writing</strong> so each run starts clean &mdash;
+<strong>empties its bulk output directory before writing</strong> so each run starts clean
+(<code>high_impact_xml.py</code> removes only XMLs outside the current selection and keeps the
+finished ones, so an interrupted download resumes) &mdash;
 Python scripts are never deleted. Several stages reach the network (NCBI E-utilities, OpenAlex,
 CrossRef) or need Docker (GROBID), so they are <em>not</em> run automatically &mdash; run each yourself,
 or drive them all in order with <code>step_1_orchestrator.py</code> (see section&nbsp;3), which still
@@ -385,7 +387,7 @@ python subtract.py</pre>
 <div class='warn'>These scripts are <strong>not executed automatically</strong>: most reach external
 services (NCBI E-utilities, OpenAlex, CrossRef) and step 5 needs a running GROBID container. Set
 <code>NCBI_API_KEY</code> to lift the 3&nbsp;req/s rate limit. Each run starts clean (the bulk output
-dir is emptied before writing) <em>except</em> <code>ncbi_pdf.py</code> and <code>grobid_xml.py</code>, which resume; bound the
+dir is emptied before writing) <em>except</em> <code>high_impact_xml.py</code>, <code>ncbi_pdf.py</code> and <code>grobid_xml.py</code>, which resume; bound the
 network stages with <code>TIME_BUDGET</code> if needed. <strong>Step&nbsp;8 deletes</strong> the five
 intermediate directories &mdash; everything re-downloadable, and the corpus, <code>pmids/</code> and
 <code>summaries/</code> are kept &mdash; so run <code>--stop 7</code> (or <code>DRY_RUN=1
