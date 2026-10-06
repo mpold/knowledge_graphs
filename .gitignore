@@ -62,3 +62,6 @@ xhigh_confidence_g.py
 Thumbs.db
 .idea/
 .vscode/
+
+# ---- Local PubMed query-building scripts (not part of the pipeline) ----
+pubmed_queries/
