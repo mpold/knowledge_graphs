@@ -52,8 +52,9 @@ STRATEGY
 
 4. Copy, never move. The archive is a shared repository that other projects read
    -- it is opened read-only and nothing in it is renamed, moved or deleted.
-   Copies are ``shutil.copy2`` via a temp file + ``os.replace`` so an interrupted
-   run never leaves a half-file that looks complete.
+   Copies go via a temp file + ``os.replace`` so an interrupted run never leaves
+   a half-file that looks complete, and carry the ``<?pub-year?>`` stamp
+   (pub_year_xml.stamp_file) so step 6c only has to verify it.
 
 5. Tell stage 2 what to skip. ``pmids/from_archive_pmcids.txt`` lists the hit
    PMC ids; ``high_impact_xml.py`` drops them from its ``pmid2pmcid`` export
@@ -99,9 +100,10 @@ DRY_RUN       1 = plan + write the summary without copying anything
 import os
 import csv
 import sys
-import shutil
 import html as _html
 from collections import Counter
+
+from pub_year_xml import stamp_file, stamped_size   # <?pub-year?> stamp (step 6c verifies)
 
 # --------------------------------------------------------------------------- #
 # Paths / config -- all script-relative, so this runs from any working directory
@@ -296,23 +298,25 @@ def choose_representative(entry):
 # --------------------------------------------------------------------------- #
 # 4. Copy (never move) -- atomic, idempotent
 # --------------------------------------------------------------------------- #
-def copy_into(src, dst_dir):
+def copy_into(src, dst_dir, year=None):
     """Copy src into dst_dir. Returns 'copied', 'present', 'planned' or 'missing'.
 
     Written to ``<name>.part`` then ``os.replace``d, so an interrupted copy never
     leaves a truncated file that a later run would mistake for done. A
     destination that already matches the source size is left alone.
+
+    With a ``year`` the copy gets its ``<?pub-year?>`` stamp on the way (the
+    archive itself is never touched), so step 6c only has to verify it; the size
+    check then compares against the stamped size.
     """
     if not src or not os.path.exists(src):
         return "missing"
     dst = os.path.join(dst_dir, os.path.basename(src))
-    if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
+    if os.path.exists(dst) and os.path.getsize(dst) == stamped_size(src, year):
         return "present"
     if DRY_RUN:
         return "planned"
-    tmp = dst + ".part"
-    shutil.copy2(src, tmp)
-    os.replace(tmp, dst)
+    stamp_file(src, dst, year)          # no usable year -> a plain byte copy
     return "copied"
 
 
@@ -597,7 +601,7 @@ def build_summary(stats):
     # 9. Caveats
     H.append("<h2>9. Notes &amp; caveats</h2><ul>")
     H.append("<li><strong>The archive is never modified.</strong> Files are copied out with "
-             "<code>shutil.copy2</code>; nothing in <code>%s</code> is written, moved or deleted.</li>"
+             "a temp file + <code>os.replace</code> (year-stamped on the way); nothing in <code>%s</code> is written, moved or deleted.</li>"
              % _html.escape(ARCHIVE_DIR))
     H.append("<li><strong>Matching is by PMC id, not by content.</strong> An archived file is trusted to "
              "be that publication's XML. A truncated or stale archive entry would be copied as-is; the "
@@ -670,12 +674,16 @@ def main():
     copy_stage, copy_exp = Counter(), Counter()
     try:
         for i, m in enumerate(hits.values(), 1):
-            copy_stage[copy_into(m["path"], STAGE_DIR)] += 1
+            # The staged copy is stamped with the year; seeding from it is then a
+            # plain copy of an already-stamped file.
+            copy_stage[copy_into(m["path"], STAGE_DIR, m["year"])] += 1
             # Seed from the staged copy when it exists, so stage 6b works even if
             # the archive is offline; fall back to the archive on the first run.
             staged = os.path.join(STAGE_DIR, os.path.basename(m["path"]))
-            copy_exp[copy_into(staged if os.path.exists(staged) else m["path"],
-                               EXPERIMENTAL_DIR)] += 1
+            if os.path.exists(staged):
+                copy_exp[copy_into(staged, EXPERIMENTAL_DIR)] += 1
+            else:
+                copy_exp[copy_into(m["path"], EXPERIMENTAL_DIR, m["year"])] += 1
             if i % 500 == 0:
                 print("[copy] %d/%d" % (i, len(hits)), file=sys.stderr)
     except KeyboardInterrupt:
