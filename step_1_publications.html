@@ -225,9 +225,13 @@ later stage reads &mdash; after the corpus that stage&nbsp;2 consumes has been a
       itself (JATS <code>&lt;pub-date&gt;&lt;year&gt;</code>, TEI <code>&lt;publicationStmt&gt;&lt;date when&gt;</code>).
       The table wins because it is the year the rest of stage&nbsp;1 reports against. Offline and
       idempotent (an existing stamp is replaced; a file already correct is not rewritten).
+      The stamp is normally written <strong>upstream</strong>, as the bytes are first written:
+      steps&nbsp;2 and&nbsp;5 stamp each file they write, and 1b/6b stamp the <code>archive_xmls/</code>
+      staging copy. So 6c only <strong>verifies</strong>: it reads the first 64&nbsp;KB of each file and
+      rewrites a file only when its stamp is missing or wrong.
       <strong>Exits non-zero, listing the files, if any document stays undated</strong> &mdash; which aborts
-      the orchestrator. On the current corpus: 3,769 XML, all dated from the table, 411 of them stating a
-      different year themselves (table kept), range 1949&ndash;2026.</td>
+      the orchestrator. On the current corpus: 121,630 XML, all dated from the table, 7,536 of them stating a
+      different year themselves (table kept), range 1948&ndash;2026.</td>
 </tr>
 <tr>
   <td class='num'>7</td>

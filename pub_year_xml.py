@@ -26,6 +26,13 @@ PubMed disagree by a year on ~10% of papers (e-pub in December, print issue in
 January). Re-running is safe: an existing stamp is replaced, and a file whose stamp
 is already right is not rewritten.
 
+The stamp is normally written upstream, by the steps that create the corpus bytes
+(high_impact_xml.py, grobid_xml.py, from_archive.py, via ``stamp_text`` /
+``stamp_file`` below), so on a normal run this step only VERIFIES: it reads the
+first HEAD_BYTES of each file, sees the right stamp and moves on. A file is read
+whole and rewritten only when its stamp is missing or wrong (files kept from a run
+older than the upstream stamping, or a corpus edited by hand).
+
 Exits non-zero, listing the files, if any document is left without a year -- the
 point of this step is that stage 2 receives a FULLY dated corpus.
 
@@ -40,6 +47,7 @@ import argparse
 import csv
 import os
 import re
+import shutil
 import sys
 from collections import Counter
 
@@ -49,9 +57,12 @@ IN_TSV  = os.path.join(BASE, "pmids", "pmid_pmc_ids.tsv")
 
 STAMP      = re.compile(rb"<\?pub-year\s+(\d{4})\s*\?>")      # also read by gpu_bundle/pub_years.py
 DECL       = re.compile(rb"^(\xef\xbb\xbf)?\s*<\?xml[^>]*\?>")  # optional BOM + XML declaration
-JATS_YEAR  = re.compile(rb"<pub-date\b[^>]*>.*?<year>\s*(\d{4})\s*</year>", re.S)
-TEI_YEAR   = re.compile(rb"<publicationStmt>.*?<date\b[^>]*\bwhen=\"(\d{4})", re.S)
+JATS_YEAR  = re.compile(rb"<pub-date\b[^>]*>(?:(?!</pub-date>).)*?<year>\s*(\d{4})\s*</year>", re.S)
+# Bounded to the element: an empty <publicationStmt> (common in GROBID output) must
+# not let the match run on into the reference list and pick up a CITED paper's date.
+TEI_YEAR   = re.compile(rb"<publicationStmt>(?:(?!</publicationStmt>).)*?<date\b[^>]*\bwhen=\"(\d{4})", re.S)
 TEI_SUFFIX = ".grobid.tei.xml"
+HEAD_BYTES = 1 << 16   # prolog + JATS <article-meta> / TEI header: where the stamp and year live
 
 
 def table_years(path):
@@ -66,6 +77,11 @@ def table_years(path):
     return out
 
 
+def pmcid_of(name):
+    """The PMC accession a corpus file name carries (``PMC123.xml`` / ``PMC123.grobid.tei.xml``)."""
+    return os.path.basename(name).split(".")[0]
+
+
 def own_year(data, name):
     """The year the document states itself, or None."""
     m = (TEI_YEAR if name.endswith(TEI_SUFFIX) else JATS_YEAR).search(data)
@@ -78,6 +94,46 @@ def stamped(data, year):
     pi = b"<?pub-year %d?>" % year
     m = DECL.match(body)
     return body[:m.end()] + pi + body[m.end():] if m else pi + body
+
+
+def stamp_text(text, year):
+    """`stamped` for a str document; returns `text` unchanged when `year` is unusable."""
+    year = _as_year(year)
+    return text if year is None else stamped(text.encode("utf-8"), year).decode("utf-8")
+
+
+def stamp_file(src, dst, year):
+    """Copy `src` to `dst` (atomically, via ``dst.part``) with the year stamped in.
+
+    Falls back to a plain byte copy when `year` is unusable, so the caller never has
+    to care; pub_year_xml.py (step 6c) still dates any file left unstamped."""
+    year = _as_year(year)
+    with open(src, "rb") as fh:
+        data = fh.read()
+    tmp = dst + ".part"
+    with open(tmp, "wb") as fh:
+        fh.write(data if year is None else stamped(data, year))
+    shutil.copystat(src, tmp)
+    os.replace(tmp, dst)
+
+
+def stamped_size(src, year):
+    """Size `stamp_file(src, ..., year)` would produce -- from the head only, no full read."""
+    year = _as_year(year)
+    size = os.path.getsize(src)
+    if year is None:
+        return size
+    with open(src, "rb") as fh:
+        head = fh.read(HEAD_BYTES)
+    return size + len(stamped(head, year)) - len(head)
+
+
+def _as_year(year):
+    try:
+        year = int(str(year).strip())
+    except (TypeError, ValueError):
+        return None
+    return year if 1000 <= year <= 9999 else None
 
 
 def main():
@@ -98,26 +154,32 @@ def main():
     for name in names:
         path = os.path.join(args.xml_dir, name)
         with open(path, "rb") as fh:
-            data = fh.read()
-        own = own_year(data, name)
-        year = table.get(name.split(".")[0])
-        if year is not None:
-            source["table"] += 1
-            disagree += own is not None and own != year
-        elif own is not None:
-            year = own
-            source["xml"] += 1
-        else:
-            undated.append(name)
-            continue
-        years[year] += 1
-        if args.check:
-            continue
-        new = stamped(data, year)
-        if new != data:
-            with open(path, "wb") as fh:
-                fh.write(new)
+            # Stamp and year both sit in the head, so most files are never read whole.
+            data = fh.read(HEAD_BYTES)
+            own = own_year(data, name)
+            year = table.get(pmcid_of(name))
+            if year is None and own is None and len(data) == HEAD_BYTES:
+                data += fh.read()                       # last resort: a date further in
+                own = own_year(data, name)
+            if year is not None:
+                source["table"] += 1
+                disagree += own is not None and own != year
+            elif own is not None:
+                year = own
+                source["xml"] += 1
+            else:
+                undated.append(name)
+                continue
+            years[year] += 1
+            have = STAMP.search(data)
+            if have and int(have.group(1)) == year:
+                continue                                # already right: the common case
             written += 1
+            if args.check:
+                continue
+            data += fh.read()                           # rewrite needs the whole document
+        with open(path, "wb") as fh:
+            fh.write(stamped(data, year))
 
     print("[pub_year] %d XML: %d dated from the table, %d from the XML itself, %d undated"
           % (len(names), source["table"], source["xml"], len(undated)))
@@ -125,8 +187,9 @@ def main():
         print("[pub_year] %d documents state a different year than PubMed (table kept)" % disagree)
     if years:
         print("[pub_year] year range %d-%d" % (min(years), max(years)))
-    print("[pub_year] %s" % ("--check: nothing written" if args.check
-                             else "%d files stamped, %d already current" % (written, len(names) - len(undated) - written)))
+    print("[pub_year] %d files %s, %d already current"
+          % (written, "need a stamp (--check: nothing written)" if args.check else "stamped",
+             len(names) - len(undated) - written))
     if undated:
         print("[pub_year] ERROR: no publication year for %d file(s):" % len(undated), file=sys.stderr)
         for n in undated[:20]:

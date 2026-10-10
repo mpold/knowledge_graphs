@@ -27,8 +27,8 @@ Usage
     # both inputs piped in (query first, percentile second)
     printf 'your pubmed query\n0.01\n' | python step_1_orchestrator.py
 
-    # re-seed the archive contribution after a manual step 6 (and re-stamp its years:
-    # 6b replaces stamped files with the unstamped archive copies)
+    # re-seed the archive contribution after a manual step 6 (6b copies stamped files
+    # from archive_xmls/; 6c verifies the years)
     python step_1_orchestrator.py --start 6b --stop 6c
 
     # keep the intermediate directories (stop before the clean-up step)
@@ -81,8 +81,9 @@ The publication-year stamp (6c)
 -------------------------------
 ``pub_year_xml.py`` writes a ``<?pub-year YYYY?>`` processing instruction into
 the prolog of every file in ``gpu_bundle/experimental_ner/``, from the year column
-of ``pmids/pmid_pmc_ids.tsv`` (falling back to the date inside the XML). It runs
-after 6/6b because both rewrite the corpus, and it fails the pipeline if any file
+of ``pmids/pmid_pmc_ids.tsv`` (falling back to the date inside the XML). Steps 2, 5
+and 1b/6b already stamp each file as they write it, so 6c normally only verifies
+(head reads, no rewrite); it runs after 6/6b because both rebuild the corpus, and it fails the pipeline if any file
 is left undated -- so stage 2 receives a corpus that carries its own dates and
 never needs the PubMed table or NCBI to place a paper in time.
 

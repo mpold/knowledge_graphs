@@ -82,6 +82,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
+from pub_year_xml import IN_TSV, pmcid_of, stamp_text, table_years   # <?pub-year?> stamp (step 6c verifies)
+
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
@@ -443,6 +445,10 @@ def process_fulltext(pdf):
 # as opposed to an HTTP error code returned by a live server.
 CONN_DOWN = "conn-down"
 
+# PMC id -> publication year from the stage-1 table, stamped into each TEI as it is
+# written (filled by run_grobid; empty = no stamp, step 6c then dates the file).
+_YEARS = {}
+
 
 def _convert_one(pdf, tei):
     """Convert one PDF to TEI, retrying transient failures. Returns (ok, status, reason).
@@ -471,7 +477,7 @@ def _convert_one(pdf, tei):
         if status == 200 and text and text.strip():
             try:
                 with open(tei, "w", encoding="utf-8") as fh:
-                    fh.write(text)
+                    fh.write(stamp_text(text, _YEARS.get(pmcid_of(tei))))
             except OSError as exc:
                 return (False, status, "write failed: %s" % exc)
             return (True, status, "ok")
@@ -529,6 +535,8 @@ def run_grobid():
         _convert_one), permanent ones are logged and skipped. Returns True on run.
     """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    if os.path.isfile(IN_TSV):
+        _YEARS.update(table_years(IN_TSV))
 
     # (1) Build the work list, skipping PDFs already converted.
     pdfs = sorted(glob.glob(os.path.join(INPUT_DIR, "*.pdf")))

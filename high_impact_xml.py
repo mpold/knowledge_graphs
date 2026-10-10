@@ -81,6 +81,8 @@ import time
 import html as _html
 import requests
 
+from pub_year_xml import stamp_text   # <?pub-year?> stamp, verified by step 6c
+
 # --------------------------------------------------------------------------- #
 # Paths / config
 # --------------------------------------------------------------------------- #
@@ -342,7 +344,7 @@ def _prune_stale(path, selected):
           "selection" % (kept, removed), file=sys.stderr)
 
 
-def export(pmid2pmcid):
+def export(pmid2pmcid, years=None):
     _prune_stale(OUT_DIR, set(pmid2pmcid.values()))   # keep finished, drop stale
     failed_skip = load_failed()
     deadline = (time.time() + TIME_BUDGET) if TIME_BUDGET > 0 else 0
@@ -377,7 +379,9 @@ def export(pmid2pmcid):
                 log_failed(pmc_id, "empty-or-nonxml-response")
                 newly_failed += 1
             else:
-                atomic_write(path, text)
+                # Stamp the year now, while the bytes are written anyway, so step 6c
+                # only has to verify instead of rewriting the whole corpus.
+                atomic_write(path, stamp_text(text, (years or {}).get(pmc_id)))
                 fetched += 1
                 if fetched % 200 == 0:
                     print("[export] fetched %d (at %d/%d)" % (fetched, done, total),
@@ -681,7 +685,7 @@ def main():
               % (n_dropped, len(pmid2pmcid)), file=sys.stderr)
     complete = False
     try:
-        complete = export(pmid2pmcid)
+        complete = export(pmid2pmcid, {pmc: m["year"] for pmc, m in meta.items()})
     finally:
         # Always summarise what we have, even after an interruption/time-out.
         build_summary(threshold, meta)

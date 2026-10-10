@@ -112,11 +112,18 @@ and `pub_year_xml.py` as 6c.
   both PMC JATS and GROBID TEI, ignored by parsers). The year comes from the `year` column of
   `pmids/pmid_pmc_ids.tsv` (PubMed; it wins), falling back to the date inside the XML (JATS
   `<pub-date><year>`, TEI `<publicationStmt><date when>`). Offline and idempotent (an existing
-  stamp is replaced; files already correct are not rewritten); `--check` reports without writing.
+  stamp is replaced; files already correct are not rewritten); `--check` reports without writing
+  and counts the files a real run would rewrite. The stamp is normally written **upstream**, as
+  the bytes are first written: steps 2 (`high_impact_xml.py`) and 5 (`grobid_xml.py`) stamp
+  each file they write, and 1b/6b (`from_archive.py`) stamp the `archive_xmls/` staging copy
+  (the archive itself is never touched). So on a normal run 6c only **verifies**. It reads
+  the first 64 KB of each file, where the stamp and year live, and reads a file whole and
+  rewrites it only when its stamp is missing or wrong. On the full corpus (121,630 files, 14 GB)
+  that check takes about a minute.
   It **exits non-zero, listing the files, if any document stays undated**, aborting the pipeline —
   so stage 2 gets a fully dated corpus and never needs the PubMed table or NCBI. On the current
-  corpus: 3,769 XML, all dated from the table (411 state a different year themselves; the table is
-  kept), range 1949–2026.
+  corpus: 121,630 XML, all dated from the table (7,536 state a different year themselves; the
+  table is kept), range 1948–2026.
 - **Impact percentile prompt:** when `step_1_orchestrator.py` runs step 2 it prompts
   `Publication impact percentile (decimal: 0 <= impact <= 1):` on its own line right after
   the query, and hands the entered value to `high_impact_xml.py` on its **STDIN** and as the
@@ -149,8 +156,8 @@ and `pub_year_xml.py` as 6c.
   separated) spares one; `--stop 7` skips the step entirely. Writes `summaries/clean_up.html`.
   > **Re-running after a clean-up** starts from step 2 — the inputs of steps 3–6b are gone. The
   > exception is `--start 6b --stop 6c`: `from_archive.py` re-copies the hit set out of the real
-  > archive (`ARCHIVE_DIR`), so it still works, it just pays the file copy again — and 6c
-  > re-stamps the years on the copies it replaced.
+  > archive (`ARCHIVE_DIR`), so it still works, it just pays the file copy again (stamping the
+  > years as it copies) — and 6c verifies them.
 - **Optional — `subtract.py`** (not one of the eleven, not run by the orchestrator): reads two
   directory paths from **STDIN** and moves entries of `directory_1` whose names also appear in
   `directory_2` into `gpu_bundle/removed/` (relocated, not deleted; name collisions get a
