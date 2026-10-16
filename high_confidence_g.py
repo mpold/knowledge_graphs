@@ -103,8 +103,6 @@ DATA_ROOT = ROOT / "kaggle_working"
 # module-level paths; (re)bound to DATA_ROOT by set_data_root() so --data-root can retarget them
 OUT_DIR = XML_DIR = SENT_DIR = None
 RE_FILE = PMC_YEARS = TARGET_FILE = None
-# every lung_* project caches its slice of the shared corpus under this name
-CONTRIB_NAME = "corpus_contrib.json"
 DISEASE_LIB = CHEM_LIB = None
 JSON_OUT = GRAPH_OUT = None
 
@@ -716,122 +714,6 @@ def graph_payload_multi(triples, flags):
     return {"nodes": nodes, "edges": edges}
 
 
-def corpus_contrib(triples, flags):
-    """This run's contribution to the shared lung corpus: which publications and partners stand
-    behind each entity, as SETS rather than counts.
-
-    Sets, because the sibling corpora overlap -- only by one paper today, but summing counts
-    would make the denominator wrong the moment two queries pull the same article, and a
-    denominator quietly off by a few is worse than one that is obviously off."""
-    flags = flags or {"phenotype": {}, "non_chemical": {}}
-    pm, ents = set(), set()
-    doc = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
-    par = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
-    for t in triples:
-        p = (t.get("pmid") or "?").split(".")[0]
-        pm.add(p)
-        a, b = node_of(t["subject"], flags), node_of(t["object"], flags)
-        for n in (a, b):
-            if n:
-                ents.add(n[1])
-                if n[0] in doc:
-                    doc[n[0]][n[1]].add(p)
-        if a and b and a[1] != b[1]:
-            if a[0] in par:
-                par[a[0]][a[1]].add(b[1])
-            if b[0] in par:
-                par[b[0]][b[1]].add(a[1])
-    return {"pm": sorted(pm), "ents": sorted(ents),
-            "doc": {k: {i: sorted(v) for i, v in d.items()} for k, d in doc.items()},
-            "par": {k: {i: sorted(v) for i, v in d.items()} for k, d in par.items()}}
-
-
-def shared_background(data_root, contrib, src_file):
-    """Merge this run's contribution with every sibling lung_* corpus into one background.
-
-    Every lung analysis then divides by the same denominator, so an odds ratio from one
-    directory means the same thing as one from another. Each directory caches its own
-    contribution next to its databases (keyed to the source file's size and mtime, so an
-    updated pipeline invalidates it); a sibling that has never been run is simply absent, and
-    the page says which corpora it actually covers rather than pretending to totality."""
-    root = Path(data_root).resolve()
-    cache = root / "databases" / CONTRIB_NAME
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    st = src_file.stat()
-    payload = dict(contrib, _src={"size": st.st_size, "mtime": int(st.st_mtime)})
-    cache.write_text(json.dumps(payload), encoding="utf-8")
-
-    family = root.parent.parent            # <...>/relationship_graphs/<project>/<data_root>
-    here = root.parent.name
-    parts, missing = {here: contrib}, []
-    for sib in sorted(family.glob("lung_*")):
-        if not sib.is_dir() or sib.name == here:
-            continue
-        f = sib / root.name / "databases" / CONTRIB_NAME
-        if not f.exists():
-            missing.append(sib.name)
-            continue
-        try:
-            parts[sib.name] = json.loads(f.read_text(encoding="utf-8"))
-        except Exception:
-            missing.append(sib.name)
-
-    pm, ents = set(), set()
-    doc = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
-    par = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
-    for c in parts.values():
-        pm.update(c.get("pm", ()))
-        ents.update(c.get("ents", ()))
-        for kind in doc:
-            for i, v in (c.get("doc", {}).get(kind) or {}).items():
-                doc[kind][i].update(v)
-            for i, v in (c.get("par", {}).get(kind) or {}).items():
-                par[kind][i].update(v)
-    return {"n": len(pm), "ne": len(ents),
-            "doc": {k: {i: len(v) for i, v in d.items()} for k, d in doc.items()},
-            "par": {k: {i: len(v) for i, v in d.items()} for k, d in par.items()},
-            "src": sorted(parts), "missing": missing}
-
-
-def background_index(triples, flags):
-    """Per-entity denominators over ALL normalized triples, for the in-browser Fisher test.
-
-    Two backgrounds, because the panel ranks on two different units and a test must use the
-    unit it is ranking on:
-      doc  publications mentioning the entity, and `n`, the corpus publication count
-      par  distinct partners the entity is related to, and `ne`, the corpus entity count
-
-    Deliberately score-unfiltered: the page tests a filtered view against the corpus, so the
-    corpus must not already be filtered by the cutoff being tested. Keyed through node_of, the
-    same identity the graph nodes use -- including its ignore lists -- so a count joins to a
-    node without any string matching.
-
-    The population is "documents with an extracted candidate pair", not "documents mentioning
-    the entity": a gene named only in a methods section never enters either column of the
-    table. That is what a p-value from this index is about."""
-    flags = flags or {"phenotype": {}, "non_chemical": {}}   # tolerate a caller with no flags
-    pm, ents = set(), set()
-    doc = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
-    par = {"gene": collections.defaultdict(set), "chemical": collections.defaultdict(set)}
-    for t in triples:
-        p = (t.get("pmid") or "?").split(".")[0]
-        pm.add(p)
-        a, b = node_of(t["subject"], flags), node_of(t["object"], flags)
-        for n in (a, b):
-            if n:
-                ents.add(n[1])
-                if n[0] in doc:
-                    doc[n[0]][n[1]].add(p)
-        if a and b and a[1] != b[1]:
-            if a[0] in par:
-                par[a[0]][a[1]].add(b[1])
-            if b[0] in par:
-                par[b[0]][b[1]].add(a[1])
-    return {"n": len(pm), "ne": len(ents),
-            "doc": {k: {i: len(v) for i, v in d.items()} for k, d in doc.items()},
-            "par": {k: {i: len(v) for i, v in d.items()} for k, d in par.items()}}
-
-
 def read_pubmed_query():
     """Pull the PubMed query out of summaries/pubmed_query.html (the step-1 publications
     summary), i.e. the value after 'Query (read strictly from <STDIN>):'. Looks under the
@@ -893,44 +775,6 @@ __LIBTAG__
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
  #catfilters .cnt{color:#5b6677;font-size:11px}
- #siglist{margin-top:5px}
- #siglist .sig{display:flex;align-items:center;gap:6px;padding:1px 2px;font-size:12px;cursor:pointer;border-radius:3px}
- #siglist .sig:hover{background:#eef2f7}
- #siglist .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- #siglist .vl{width:52px;text-align:right;color:#5b6677;font-variant-numeric:tabular-nums;font-size:11px}
- #siglist .vl b{color:#1c2330}
- #siglist .pc{width:40px;text-align:right;color:#2b6cb0;font-size:11px;font-variant-numeric:tabular-nums}
- #sighdr{font-size:11px;color:#5b6677;text-align:right;margin-top:5px}
- #sigtab,#sigboot{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:12px}
- #sigtab:hover,#sigboot:hover{background:#dde4ee}
- #sigboot{margin-left:14px}
- #sigboot:disabled{opacity:.6;cursor:default}
- /* The table replaces the CANVAS, not the controls: it covers the graph and the left column, but
-    stops short of the right panel (layoutTable measures it), which stays live above the overlay.
-    Filtering while reading the table is the point -- every change re-runs the ranking under it. */
- #sigtable{display:none;position:absolute;top:0;left:0;right:0;bottom:0;z-index:20;background:#fff;overflow:auto;padding:16px 20px}
- #sigtable.open+#panel,#panel.overtable{z-index:25}
- #sigtable.open{display:block}
- /* inline-block so the "i" sits beside the title rather than under it */
- #sigtable h2{font-size:15px;margin:0;color:#1c2330;display:inline-block}
- #sigtable table{border-collapse:collapse;font-size:13px;margin-top:10px;min-width:620px}
- #sigtable th,#sigtable td{padding:3px 8px;border-bottom:1px solid #e9edf3;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
- #sigtable th{position:sticky;top:0;background:#fff;color:#2b6cb0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #cdd5e0}
- #sigtable th.on{font-weight:700;text-decoration:underline}
- #sigtable td.nm,#sigtable th.nm{text-align:left;position:sticky;left:0;background:#fff}
- #sigtable tbody tr:hover td.nm{background:#eef2f7}
- #sigtbody{overflow-x:auto}   /* the table scrolls sideways inside the page, name column pinned */
- #sigtable tbody tr:hover{background:#eef2f7}
- #sigyr{margin:10px 0 2px;font-size:13px}
- /* an undefined test is not a missing feature: say so where the columns would have been */
- #signotest{margin:8px 0 2px;padding:6px 10px;border:1px solid #e5cf9a;border-left:4px solid #d59a2e;
-            border-radius:6px;background:#fdf7e8;font-size:12px;color:#5b4a1f;max-width:760px}
- /* the bars live here now: a table row has the width for them, a 320px panel row does not */
- #sigtable td.bar,#sigtable th.bar{width:130px;padding-right:0}
- #sigtable td.bar span{display:block;height:9px;background:#2b6cb0;border-radius:3px;min-width:1px}
- #sigclose{margin-left:14px;background:#eef2f7;border:1px solid #cdd5e0;border-radius:6px;padding:3px 12px;cursor:pointer;font-size:13px}
- #sigclose:hover{background:#dde4ee}
- #sighelp2{max-width:640px}
  #zoom button,#srcbtns button,#labelbtns button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
  #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button{margin-bottom:4px}
@@ -963,9 +807,9 @@ __LIBTAG__
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
  <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease">Disease names</button><button class="lblb" data-kind="chemical">Drug names</button></span>
   <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed.</div></div>
- <div class="row">Shrink periphery: <b id="shv">0%</b> <button class="ihelp" aria-label="About shrink periphery" aria-expanded="false">i</button><br><input id="shrink" type="range" min="0" max="90" step="5" value="0" aria-label="Shrink periphery">
+ <div class="row">Shrink periphery: <b id="shv">90%</b> <button class="ihelp" aria-label="About shrink periphery" aria-expanded="false">i</button><br><input id="shrink" type="range" min="0" max="90" step="5" value="90" aria-label="Shrink periphery">
   <div class="mut help">Pulls everything past the middle distance inward, so the small clusters physics flung to the edges come back where you can read them without zooming out. The centre is left alone.</div></div>
- <div class="row">Expand center: <b id="exv">0%</b> <button class="ihelp" aria-label="About expand center" aria-expanded="false">i</button><br><input id="expand" type="range" min="0" max="100" step="5" value="0" aria-label="Expand center">
+ <div class="row">Expand center: <b id="exv">100%</b> <button class="ihelp" aria-label="About expand center" aria-expanded="false">i</button><br><input id="expand" type="range" min="0" max="100" step="5" value="100" aria-label="Expand center">
   <div class="mut help">Blows the crowded core outward and carries the rest along, thinning the hairball without moving anything past its neighbours. Both reshape the drawn layout only &mdash; radially, from the stabilized positions, so nothing changes order and returning a slider to 0% restores the layout exactly.</div></div>
  <div class="row" id="tissuerow"><label><input type=checkbox id="tissuestack" checked> Stack same-tissue diseases</label> <button class="ihelp" aria-label="About tissue stacking" aria-expanded="false">i</button>
   <div class="mut help">Drops the disease nodes naming one tissue onto a single spot, overlapping, so <em>lung cancer</em>, <em>lung adenocarcinoma</em> and <em>non-small cell lung carcinoma</em> read as one place on the canvas instead of three. They stay separate nodes with their own edges and tooltips &mdash; only their positions are pooled, after the layout settles. Tissue is read from the name (<span id="tissuen"></span>).</div></div>
@@ -974,14 +818,6 @@ __LIBTAG__
   <div class="legend" id="disfilters"></div>
   <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
- <div class="row" id="sigrow">Significance in view <button class="ihelp" aria-label="About significance in view" aria-expanded="false">i</button><br>
-  <select id="sigkind"><option value="gene">genes</option><option value="chemical">drugs</option></select>
-  <select id="sigmeasure"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
-  <div class="mut" id="signote" style="display:none"></div>
-  <div id="sighdr">publications &nbsp;&nbsp;z</div>
-  <div id="siglist"></div>
-  <button id="sigtab">Full table view</button>
-  <div class="mut help" id="sighelp">The top six of whatever the graph is <em>currently drawing</em>: every control reshapes this too &mdash; score, year, text, node and relation type, training set, the support thresholds and the structural pruning &mdash; and it is recomputed on every redraw, so the ranking and the picture can never disagree. Widen the filters to read it as the corpus; narrow them to ask the same question of a slice. <b>Publications</b> counts the distinct papers behind a node's relations &mdash; the measure the edge thicknesses use; <b>partners</b> counts the distinct entities it is related to (breadth, not weight); <b>sentences</b> counts the unique sentences supporting them. The second column is <b>z</b>: standard deviations above the mean on a log&#8321;&#8320; scale, <em>among its own kind</em>, since a gene is only remarkable among genes. The percentile is there too (hover a row), but it saturates &mdash; every one of a top six reads 99.9%, while z still separates them. In the panel list, click a row to select and centre that node; if the current filters have removed it, the details box says so rather than moving the view. Table rows do not navigate &mdash; they are there to be read and sorted. <b>Bootstrap CIs</b>, in the table, resamples the view's <em>publications</em> with replacement 300 times and reports 95% intervals for each count and each rank &mdash; papers, because that is the independent unit; resampling sentences would give intervals several times too tight. Ranks at the top are firm (1&ndash;2) and the tail is not (a gene ranked 500th may belong anywhere from 264th to 1447th), which is the honest width of &ldquo;top ten&rdquo;. <b>OR vs corpus</b> and <b>q</b> ask a different question: is this entity over-represented in the current view compared with the whole normalized corpus? A 2&times;2 over publications &mdash; in view or not, mentions it or not &mdash; by Fisher's exact test, with a Haldane-corrected odds ratio, a Woolf interval and Benjamini-Hochberg q-values over the entities with at least 5 corpus papers. Type &ldquo;immunotherapy&rdquo; and PDCD1, CD274 and CTLA4 come out at OR 5&ndash;9; EGFR comes out <em>depleted</em>. It cannot say an entity is specific to lung adenocarcinoma &mdash; every paper here is a lung paper, so the contrast is view-against-corpus, never corpus-against-literature. <b>Full table view</b> opens the whole ranking &mdash; every node of that kind, all three counts, both statistics and a bar, sortable by any column, with its own year handles.</div></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
 <div id="panel">
@@ -1011,20 +847,8 @@ __KINDROW__
  <div class="row mut" id="stats"></div>
 </div>
 <div id="net"></div>
-<div id="sigtable"><h2 id="sigttl"></h2><button class="ihelp" data-help="sig" aria-label="About significance in view" aria-expanded="false">i</button>
- <div class="mut help" data-help="sig" id="sighelp2"></div>
- <div class="mut" id="sigsub"></div>
- <div class="mut" id="signote2" style="display:none"></div>
- <div id="signotest" style="display:none"></div>
- <div id="sigyr" class="row"><select id="sigkind2"><option value="gene">genes</option><option value="chemical">drugs</option></select>
-  <select id="sigmeasure2"><option value="pub">by publications</option><option value="deg">by partners</option><option value="sent">by sentences</option></select>
-  &nbsp; Year: <b id="yrlab2"></b> <input id="yrlo2" type="range" style="width:120px"> <input id="yrhi2" type="range" style="width:120px">
-  <button id="sigboot">Bootstrap CIs</button>
-  <button id="sigclose">Graph view</button></div>
- <div id="sigtbody"></div></div>
 <script>
 const DATA=__PAYLOAD__;
-const BG=__BACKGROUND__;   // per-entity document counts over the whole normalized corpus
 const CCOLOR=__CCOLOR__;
 const DIRECTED=new Set(['activates','inhibits']);   // the only relations with a direction
 const MINY=__MINY__, MAXY=__MAXY__;
@@ -1386,19 +1210,10 @@ function build(thr){
    const csz={};for(const n in comp)csz[comp[n]]=(csz[comp[n]]||0)+1;
    edges=edges.filter(o=>csz[comp[o.e.from]]>=mc);
  }
- // --- the ranking ---------------------------------------------------------------------------
- DRAWN_EDGES=edges;BOOT=null;          // a new view invalidates any bootstrap taken of the old one
- (function(){const pm=new Set(), nd=new Set();
-  edges.forEach(o=>{nd.add(o.e.from);nd.add(o.e.to);o.vis.forEach(s=>pm.add(s.pmid));});
-  VIEW_PUBS=pm.size;VIEW_ENTS=nd.size;})();
- sigCompute(edges);
- ENRICH=enrichCompute(VIEW_PUBS,VIEW_ENTS);
  // the disease keep-list, built from what the controls above left and applied after it, so the
  // menu never filters itself out of existence (see buildDiseaseFilter)
  buildDiseaseFilter(edges);
  if(DIS_KEEP.size)edges=edges.filter(o=>disPass(o.e.from)&&disPass(o.e.to));
- sigRender();
- if(SIGTAB_OPEN)sigTable();
  updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text, disease)
  const keep=new Set();edges.forEach(o=>{keep.add(o.e.from);keep.add(o.e.to);});
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
@@ -1451,7 +1266,7 @@ let CATTOT={};
 // than the edge count -- they answer "how many edges can show me this label", which is the
 // question the tick boxes and the "in view" half answer too.
 function catsOf(e){const c={};e.sents.forEach(s=>c[sentCat(e,s)]=1);return Object.keys(c);}
-function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>CATTOT[c]=(CATTOT[c]||0)+1));const cats=Object.keys(CATTOT).sort((a,b)=>CATTOT[b]-CATTOT[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+esc(c)+'" checked> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+esc(c)+' <span class=cnt data-cat="'+esc(c)+'">('+CATTOT[c]+')</span></label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
+function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>CATTOT[c]=(CATTOT[c]||0)+1));const cats=Object.keys(CATTOT).sort((a,b)=>CATTOT[b]-CATTOT[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+esc(c)+'"'+(c==='binds'?' checked':'')+'> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+esc(c)+' <span class=cnt data-cat="'+esc(c)+'">('+CATTOT[c]+')</span></label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
 // Counts are LIVE: "(total · N in view)" is recomputed from the sentences actually drawn, so
 // "N in view" is exactly the number of drawn edges that can show you a sentence tagged with
 // that relation -- 0 means no visible sentence carries the label, never "0 but there it is in
@@ -1509,383 +1324,6 @@ document.getElementById('hops').addEventListener('change',()=>build(+thr.value))
 const txtEl=document.getElementById('textfilter');let txtTimer=null;   // debounce: each keystroke would otherwise rebuild the whole network
 txtEl.addEventListener('input',()=>{clearTimeout(txtTimer);txtTimer=setTimeout(()=>build(+thr.value),350);});
 txtEl.addEventListener('keydown',ev=>{if(ev.key==='Enter'){clearTimeout(txtTimer);build(+thr.value);}});
-// --- significance in view ----------------------------------------------------------------
-// The graph shows which relations survive your filters; this ranks the NODES behind them, so
-// you can ask "and who carries this view" without counting edges by eye. It is computed from
-// the drawn edge list on every redraw -- open every filter and it reads as the corpus, narrow
-// them and it answers the same question of a slice.
-//   publications = distinct papers behind the node's relations (what edge thickness uses)
-//   partners     = distinct entities it is related to -- breadth, not weight
-//   sentences    = unique sentences supporting those relations
-// Publications leads because it is the one that cannot be inflated by a single talkative paper.
-// Computed from the edges the graph is actually DRAWING, so the ranking is always an answer
-// about the picture in front of you: every control that shapes the graph -- score, year, text,
-// relation type, training set, node type, the support thresholds and the structural pruning --
-// reshapes this too, and build() recomputes it on every pass.
-let SIG=[];
-function sigCompute(drawn){
- const acc={};
- const touch=id=>acc[id]||(acc[id]={id:id,label:labelById[id]||id,kind:KIND[id]||'gene',
-                                    pubs:new Set(),partners:new Set(),sents:new Set()});
- (drawn||[]).forEach(o=>{
-  const a=touch(o.e.from),b=touch(o.e.to);
-  a.partners.add(o.e.to);b.partners.add(o.e.from);
-  o.vis.forEach(s=>{a.pubs.add(s.pmid);b.pubs.add(s.pmid);a.sents.add(s.text);b.sents.add(s.text);});
- });
- SIG=Object.keys(acc).map(id=>{const n=acc[id];
-   return {id:id,label:n.label,kind:n.kind,pub:n.pubs.size,deg:n.partners.size,sent:n.sents.size};});
- sigStats();
-}
-// Two statistics per node, per measure, computed within its own kind -- a gene is only
-// remarkable among genes. PERCENTILE is a mid-rank over the whole corpus (ties share their
-// rank), which needs no assumption about the distribution; this one is brutally heavy-tailed,
-// so a mean would be meaningless. Z is on log10 counts, where the tail is closer to symmetric,
-// and answers the other question: not "how many below you" but "how far out".
-function sigStats(){
- ['gene','disease','chemical'].forEach(k=>{
-  const rows=SIG.filter(s=>s.kind===k), n=rows.length;
-  if(!n)return;
-  ['pub','deg','sent'].forEach(m=>{
-   const vals=rows.map(s=>s[m]).sort((a,b)=>a-b);
-   const lg=rows.map(s=>Math.log10(Math.max(1,s[m])));
-   const mu=lg.reduce((a,b)=>a+b,0)/n;
-   const sd=Math.sqrt(lg.reduce((a,b)=>a+(b-mu)*(b-mu),0)/n)||1;
-   const bound=(v,inc)=>{let lo=0,hi=n;while(lo<hi){const mid=(lo+hi)>>1;
-     if(inc?vals[mid]<=v:vals[mid]<v)lo=mid+1;else hi=mid;}return lo;};
-   rows.forEach(s=>{const b=bound(s[m],false),e=bound(s[m],true);
-    (s.pct=s.pct||{})[m]=100*(b+(e-b)/2)/n;
-    (s.z=s.z||{})[m]=(Math.log10(Math.max(1,s[m]))-mu)/sd;});
-  });
- });
-}
-function pctStr(p){return (p>=99.95?'99.9':p.toFixed(1))+'%';}
-function zStr(z){return (z>=0?'+':'')+z.toFixed(1);}
-// --- bootstrap over publications ---------------------------------------------------------
-// The counts are one draw from the literature; these say how much of the ranking would survive
-// another. Resample the PAPERS of the current view with replacement -- papers, because that is
-// the independent unit: sentences inside one article are the same authors saying the same thing
-// twice, and resampling them would give intervals several times too tight. Recompute the measure
-// and the whole ordering per replicate, then take percentile intervals of each node's count and
-// of its rank. A rank interval spanning 3-40 is the honest reading of "top ten": the leaderboard
-// is a sample statistic, and this is the width of the uncertainty behind it.
-// --- enrichment against the corpus --------------------------------------------------------
-// The ranking says who carries this view; this says whether they carry it MORE than they carry
-// the corpus. Per entity, a 2x2 over publications -- in view / not, mentions it / not -- tested
-// with Fisher's exact test against BG, the document counts over every normalized triple in the
-// file, score-unfiltered on purpose: a corpus already filtered by the cutoff you are testing is
-// no denominator at all. The odds ratio carries a Woolf interval on the 0.5-corrected log OR
-// (an approximation, not the conditional MLE), and q is Benjamini-Hochberg over the entities
-// actually testable in this view.
-//
-// What it cannot say: whether a gene is specific to lung adenocarcinoma. Every paper here is a
-// lung paper, so the contrast is view-against-corpus, never corpus-against-literature.
-// log-factorials, grown on demand: sized to the corpus is enough for the tables this page
-// builds (the four cells always sum to N), but a table that silently runs off its end returns
-// exp(NaN) = 0 -- a p-value of zero that looks like a discovery. So it extends instead.
-let LGF=(function(){const N=(BG&&BG.n?BG.n:0)+8, a=new Float64Array(N+1);
- for(let i=2;i<=N;i++)a[i]=a[i-1]+Math.log(i);return a;})();
-function lgf(i){
- if(i>=LGF.length){const old=LGF, n=Math.max(i+1,old.length*2), a=new Float64Array(n);
-  a.set(old);for(let k=old.length;k<n;k++)a[k]=a[k-1]+Math.log(k);LGF=a;}
- return LGF[i];
-}
-function lhyper(a,r1,r2,n){return lgf(r1)-lgf(a)-lgf(r1-a)+lgf(n-r1)-lgf(r2-a)-lgf(n-r1-r2+a)+lgf(r2)+lgf(n-r2)-lgf(n);}
-function fisherP(a,b,c,d){                      // two-sided, by summing tables no likelier than seen
- const n=a+b+c+d, r1=a+b, r2=a+c;
- if(!n||!r1||!r2||r1===n||r2===n)return 1;
- const lo=Math.max(0,r1+r2-n), hi=Math.min(r1,r2);
- const obs=lhyper(a,r1,r2,n), eps=1e-9;
- let p=0;
- for(let k=lo;k<=hi;k++){const l=lhyper(k,r1,r2,n);if(l<=obs+eps)p+=Math.exp(l);}
- return Math.min(1,p);
-}
-function oddsRatio(a,b,c,d){                    // Haldane-Anscombe: 0.5 keeps a zero cell finite
- const A=a+0.5,B=b+0.5,C=c+0.5,D=d+0.5, or=(A*D)/(B*C);
- const se=Math.sqrt(1/A+1/B+1/C+1/D), l=Math.log(or);
- return {or:or,lo:Math.exp(l-1.96*se),hi:Math.exp(l+1.96*se)};
-}
-const ENRICH_MIN=5;                             // below ~5 in the corpus Fisher cannot reach significance
-// The unit follows the ranking. By publications the table is papers-with-the-entity out of the
-// corpus' papers; by PARTNERS it is entities-related-to-it out of the corpus' entities, against
-// a separate partner background -- testing breadth against a paper denominator would be
-// comparing two different things. Sentences fall back to the publication test on purpose: they
-// are pseudo-replicates, and a Fisher test on them would be anticonservative by a large factor.
-function enrichUnit(){return sigMeas()==='deg'?'par':'doc';}
-// The corpus count is known for every node whether or not its row can be TESTED -- it comes
-// straight from BG. Tying it to the test result printed a blank next to a positive view count,
-// which reads as "0 corpus papers behind 37 in view", an impossibility: the corpus contains the
-// view. Untestable now means an empty OR and q, never an empty denominator.
-function bgCount(s){const m=(BG&&BG[enrichUnit()]&&BG[enrichUnit()][s.kind])||{};
- const v=m[s.id];return v===undefined?null:v;}
-function enrichCompute(viewPubs,viewEnts){
- const kind=sigKind(), unit=enrichUnit();
- const bg=(BG&&BG[unit]&&BG[unit][kind])||{};
- const N=(unit==='par'?(BG&&BG.ne):(BG&&BG.n))||0;
- const V=unit==='par'?viewEnts:viewPubs;
- const val=s=>unit==='par'?s.deg:s.pub;
- if(!N||!V)return null;
- const out={}, tested=[];
- let nocontrast=0, belowfloor=0;
- SIG.forEach(s=>{
-  if(s.kind!==kind)return;
-  const c=bg[s.id];                             // corpus documents (or partners) for it
-  if(!c||c<ENRICH_MIN){belowfloor++;return;}
-  const a=Math.min(val(s),c), b=Math.max(0,V-a), cc=Math.max(0,c-a), d=Math.max(0,N-V-cc);
-  // Nothing outside the view: every paper (or partner) this entity has is already in front of
-  // you, so there is no contrast to test. The Haldane 0.5 would still hand back a huge odds
-  // ratio and a tiny q -- an artefact of the correction, not a finding -- so the row says
-  // nothing instead. On an unfiltered view that is every row, which is the honest answer.
-  if(cc<1){nocontrast++;return;}
-  const r=oddsRatio(a,b,cc,d);
-  out[s.id]={a:a,c:c,or:r.or,lo:r.lo,hi:r.hi,p:fisherP(a,b,cc,d)};
-  tested.push(s.id);
- });
- tested.sort((x,y)=>out[x].p-out[y].p);         // Benjamini-Hochberg over what was testable here
- const m=tested.length;
- let prev=1;
- for(let i=m-1;i>=0;i--){const id=tested[i];
-  prev=Math.min(prev,out[id].p*m/(i+1));out[id].q=prev;}
- return {kind:kind,unit:unit,n:N,view:V,tested:m,nocontrast:nocontrast,belowfloor:belowfloor,rows:out};
-}
-function orStr(e){return e?e.or.toFixed(2)+' <span class=mut>('+e.lo.toFixed(2)+'&ndash;'+e.hi.toFixed(2)+')</span>':'&mdash;';}
-function qStr(e){return e?(e.q<1e-4?e.q.toExponential(1):e.q.toFixed(4)):'&mdash;';}
-let DRAWN_EDGES=[], BOOT=null, ENRICH=null, VIEW_PUBS=0, VIEW_ENTS=0;
-function bootstrapCIs(B){
- const kind=sigKind(), meas=sigMeas();
- const kidx=new Map(), ids=[];
- SIG.forEach(s=>{if(s.kind===kind){kidx.set(s.id,ids.length);ids.push(s.id);}});
- const K=ids.length;
- if(!K)return null;
- const pidx=new Map(), inc=[], eList=[];
- const pi=pm=>{let k=pidx.get(pm);if(k===undefined){k=inc.length;pidx.set(pm,k);inc.push(null);}return k;};
- // per paper: which nodes it supports, and with what weight (1 per paper, or its sentence count)
- const acc=[];
- DRAWN_EDGES.forEach(o=>{
-  const a=kidx.has(o.e.from)?kidx.get(o.e.from):-1, b=kidx.has(o.e.to)?kidx.get(o.e.to):-1;
-  const pset=new Set();
-  o.vis.forEach(s=>{
-   const p=pi(s.pmid);pset.add(p);
-   if(!acc[p])acc[p]=new Map();
-   [a,b].forEach(n=>{if(n<0)return;let t=acc[p].get(n);if(!t){t=new Set();acc[p].set(n,t);}t.add(s.text);});
-  });
-  if(a>=0||b>=0)eList.push({a:a,b:b,p:[...pset]});
- });
- const P=inc.length;
- for(let p=0;p<P;p++){
-  const m=acc[p]||new Map(), n=[], w=[];
-  m.forEach((texts,node)=>{n.push(node);w.push(meas==='sent'?texts.size:1);});
-  inc[p]={n:Int32Array.from(n),w:Float64Array.from(w)};
- }
- const counts=[], ranks=[];
- for(let k=0;k<K;k++){counts.push(new Float64Array(B));ranks.push(new Int32Array(B));}
- const val=new Float64Array(K), draw=new Int32Array(P), order=new Int32Array(K);
- for(let k=0;k<K;k++)order[k]=k;
- for(let r=0;r<B;r++){
-  draw.fill(0);
-  for(let i=0;i<P;i++)draw[(Math.random()*P)|0]++;
-  val.fill(0);
-  if(meas==='deg'){                     // distinct partners: an edge counts once if it survives
-   for(let i=0;i<eList.length;i++){const e=eList[i];
-    let live=false;
-    for(let q=0;q<e.p.length;q++)if(draw[e.p[q]]>0){live=true;break;}
-    if(!live)continue;
-    if(e.a>=0)val[e.a]++;
-    if(e.b>=0)val[e.b]++;}
-  }else{                                // publications / sentences: additive over sampled papers
-   for(let p=0;p<P;p++){const c=draw[p];if(!c)continue;
-    const {n,w}=inc[p];
-    for(let q=0;q<n.length;q++)val[n[q]]+=c*w[q];}
-  }
-  const ord=Array.prototype.slice.call(order).sort((x,y)=>val[y]-val[x]);
-  for(let k=0;k<K;k++){const node=ord[k];ranks[node][r]=k+1;}
-  for(let k=0;k<K;k++)counts[k][r]=val[k];
- }
- const q=(arr,p)=>{const a=Array.prototype.slice.call(arr).sort((x,y)=>x-y);
-   return a[Math.min(a.length-1,Math.max(0,Math.round(p*(a.length-1))))];};
- const out={kind:kind,meas:meas,B:B,count:{},rank:{}};
- ids.forEach((id,k)=>{out.count[id]=[q(counts[k],0.025),q(counts[k],0.975)];
-                      out.rank[id]=[q(ranks[k],0.025),q(ranks[k],0.975)];});
- return out;
-}
-const SIG_TOP=6;                       // a teaser in the panel; the full ranking is the table
-const SIG_LAB={pub:'publications',deg:'partners',sent:'sentences'};
-// The chemical nodes are whatever ChEBI recognised in the text, which mixes therapeutics with
-// reagents -- LY294002 ranks high here and has never been in a patient. Say so wherever the
-// drug list is on screen, rather than leaving the reader to spot it.
-const SIG_DRUGNOTE='The list contains both (1) clinically used drugs and (2) lab chemicals used only in experiments.';
-function sigNote(id,kind){const el=document.getElementById(id);if(!el)return;
- el.innerHTML=kind==='chemical'?SIG_DRUGNOTE:'';
- el.style.display=kind==='chemical'?'':'none';}
-let SIG_ROWS=[];
-function sigRender(){
- const kind=(document.getElementById('sigkind')||{}).value||'gene';
- const meas=(document.getElementById('sigmeasure')||{}).value||'pub';
- SIG_ROWS=SIG.filter(s=>s.kind===kind).sort((a,b)=>(b[meas]-a[meas])||a.label.localeCompare(b.label)).slice(0,SIG_TOP);
- document.getElementById('siglist').innerHTML=SIG_ROWS.map((s,i)=>
-   '<div class="sig" data-i="'+i+'" title="'+esc(s.label)+' &mdash; '+s.pub+' publications &middot; '
-   +s.deg+' partners &middot; '+s.sent+' sentences (corpus-wide) &middot; percentile '+pctStr(s.pct[meas])
-   +' &middot; z '+zStr(s.z[meas])+' among '+s.kind+'s">'
-   +'<span class=nm>'+(i+1)+'. '+esc(s.label)+'</span>'
-   // one number, the ranked measure -- the other two are a column click away in the table
-   +'<span class=vl>'+s[meas]+'</span>'
-   // z, not the percentile: every one of a top-6 sits at 99.9%, while z still separates them
-   +'<span class=pc>'+zStr(s.z[meas])+'</span></div>').join('')
-   ||'<div class=mut>no '+esc(kind)+' nodes in this graph</div>';
- const hdr=document.getElementById('sighdr');
- if(hdr)hdr.innerHTML=SIG_LAB[meas]+' &nbsp;&nbsp;z';
- sigNote('signote',kind);
- document.querySelectorAll('#siglist .sig').forEach(el=>
-   el.addEventListener('click',()=>sigFocus(SIG_ROWS[parseInt(el.getAttribute('data-i'))])));
-}
-// select and centre the node; a node the current filters removed reports that instead of
-// silently doing nothing (or worse, moving the view to where it is not)
-function sigFocus(s){
- if(!s)return;
- const info=document.getElementById('info');
- const head='<b>'+esc(s.label)+'</b> <span class=mut>(corpus-wide: '+s.pub+' publications &middot; '
-   +s.deg+' partners &middot; '+s.sent+' sentences)</span>';
- try{network.selectNodes([s.id]);network.focus(s.id,{scale:1.3,animation:true});info.innerHTML=head;}
- catch(err){info.innerHTML=head+'<div class=mut>Not in the current view &mdash; loosen the filters to see it.</div>';}
-}
-// Two pairs of selects, one range: the panel's are the source of truth and the table's mirror
-// them, so switching to drugs inside the table leaves the panel showing drugs when you close it.
-function sigSync(fromTable){
- const k=document.getElementById('sigkind'), m=document.getElementById('sigmeasure');
- const k2=document.getElementById('sigkind2'), m2=document.getElementById('sigmeasure2');
- if(fromTable&&k2){k.value=k2.value;m.value=m2.value;}
- else if(k2){k2.value=k.value;m2.value=m.value;}
- SIGTAB_SORT=null;                      // the ranking changed; drop a column sort from before it
- ENRICH=enrichCompute(VIEW_PUBS,VIEW_ENTS);   // by-partners tests partners, not papers
- sigRender();
- if(SIGTAB_OPEN)sigTable();
-}
-['sigkind','sigmeasure'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('change',()=>sigSync(false));});
-['sigkind2','sigmeasure2'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('change',()=>sigSync(true));});
-// NB: the first sigCompute() runs with the year sliders, below -- before they carry values
-// activeYears() is NaN and every sentence falls outside the window
-// --- table view -------------------------------------------------------------------------
-// The panel list is a top-15 teaser; this is the whole ranking, every node of the kind with
-// all three counts and both statistics, sortable by any column. It replaces the canvas rather
-// than floating over it -- reading a table and reading a graph are different jobs.
-let SIGTAB_OPEN=false, SIGTAB_SORT=null, SIGTAB_ROWS=[];
-const SIGCOLS=[['nm','node',s=>esc(s.label)],['pub','publications',s=>s.pub],['deg','partners',s=>s.deg],
-               ['sent','sentences',s=>s.sent],['pct','percentile',s=>pctStr(s.pct[sigMeas()])],
-               ['z','z (log₁₀)',s=>zStr(s.z[sigMeas()])],
-               ['cic','count 95% CI',s=>bootStr(BOOT&&BOOT.count[s.id])],
-               ['cir','rank 95% CI',s=>bootStr(BOOT&&BOOT.rank[s.id])],
-               ['corpus',()=>enrichUnit()==='par'?'corpus partners':'corpus papers',s=>{const v=bgCount(s);return v===null?'&mdash;':v;}],
-               ['or','OR vs corpus',s=>orStr(ENRICH&&ENRICH.rows[s.id])],
-               ['q','q (BH)',s=>qStr(ENRICH&&ENRICH.rows[s.id])],
-               // the bar is drawn from whichever measure the table is sorted by, so it says which
-               ['bar',()=>'relative '+SIG_LAB[barMeas()],null]];
-function barMeas(){const m=SIGTAB_SORT||sigMeas();return ['pub','deg','sent'].indexOf(m)>=0?m:sigMeas();}
-// Columns only exist once they carry something. Twelve of them ran off the right edge of the
-// space left beside the panel, which is how a computed enrichment can look like a missing one:
-// the bootstrap pair appears when you press the button, the enrichment trio when there is a
-// contrast to test, and the table stays narrow enough to read until then.
-function sigCols(){return SIGCOLS.filter(([k])=>
-  (k==='cic'||k==='cir')?!!BOOT
-  :(k==='corpus')?!!(BG&&BG.n)
-  :((k==='or'||k==='q')?!!(ENRICH&&ENRICH.tested):true));}
-const SIGSORTABLE=new Set(['nm','pub','deg','sent','pct','z','corpus','or','q']);   // intervals are not a sort key
-function sigSortVal(s,k){                       // enrichment columns sort on their own numbers
- const e=ENRICH&&ENRICH.rows[s.id];
- if(k==='corpus'){const v=bgCount(s);return v===null?-1:v;}
- if(k==='or')return e?e.or:-1;
- if(k==='q')return e?-e.q:-Infinity;            // smallest q first
- return s[k];
-}
-function bootStr(iv){return iv?(iv[0]===iv[1]?String(iv[0]):iv[0]+'&ndash;'+iv[1]):'&mdash;';}
-function sigKind(){return (document.getElementById('sigkind')||{}).value||'gene';}
-function sigMeas(){return (document.getElementById('sigmeasure')||{}).value||'pub';}
-function sigTable(){
- const kind=sigKind(), meas=SIGTAB_SORT||sigMeas();
- SIGTAB_ROWS=SIG.filter(s=>s.kind===kind)
-   .sort((a,b)=>{
-   if(meas==='nm')return a.label.localeCompare(b.label);
-   if(meas==='pct'||meas==='z')return (b[meas][sigMeas()]-a[meas][sigMeas()])||a.label.localeCompare(b.label);
-   return (sigSortVal(b,meas)-sigSortVal(a,meas))||a.label.localeCompare(b.label);});
- const KL={gene:'genes',chemical:'drugs',disease:'diseases'};
- document.getElementById('sigttl').innerHTML='Significance in view &mdash; '+(KL[kind]||kind);
- const yr=activeYears();
- document.getElementById('sigsub').innerHTML=SIGTAB_ROWS.length+' '+(KL[kind]||kind)+' in the graph as currently drawn &mdash; <b>'
-  +yr[0]+'&ndash;'+yr[1]+'</b>, score &ge;'+activeConf()+', and every other filter in force. '
-  +'Percentile and z are computed among those '+(KL[kind]||kind)+' for <b>'+
-  ({pub:'publications',deg:'partners',sent:'sentences'}[sigMeas()])+'</b>; click a heading to sort. The controls on the right stay live &mdash; filter while you read and the table follows.'
-  +(ENRICH?(' &middot; enrichment counts '+(ENRICH.unit==='par'?'<b>partners</b>':'<b>publications</b>')
-    +': this view’s <b>'+ENRICH.view+'</b> against the shared lung corpus'
-    +((BG&&BG.src&&BG.src.length>1)?(' ('+BG.src.join(' + ')+')'):'')+'’ <b>'+ENRICH.n
-    +'</b>, Fisher exact on <b>'+ENRICH.tested+'</b> testable '+(KL[kind]||kind)+' (≥'+ENRICH_MIN
-    +' in the corpus), q = Benjamini-Hochberg.'
-    +(ENRICH.belowfloor?(' <b>'+ENRICH.belowfloor+'</b> fall below that floor'):'')
-    +(ENRICH.nocontrast?((ENRICH.belowfloor?' and ':' ')+'<b>'+ENRICH.nocontrast+'</b> have nothing outside the view to contrast against'):'')
-    +((ENRICH.belowfloor||ENRICH.nocontrast)?(', so their OR and q are blank &mdash; their corpus counts are still shown'
-      +(ENRICH.tested?'':'; narrow the view to make the comparison mean something')+'.'):'')):'');
- sigNote('signote2',kind);
- // when nothing can be tested the OR/q columns are absent; without this they would just look missing
- const nt=document.getElementById('signotest');
- if(nt){
-  const dead=ENRICH&&!ENRICH.tested;
-  nt.style.display=dead?'':'none';
-  if(dead)nt.innerHTML='<b>No enrichment to test at this view.</b> All <b>'+ENRICH.nocontrast+'</b> '
-    +(KL[kind]||kind)+' with enough corpus '+(ENRICH.unit==='par'?'partners':'papers')
-    +' already have every one of them on screen, so there is nothing outside the view to compare against and '
-    +'<em>OR vs corpus</em> and <em>q</em> are undefined rather than missing. Narrow the view to create the contrast '
-    +'&mdash; raising <b>Min unique publications</b> to 2 or <b>Min connections</b> to 2 is usually enough.';
- }
- // the bar column tracks whatever the table is sorted by, scaled to the leading row
- const bmeas=barMeas();
- const bmax=Math.max(1,...SIGTAB_ROWS.map(s=>s[bmeas]));
- const COLS=sigCols();
- const head='<tr>'+COLS.map(([k,lab])=>'<th class="'+(k==='nm'?'nm':k)+(k===meas?' on':'')+'" data-k="'+k+'">'
-   +(typeof lab==='function'?lab():lab)+'</th>').join('')+'</tr>';
- const body=SIGTAB_ROWS.map((s,i)=>'<tr data-i="'+i+'">'+COLS.map(([k,lab,f])=>
-   k==='bar'?'<td class=bar><span style="width:'+Math.max(1,Math.round(100*s[bmeas]/bmax))+'%"></span></td>'
-   :'<td class="'+(k==='nm'?'nm':'')+'">'+(k==='nm'?(i+1)+'. '+f(s):f(s))+'</td>').join('')+'</tr>').join('');
- document.getElementById('sigtbody').innerHTML='<table><thead>'+head+'</thead><tbody>'+body+'</tbody></table>';
- document.querySelectorAll('#sigtbody th').forEach(th=>{const k=th.getAttribute('data-k');
-   if(SIGSORTABLE.has(k))th.addEventListener('click',()=>{SIGTAB_SORT=k;sigTable();});
-   else th.style.cursor='default';});
- // rows are not links: a click used to close the table and jump the graph to that node, which
- // is the wrong default while you are reading a table. Headings still sort; the panel's top-six
- // list still navigates.
-}
-// Leave room for the right panel and lift it above the overlay, so every filter stays usable
-// while the table is open -- build() re-runs the ranking and redraws the table under it. On a
-// narrow screen there is no room to sit side by side, so the table covers everything as before.
-function layoutTable(){
- const st=document.getElementById('sigtable'), pn=document.getElementById('panel');
- if(!st||!pn)return;
- if(!SIGTAB_OPEN||window.innerWidth<=700){st.style.right='';pn.classList.remove('overtable');return;}
- const w=Math.ceil(pn.getBoundingClientRect().width);
- st.style.right=(w>0?w+24:0)+'px';
- pn.classList.add('overtable');
-}
-function sigOpen(){SIGTAB_OPEN=true;SIGTAB_SORT=null;
- const k2=document.getElementById('sigkind2'),m2=document.getElementById('sigmeasure2');
- if(k2){k2.value=sigKind();m2.value=sigMeas();}   // open showing what the panel was showing
- sigTable();document.getElementById('sigtable').classList.add('open');layoutTable();}
-function sigClose(){SIGTAB_OPEN=false;document.getElementById('sigtable').classList.remove('open');layoutTable();}
-// one source for the explanation: the panel's copy is authored in the template, the table's is
-// filled from it at load, so the two can never drift apart
-(function(){[['sighelp','sighelp2']].forEach(([x,y])=>{
- const a=document.getElementById(x),b=document.getElementById(y);
- if(a&&b)b.innerHTML=a.innerHTML;});})();
-// run on demand, not on every redraw: it is the one thing here that costs real work, and it is
-// only meaningful once you have settled on the view you want to read
-const BOOT_B=300;
-document.getElementById('sigboot').addEventListener('click',()=>{
- const b=document.getElementById('sigboot');
- b.textContent='resampling…';b.disabled=true;
- setTimeout(()=>{                       // let the label paint before the loop blocks the thread
-  try{BOOT=bootstrapCIs(BOOT_B);}catch(err){BOOT=null;}
-  b.textContent=BOOT?(BOOT_B+'× bootstrap'):'Bootstrap CIs';b.disabled=false;
-  sigTable();
- },20);
-});
-document.getElementById('sigtab').addEventListener('click',sigOpen);
-document.getElementById('sigclose').addEventListener('click',sigClose);
-document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&SIGTAB_OPEN)sigClose();});
 const searchBox=document.getElementById('search');
 function doSearch(q){q=(q||'').trim();const info=document.getElementById('info');if(!q)return;const hit=DATA.nodes.find(n=>n.label.toLowerCase()===q.toLowerCase())||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(q.toLowerCase())===0);if(!hit){info.innerHTML='No gene matching "'+q+'"';return;}try{network.selectNodes([hit.id]);network.focus(hit.id,{scale:1.3,animation:true});info.innerHTML='<b>'+hit.label+'</b>';}catch(e){info.innerHTML='<b>'+hit.label+'</b> not in current view';}}
 searchBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')doSearch(searchBox.value);});
@@ -1894,24 +1332,13 @@ function zoomBy(f){if(!network)return;const s=network.getScale();network.moveTo(
 document.getElementById('zin').addEventListener('click',()=>zoomBy(1.25));
 document.getElementById('zout').addEventListener('click',()=>zoomBy(0.8));
 document.getElementById('zfit').addEventListener('click',()=>{if(network)network.fit({animation:true});});
-// Two pairs of year handles -- one in the panel, one in the table view -- driving one range.
-// Whichever you drag, the other follows, the ranking is recomputed for the new window, and the
-// graph rebuilds; the table redraws only while it is open.
+// the year range: dragging either handle relabels it and rebuilds the graph
 const yl=document.getElementById('yrlo'),yh=document.getElementById('yrhi');
-const yl2=document.getElementById('yrlo2'),yh2=document.getElementById('yrhi2');
-[yl,yh,yl2,yh2].forEach(el=>{if(el){el.min=MINY;el.max=MAXY;}});
-yl.value=MINY;yh.value=MAXY;if(yl2){yl2.value=MINY;yh2.value=MAXY;}
-function updYr(){const a=activeYears(),t=a[0]+'–'+a[1];
- ['yrlab','yrlab2'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=t;});}
-function yearChanged(fromTable){
- if(fromTable){yl.value=yl2.value;yh.value=yh2.value;}
- else if(yl2){yl2.value=yl.value;yh2.value=yh.value;}
- updYr();
- build(+thr.value);                 // build() recomputes the ranking and redraws the table
-}
-[yl,yh].forEach(el=>el.addEventListener('input',()=>yearChanged(false)));
-[yl2,yh2].forEach(el=>{if(el)el.addEventListener('input',()=>yearChanged(true));});
-updYr();   // the ranking follows from build(), which runs once at the end of this script
+[yl,yh].forEach(el=>{el.min=MINY;el.max=MAXY;});
+yl.value=MINY;yh.value=MAXY;
+function updYr(){const a=activeYears();document.getElementById('yrlab').textContent=a[0]+'–'+a[1];}
+[yl,yh].forEach(el=>el.addEventListener('input',()=>{updYr();build(+thr.value);}));
+updYr();
 const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
 // disease list for the tissue controls; the gene-only graph has none, so the row hides itself
 (function(){const ds=DATA.nodes.filter(n=>(n.kind||'gene')==='disease').sort((a,b)=>a.label.localeCompare(b.label));
@@ -1953,7 +1380,7 @@ function fitLeftPanel(){
  else {lp.style.width=prevW;lp.style.maxWidth=prevM;}
 }
 fitLeftPanel();
-window.addEventListener('resize',()=>{fitLeftPanel();layoutTable();if(network)network.redraw();});
+window.addEventListener('resize',()=>{fitLeftPanel();if(network)network.redraw();});
 document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
 // gene-only runs hide every row the left column holds; an empty white box is worse than none
 (function(){const lp=document.getElementById('lpanel');
@@ -1985,7 +1412,7 @@ KIND_ROW = (' <div class="row">Node type <button class="ihelp" data-help="kind" 
             'sized by that evidence and pooled by tissue.</div>')
 
 
-def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query="", background=None):
+def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query=""):
     # nxml is kept for the caller's signature; the panel no longer prints a corpus-coverage line
     if lib:
         libtag = "<script>\n" + lib.replace("</script>", "<\\/script>") + "\n</script>"
@@ -2000,15 +1427,14 @@ def render_graph(payload, lib, miny, maxy, nxml=None, pubmed_query="", backgroun
             if pubmed_query else "")
     title = (html.escape(pubmed_query) if pubmed_query
              else "High-confidence gene / disease / chemical relations")
-    # these edges sit mostly in 0.5-0.8 (BioRED gene-disease relations), so opening the
-    # slider at the old gene-only default of >=0.99 would show an almost empty canvas
+    # the score slider opens at its lowest stop (SCORE_STEPS[0] = 0.5): these edges sit mostly
+    # in 0.5-0.8 (BioRED gene-disease relations), so a high default shows an almost empty canvas
     return (GRAPH_TEMPLATE.replace("__LIBTAG__", libtag)
             .replace("__TITLE__", title)
             .replace("__KINDROW__", KIND_ROW)
-            .replace("__CONFDEF__", "6")
+            .replace("__CONFDEF__", "0")
             .replace("__PUBMED_QUERY__", qrow)
             .replace("__PAYLOAD__", json.dumps(payload, ensure_ascii=False))
-            .replace("__BACKGROUND__", json.dumps(background or {"n": 0, "ne": 0, "doc": {}, "par": {}}))
             .replace("__CCOLOR__", json.dumps(RCOLOR))
             .replace("__MINY__", str(miny)).replace("__MAXY__", str(maxy)))
 
@@ -2075,12 +1501,6 @@ def main():
 
     # 3) the graph (universe = qualifying at GRAPH_BASE; in-browser score slider 0.5..0.99)
     if not args.no_graph:
-        # one denominator for every lung_* analysis: this run's slice, merged with the
-        # siblings' cached slices (see shared_background)
-        bg = shared_background(DATA_ROOT, corpus_contrib(d, flags), RE_FILE)
-        print(f"  corpus for enrichment: {bg['n']:,} publications, {bg['ne']:,} entities "
-              f"from {', '.join(bg['src'])}"
-              + (f"; not yet run: {', '.join(bg['missing'])}" if bg['missing'] else ""))
         universe = kept if args.score <= GRAPH_BASE else [t for t in d if keep_fn(t, GRAPH_BASE)]
         payload = graph_payload_multi(universe, flags)
         if N_FALSE_DROPPED:
@@ -2094,7 +1514,7 @@ def main():
         nxml = len(list(XML_DIR.glob("*.xml"))) or len(list(SENT_DIR.glob("*.json")))
         GRAPH_OUT.parent.mkdir(parents=True, exist_ok=True)
         pubmed_query = read_pubmed_query()
-        GRAPH_OUT.write_text(render_graph(payload, lib, miny, maxy, nxml, pubmed_query, bg),
+        GRAPH_OUT.write_text(render_graph(payload, lib, miny, maxy, nxml, pubmed_query),
                              encoding="utf-8")
         n99 = sum(1 for e in payload["edges"] if any(s["sc"] >= 0.99 for s in e["sents"]))
         npubs = len({s["pmid"] for e in payload["edges"] for s in e["sents"]})
