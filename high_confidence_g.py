@@ -753,6 +753,12 @@ __LIBTAG__
  /* left column: what the picture LOOKS like (names, spacing, grouping) -- the right one keeps
     what is IN it (thresholds, filters, provenance), so the two columns split by question */
  #lpanel{left:12px}
+ /* each column can be shut to free the canvas: the x sits in the panel's top corner, and a
+    closed panel leaves a small tab at the same corner that brings it back */
+ .pclose{float:right;margin:-8px -10px 4px 8px;width:22px;height:22px;padding:0;border:1px solid #cdd5e0;border-radius:50%;background:#eef2f7;color:#1c2330;font:600 15px/1 Segoe UI,Arial,sans-serif;cursor:pointer}
+ .pclose:hover,.popen:hover{background:#dde4ee}
+ .popen{position:absolute;top:12px;z-index:6;display:none;width:34px;height:34px;padding:0;border:1px solid #cdd5e0;border-radius:8px;background:rgba(255,255,255,.97);color:#1c2330;font:18px/1 Segoe UI,Arial,sans-serif;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,.18)}
+ #lopen{left:12px} #ropen{right:12px}
  #panel h1{font-size:13px;margin:0 0 8px;color:#1c2330;font-variant:small-caps;letter-spacing:.4px}
  .row{margin:8px 0}
  input[type=range]{width:150px;max-width:100%;vertical-align:middle}
@@ -799,10 +805,14 @@ __LIBTAG__
   #panel,#lpanel{left:12px;right:12px;max-width:none;max-height:42vh;overflow:auto}
   #lpanel{top:12px}
   #panel{top:auto;bottom:12px}
+  #ropen{top:auto;bottom:12px}
   .vis-tooltip{max-width:88vw!important}
  }
 </style></head><body>
+<button id="lopen" class="popen" title="Show the left menu" aria-label="Show the left menu">&#9776;</button>
+<button id="ropen" class="popen" title="Show the right menu" aria-label="Show the right menu">&#9776;</button>
 <div id="lpanel">
+ <button class="pclose" data-panel="lpanel" title="Close this menu" aria-label="Close the left menu">&times;</button>
  __PUBMED_QUERY__
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
  <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease">Disease names</button><button class="lblb" data-kind="chemical">Drug names</button></span>
@@ -821,6 +831,7 @@ __LIBTAG__
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
 <div id="panel">
+ <button class="pclose" data-panel="panel" title="Close this menu" aria-label="Close the right menu">&times;</button>
  <div class="row legend"><b style="background:#cfe3ff;border-color:#2b6cb0"></b>gene <b style="background:#1b7837;border-color:#145a28"></b>approved anti-neoplastic <b style="background:#e08600;border-color:#9a6700"></b>approved (other) <b style="background:#c2185b;border-color:#7a0f3a"></b>no approved drug <button class="ihelp" data-help="col" aria-label="About node colours" aria-expanded="false">i</button></div>
  <div class="row mut help" data-help="col">Drug-target genes (corpus chemicals): deeper colour = more chemicals. <b style="color:#1b7837">Green</b> = DGIdb approved anti-neoplastic, <b style="color:#e08600">amber</b> = DGIdb approved (non-anti-neoplastic), <b style="color:#c2185b">pink</b> = no approved drug: DGIdb investigational and/or a ChEBI target role only (the gene may still be in DGIdb).</div>
  <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
@@ -834,7 +845,7 @@ __LIBTAG__
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
  <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
-  <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
+  <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. Regular expressions are the way to find edges that describe <b>variants</b>: for example, <code>/\s+[A-Z]\d+[A-Z]\s+/</code> finds edges that describe missense and nonsense variants. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
 __KINDROW__
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
@@ -1384,8 +1395,16 @@ window.addEventListener('resize',()=>{fitLeftPanel();if(network)network.redraw()
 document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));
 // gene-only runs hide every row the left column holds; an empty white box is worse than none
 (function(){const lp=document.getElementById('lpanel');
- const kids=lp?Array.prototype.slice.call(lp.children||[]):[];   // HTMLCollection, not an array
+ const kids=lp?Array.prototype.slice.call(lp.children||[]).filter(c=>(c.className||'').indexOf('pclose')<0):[];   // HTMLCollection, not an array; the close button is not content
  if(kids.length&&!kids.some(c=>!c.style||c.style.display!=='none'))lp.style.display='none';})();
+// close / reopen each column; the reopen tab only ever appears for a panel the user shut, so a
+// gene-only run whose left column hid itself above gets no tab for an empty box
+function setPanel(id,open){const p=document.getElementById(id),t=document.getElementById(id==='lpanel'?'lopen':'ropen');
+ if(!p||!t)return;p.style.display=open?'':'none';t.style.display=open?'none':'block';
+ if(open&&id==='lpanel')fitLeftPanel();}
+document.querySelectorAll('.pclose').forEach(b=>b.addEventListener('click',()=>setPanel(b.getAttribute('data-panel'),false)));
+document.getElementById('lopen').addEventListener('click',()=>setPanel('lpanel',true));
+document.getElementById('ropen').addEventListener('click',()=>setPanel('panel',true));
 buildCatFilters();buildSrcButtons();build(1);
 </script></body></html>"""
 
