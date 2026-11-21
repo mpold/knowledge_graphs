@@ -187,7 +187,10 @@ CHEMICAL_IGNORE = {"tyrosine", "glucose"}
 # value replaces whatever mondo_label the normalizer produced.
 #   lcc  disease.py maps it to "leukoencephalopathy with calcifications and cysts" (6
 #        mentions); in a lung-large-cell corpus LCC is large cell carcinoma.
-DISEASE_SURFACE = {"lcc": "lung large cell carcinoma"}
+#   mm   disease.py maps it to "Miyoshi myopathy" (413 mentions); in this cancer corpus MM is
+#        multiple myeloma. DISEASE_MERGE below folds MONDO's "plasma cell myeloma" into the same
+#        node, so "MM", "myeloma" and "multiple myeloma" all land on one.
+DISEASE_SURFACE = {"lcc": "lung large cell carcinoma", "mm": "multiple myeloma"}
 
 # Distinct MONDO terms that name the SAME disease at the same granularity. Splitting one
 # disease across several nodes is an artefact of ontology structure, not a finding: MONDO
@@ -202,6 +205,7 @@ DISEASE_MERGE = {
     "lung carcinoma": "lung cancer",     # MONDO:0005138 -> MONDO:0008903's plainer label
     "lung neoplasm": "lung cancer",      # surfaces "lung tumor(s)" / "lung tumours"
     "breast carcinoma": "breast cancer",
+    "plasma cell myeloma": "multiple myeloma",   # MONDO's label; MM is overridden to the common name
 }
 
 
@@ -826,7 +830,8 @@ __LIBTAG__
  <div class="row" id="disrow">Keep diseases: <button class="ihelp" aria-label="About the disease keep-list" aria-expanded="false">i</button>
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
   <div class="legend" id="disfilters"></div>
-  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it.</div></div>
+  <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> Only their direct neighbours</label>
+  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> goes further: it keeps just the ticked diseases, the genes and drugs with an edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. It does nothing until a disease is ticked.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
@@ -1225,12 +1230,22 @@ function build(thr){
  // menu never filters itself out of existence (see buildDiseaseFilter)
  buildDiseaseFilter(edges);
  if(DIS_KEEP.size)edges=edges.filter(o=>disPass(o.e.from)&&disPass(o.e.to));
+ // direct neighbours: the ticked diseases plus every node one edge away from them, and only the
+ // edges among that set. One step, not "connected to": the gene graph is one giant component
+ // through hubs like TP53, so walking further reaches nearly everything whatever is ticked.
+ const disConn=DIS_KEEP.size>0&&document.getElementById('disconn').checked;
+ if(disConn){
+   const near=new Set(DIS_KEEP);
+   edges.forEach(o=>{if(DIS_KEEP.has(o.e.from))near.add(o.e.to);if(DIS_KEEP.has(o.e.to))near.add(o.e.from);});
+   edges=edges.filter(o=>near.has(o.e.from)&&near.has(o.e.to));
+ }
  updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text, disease)
  const keep=new Set();edges.forEach(o=>{keep.add(o.e.from);keep.add(o.e.to);});
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  // the edgeless fallback, sized by the same measure as everything else: unique sentences in view
  const isoSz={}, isoPub=new Set();
  if(kinds&&!kindOK)Object.keys(orphan).forEach(nd=>{
+   if(disConn&&!DIS_KEEP.has(nd))return;   // an edgeless node connects to nothing
    const t=new Set(),p=new Set();
    orphan[nd].forEach(s=>{if(!tm||tm.test(s.text)){t.add(s.text);p.add(s.pmid);}});
    if(t.size){isoSz[nd]=t.size;keep.add(nd);p.forEach(x=>isoPub.add(x));}});
@@ -1313,7 +1328,9 @@ document.querySelectorAll('.ihelp').forEach(b=>b.addEventListener('click',()=>{
  b.setAttribute('aria-expanded',open?'true':'false');}));
 // the position controls all replay from BASEPOS, so they reshape in place -- no rebuild, no relayout
 (function(){const c=document.getElementById('disclear');
- if(c)c.addEventListener('click',()=>{if(!DIS_KEEP.size)return;DIS_KEEP.clear();build(+thr.value);});})();
+ if(c)c.addEventListener('click',()=>{if(!DIS_KEEP.size)return;DIS_KEEP.clear();build(+thr.value);});
+ const dc=document.getElementById('disconn');
+ if(dc)dc.addEventListener('change',()=>{if(DIS_KEEP.size)build(+thr.value);});})();
 const shr=document.getElementById('shrink'), exp=document.getElementById('expand');
 shr.addEventListener('input',()=>{document.getElementById('shv').textContent=shr.value+'%';applyLayoutShape();});
 exp.addEventListener('input',()=>{document.getElementById('exv').textContent=exp.value+'%';applyLayoutShape();});
