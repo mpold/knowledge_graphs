@@ -223,7 +223,9 @@ The order is deliberate, and it is what keeps the panel honest:
   shows only the matching sentences. Typing can only remove edges from the view you had; it
   cannot collapse the graph by shrinking an edge's apparent evidence.
 - **Structure comes last** — `Min connections` and `Min cluster size` describe the picture, so
-  they run on what is actually drawn.
+  they run on what is actually drawn. `Min connections` is peeled until it holds, so every node
+  left has at least that many links on screen, and a node that is not drawn (say, a chemical
+  with a single link) cannot keep its neighbour in view.
 - **Relation type and training set cut at the sentence**, not the edge, and an edge is drawn and
   counted as the relation and provenance of its *visible* sentences. A count reading "0 in view"
   can therefore never sit above a visible tag. Each training-set button shows *every* sentence
@@ -250,7 +252,6 @@ The order is deliberate, and it is what keeps the panel honest:
   untouched, and so are knock-down constructs (`RNAi`, `CRISPRi`) and the CaSki cell line.
 - **Score >=0.95 is effectively PPI-model-only, and >=0.99 selects nothing** — the BioRED
   checkpoint's composite tops out around 0.92 (PPI's around 0.95), as the build log warns.
-- **`Min connections` is a single pass**, so nodes that lose links in it can finish below the bar.
 - **Partner enrichment degenerates more readily than publication enrichment.** A gene's whole
   neighbourhood tends to survive into the view while its papers do not, so at a loose view many
   genes have no partner outside it and go untested. Prune first — the floor of 2 on

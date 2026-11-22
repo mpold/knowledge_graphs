@@ -864,7 +864,7 @@ __LIBTAG__
   <div class="mut help">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
  <div class="row">Font size: <b id="fsv">50%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="50" aria-label="Label font size"></div>
  <div class="row">Min cluster size: <select id="mincluster"><option value="2" selected>2 (off)</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select> <button class="ihelp" aria-label="About min cluster size" aria-expanded="false">i</button><div class="mut help">Drops connected components smaller than this. <b>2 is off, not a floor</b>: the components are built from the edges that survive every other filter, so the smallest one possible already has two nodes and a pair joined by a single edge always passes. Raise it to 3 or more to peel the small islands a loose score leaves behind &mdash; and note it runs AFTER min-connections, so a node that drops below that bar can take its whole component with it.</div></div>
- <div class="row">Min connections: <select id="mindeg"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. A single pass: nodes that lose links in it can finish below the bar. <b>1</b> turns it off and keeps that fringe &mdash; the only way to see a node whose whole evidence is one edge. Expect a denser canvas: it is the setting that admits every hapax in the corpus.</div></div>
+ <div class="row">Min connections: <select id="mindeg"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. Applied until it holds: removing a node can push its neighbours below the bar, so they go too, and every node left has at least this many links <em>on screen</em>. <b>1</b> turns it off and keeps that fringe &mdash; the only way to see a node whose whole evidence is one edge. Expect a denser canvas: it is the setting that admits every hapax in the corpus.</div></div>
  <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
@@ -1251,9 +1251,17 @@ function build(thr){
  // min-publications judges an edge's whole evidence, only these two judge the query's leavings.
  // Skipped under gene/chem focus, where you asked for a neighborhood and want all of it.
  if(!focusActive){
-   if(md>1){ // single-pass degree filter: measure each gene's links once, drop the ones below md (peels the fringe)
-     const deg={};edges.forEach(o=>{deg[o.e.from]=(deg[o.e.from]||0)+1;deg[o.e.to]=(deg[o.e.to]||0)+1;});
-     edges=edges.filter(o=>deg[o.e.from]>=md&&deg[o.e.to]>=md);
+   // degree floor, peeled until it holds (the md-core): drop the edges of every node with fewer
+   // than md links, re-count, repeat. A single pass let a removed node still vote -- a gene with
+   // one gene partner and one chemical whose only link it was counted 2, kept its gene edge, and
+   // ticking "chemical" changed the gene count with not one chemical drawn.
+   if(md>1){
+     for(;;){
+       const deg={};edges.forEach(o=>{deg[o.e.from]=(deg[o.e.from]||0)+1;deg[o.e.to]=(deg[o.e.to]||0)+1;});
+       const next=edges.filter(o=>deg[o.e.from]>=md&&deg[o.e.to]>=md);
+       if(next.length===edges.length)break;
+       edges=next;
+     }
    }
    const adj={};
    edges.forEach(o=>{(adj[o.e.from]=adj[o.e.from]||[]).push(o.e.to);(adj[o.e.to]=adj[o.e.to]||[]).push(o.e.from);});
