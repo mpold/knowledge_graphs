@@ -667,6 +667,8 @@ def inhibitor_strip(s):
     The '-i' shorthand names a drug/inhibitor AGAINST the gene product (a target,
     like 'anti-'), so it links to the gene but is tagged distinctly. Case-
     sensitive (type-1), query-only; matched against the symbol fields verbatim.
+    The link records the TARGET only: triples.py (inhibitor_class) recasts every such
+    mention as the drug class "BRAF inhibitor", so BRAFi never stands in for the gene.
     """
     return s[:-1] if s.endswith("i") else s
 
