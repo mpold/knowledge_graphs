@@ -389,6 +389,11 @@ def merge_models(triples, policy="gate", typed_name=None, gate_name=None, scale=
         t["score_from"] = win
         t["models"] = sorted(by)
         t["corroborated"] = len(by) > 1
+        # the gate (PPI) model's OWN reading of a pair both models kept. The typed label above
+        # is BioRED's; PPI only ever says "interacts", so "kept by both" means both found a
+        # relation here, not that both said "binds" -- the graph shows each model's reading.
+        if t["corroborated"] and g is not None and ty is not None:
+            t["gate_cat"] = rel_cat(g)
         if t["corroborated"]:
             won[win] += 1
         n_corr += bool(t["corroborated"])
@@ -445,6 +450,11 @@ def load_type_flags():
     return out
 
 
+# '-i' inhibitor shorthand (BRAFi, MEKi) that triples.py recast as a drug class: one node per
+# class, case-insensitively ("eIF4F inhibitor" / "eiF4F inhibitor"), labelled as first seen
+INHIB_LABEL = {}
+
+
 def node_of(e, flags):
     """(kind, normalized_id) for one endpoint, or None when it cannot be a node.
 
@@ -453,6 +463,9 @@ def node_of(e, flags):
     surfaces (diseases), gene-or-process surfaces mislabelled CHEMICAL, and over-generic
     disease labels."""
     t, txt = e.get("type"), (e.get("text") or "").strip().lower()
+    ic = e.get("inhibitor_class")
+    if ic:          # "BRAFi" is a BRAF INHIBITOR, a drug class -- not the BRAF gene
+        return ("chemical", INHIB_LABEL.setdefault(ic.lower(), ic))
     if t == "GENETIC":
         s = single(e.get("hgnc_symbol"))
         if not s or s == "MKI67" or e.get("control") == "yes":
@@ -485,12 +498,14 @@ def node_drop_report(triples, flags, top=8):
     normalization gaps upstream (disease.py / chemical.py), not deliberate exclusions."""
     kept, drops = collections.Counter(), collections.Counter()
     unnorm, overridden = collections.Counter(), 0
-    merged = collections.Counter()
+    merged, inhib = collections.Counter(), collections.Counter()
     for t in triples:
         for side in ("subject", "object"):
             e = t[side]
             typ, txt = e.get("type"), (e.get("text") or "").strip()
             key = txt.lower()
+            if e.get("inhibitor_class"):
+                inhib[e["inhibitor_class"]] += 1
             if typ == "DISEASE":
                 if key in DISEASE_SURFACE:
                     overridden += 1
@@ -523,6 +538,9 @@ def node_drop_report(triples, flags, top=8):
                 else:
                     drops["chemical: non_chemical flag"] += 1
     out = [f"  nodes kept: {', '.join(f'{k} {c:,}' for k, c in kept.most_common())}"]
+    if inhib:
+        out.append(f"  '-i' inhibitor shorthand -> drug-class (chemical) nodes: {sum(inhib.values()):,} "
+                   f"mention(s), " + ", ".join(f"{k} x{c}" for k, c in inhib.most_common(top)))
     if overridden:
         out.append(f"  DISEASE_SURFACE overrides applied: {overridden:,} mention(s) "
                    f"({', '.join(sorted(DISEASE_SURFACE))})")
@@ -548,7 +566,9 @@ def qualifies_multi(t, T, flags):
     a, b = node_of(t["subject"], flags), node_of(t["object"], flags)
     if not a or not b or a == b:
         return False
-    if "GENETIC" in (t["subject"].get("type"), t["object"].get("type")) and not ctrl_no(t):
+    genes = [e for e in (t["subject"], t["object"])
+             if e.get("type") == "GENETIC" and not e.get("inhibitor_class")]
+    if genes and not any(e.get("control") == "no" for e in genes):
         return False        # same "annotated control:no" requirement as the gene-only filter
     return True
 
@@ -681,7 +701,7 @@ def graph_payload_multi(triples, flags):
         pair_src[frozenset((ka, kb))] |= roles
         cur = pair_sent[frozenset((ka, kb))].get(sent)
         if cur is None or sc > cur[0]:
-            pair_sent[frozenset((ka, kb))][sent] = [sc, pm, cat, spec, src_tag(roles)]
+            pair_sent[frozenset((ka, kb))][sent] = [sc, pm, cat, spec, src_tag(roles), t.get("gate_cat")]
         for nd in (ka, kb):
             if node_sent[nd].get(sent, -1) < sc:
                 node_sent[nd][sent] = sc
@@ -698,8 +718,8 @@ def graph_payload_multi(triples, flags):
         cands.sort(reverse=True)
         _, ff, ft, fcat = cands[0]
         sents = [{"pmid": pm, "text": sent[:300], "sc": round(sc, 4), "yr": years.get(pm),
-                  "rc": cat, "sp": sp, "sr": sr}
-                 for sent, (sc, pm, cat, sp, sr) in sd.items()]
+                  "rc": cat, "sp": sp, "sr": sr, **({"pc": pc} if sr == "both" and pc else {})}
+                 for sent, (sc, pm, cat, sp, sr, pc) in sd.items()]
         sents.sort(key=lambda z: (-z["sc"], z["pmid"]))
         edges.append({"from": ff, "to": ft, "cat": fcat, "color": RCOLOR.get(fcat, "#888"),
                       "neg": fcat.startswith("not "), "src": src_tag(pair_src[pr]), "sents": sents})
@@ -858,7 +878,7 @@ __KINDROW__
  <div class="row mut help" data-help="rel">Counts read <em>total &middot; in view</em>: the total is every edge in the file carrying at least one sentence of that type (an edge with mixed readings counts under each, so the totals exceed the edge count), &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
  <div class="row">Training set behind the edge <button class="ihelp" data-help="src" aria-label="About training sets" aria-expanded="false">i</button></div>
  <div class="row" id="srcbtns"></div>
- <div class="row mut help" data-help="src" id="srchint">Which corpus the relation was learned from &mdash; <b>PPI-only</b> = found by the BioInfer/PPI model alone, <b>BioRED-only</b> = by the BioRED model alone (typed and often signed), <b>both</b> = the two agreed a relation is there. These cut at the <em>sentence</em>, like the relation types: an edge whose support is split between the models appears under each button with that model's sentences only, so the counts sum past the edge total. Since <b>interacts</b> is the binary model's only positive label, <b>PPI-only</b> and &ldquo;All with just interacts ticked&rdquo; are the same view.</div>
+ <div class="row mut help" data-help="src" id="srchint">Which model kept each <em>sentence</em>. <b>PPI model</b> = every sentence the BioInfer/PPI model kept, shown with <em>its</em> reading &mdash; it has one label, <b>interacts</b>, so every other relation type reads 0 there. <b>BioRED model</b> = every sentence the BioRED model kept, with its typed (often signed) label. <b>Kept by both</b> = sentences both models kept: they agree a relation is there, not on its type (PPI&rsquo;s &ldquo;interacts&rdquo; is not BioRED&rsquo;s &ldquo;binds&rdquo;), so each carries both readings (BioRED&rsquo;s type and PPI&rsquo;s interacts) and matches either relation box; the tooltip gives both. Under <b>All</b>, ticking just <b>interacts</b> therefore shows exactly the PPI-model view, and a typed box exactly the BioRED-model view. Kept by both is the overlap of the two model views, so it can never exceed either. Each count is the number of <b>edges holding at least one such sentence</b>, over the whole graph rather than the current filters; an edge counts under every model behind it, so the counts sum past All.</div>
  <div class="row">Relationship score: <b id="scval">&ge;0.99</b><br><input id="conf" type="range" min="0" max="13" step="1" value="__CONFDEF__" aria-label="Minimum relationship score"></div>
  <div class="row mut" id="stats"></div>
 </div>
@@ -881,22 +901,22 @@ const KIND={};DATA.nodes.forEach(n=>{KIND[n.id]=n.kind||'gene';});
 // inferring it from counts -- and they cut at the sentence, so an edge the two models split
 // between them shows up under each, carrying only that model's half of the evidence.
 let SRC_MODE='all';
-const SRC_BTN=[['all','All'],['ppi','PPI-only'],['biored','BioRED-only'],['both','Both agreed']];
+const SRC_BTN=[['all','All'],['ppi','PPI model'],['biored','BioRED model'],['both','Kept by both']];
 function buildSrcButtons(){
- // counted like the relation types: edges holding at least one sentence from that source, so a
- // pair the two models split between them counts under each (the parts sum past the edge total)
+ // counted like the relation types: edges holding at least one sentence that model kept, so an
+ // edge counts under every model behind it (the parts sum past the edge total)
  const n={all:DATA.edges.length,ppi:0,biored:0,both:0};
- DATA.edges.forEach(e=>{const r={};e.sents.forEach(s=>r[sentSrc(e,s)]=1);for(const k in r)n[k]=(n[k]||0)+1;});
+ DATA.edges.forEach(e=>{const r={};e.sents.forEach(s=>['ppi','biored','both'].forEach(k=>{if(srcPass(e,s,k))r[k]=1;}));for(const k in r)n[k]=(n[k]||0)+1;});
  document.getElementById('srcbtns').innerHTML=SRC_BTN.map(([k,lab])=>
    '<button class="srcb'+(k===SRC_MODE?' on':'')+'" data-src="'+k+'"'+(n[k]?'':' disabled')+'>'
-   +lab+' ('+(n[k]||0)+')</button>').join('');
+   +lab+' ('+(n[k]||0)+' edges)</button>').join('');
  document.querySelectorAll('.srcb').forEach(b=>b.addEventListener('click',()=>{
    SRC_MODE=b.getAttribute('data-src');
    document.querySelectorAll('.srcb').forEach(x=>x.classList.toggle('on',x===b));
    build(+thr.value);}));
  // one checkpoint in the run -> nothing to separate; keep the row but say so
  if(!n.biored&&!n.both)document.getElementById('srchint').innerHTML=
-   'Only one RE checkpoint stands behind this graph, so every edge is <b>PPI-only</b>; '
+   'Only one RE checkpoint stands behind this graph, so every sentence comes from the <b>PPI model</b>; '
    +'run step&nbsp;2 with both models (<code>--route-mode additive</code>) to split them.';
 }
 function activeKinds(){const b=[...document.querySelectorAll('.kindf')];return b.length?new Set(b.filter(c=>c.checked).map(c=>c.value)):null;}
@@ -958,15 +978,29 @@ function hl(t){
 // its nine sentences, but the three that mention "lung" all say 'activates'. Filtering,
 // counting and colouring on the per-sentence label is what keeps the panel honest: "activates
 // 0 in view" then means no visible sentence says activates, which is what the reader sees.
-function sentCat(e,s){return s.rc||e.cat;}
+// A sentence BOTH models kept carries BioRED's typed label (rc) and PPI's own reading (pc,
+// always "interacts" / "not interacts"). They agree that a relation exists, not on its type,
+// so such a sentence holds BOTH readings and matches a relation box if either is ticked --
+// except in a single-model view, which shows only that model's reading. That makes ticking
+// "interacts" give the same sentences (hence edges, nodes, PMIDs) under All as under PPI
+// model, and "binds" the same under All as under BioRED model.
+function ppiCat(s){return s.pc||((s.rc||'').indexOf('not ')===0?'not interacts':'interacts');}
+function sentCats(e,s){const b=s.rc||e.cat;if(sentSrc(e,s)!=='both')return [b];
+ if(SRC_MODE==='ppi')return [ppiCat(s)];if(SRC_MODE==='biored')return [b];
+ const p=ppiCat(s);return p===b?[b]:[b,p];}
+// the reading a sentence is SHOWN as: its first one among the ticked boxes (BioRED's typed
+// label first), so an edge drawn under just "interacts" is coloured interacts, not binds
+let VIEW_CATS=null;
+function sentCat(e,s){const c=sentCats(e,s);if(VIEW_CATS)for(const x of c)if(VIEW_CATS.has(x))return x;return c[0];}
 // Same story for the training set: e.src is the union of model roles over ALL the pair's
 // triples, so a pair where PPI said "interacts" in one sentence and BioRED said "activates" in
 // another is tagged 'both' -- and an edge-level filter then hid its PPI-only sentences from the
-// PPI-only view. Filtering per sentence makes the buttons agree with the relation boxes: since
-// 'interacts' is the PPI checkpoint's only positive label, "PPI-only" and "all sources with
-// just interacts ticked" now describe the same 14125 edges instead of 10395 and 14125.
+// PPI view. Filtering per sentence makes the buttons agree with the relation boxes.
 function sentSrc(e,s){return s.sr||e.src||'ppi';}
-function visSents(e,conf,lo,hi,tm,cats,mode){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&(!tm||tm.test(s.text))&&(!cats||cats.has(sentCat(e,s)))&&(!mode||mode==='all'||sentSrc(e,s)===mode));}
+// a model's button shows EVERY sentence that model kept, corroborated ones included, so
+// "Kept by both" is the overlap of the PPI-model and BioRED-model views, never more than either
+function srcPass(e,s,mode){if(!mode||mode==='all')return true;const r=sentSrc(e,s);return r===mode||(r==='both'&&mode!=='both');}
+function visSents(e,conf,lo,hi,tm,cats,mode){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&(!tm||tm.test(s.text))&&(!cats||sentCats(e,s).some(c=>cats.has(c)))&&srcPass(e,s,mode));}
 // The relation an edge is DRAWN as: whichever label carries the most sentences in view. A tie
 // keeps the payload's own cat if it is among the leaders, else the last alphabetically --
 // mirroring the reverse sort that picked cat in the first place.
@@ -990,7 +1024,9 @@ function edgeHead(e,vis,cat){const np=new Set(vis.map(s=>s.pmid)).size;return '<
 // per-sentence relation tag: the label the model gave THIS sentence (an edge shows its
 // dominant relation, so a minority reading -- e.g. one "inhibits" under an "interacts"
 // edge -- would otherwise be invisible). "?" marks a speculated statement.
-function relTag(s){return s.rc?' <span class=mut style="color:'+(CCOLOR[s.rc]||'#888')+'">['+esc(s.rc)+(s.sp?' ?':'')+']</span>'+(s.sr?' <span class=mut>'+esc(SRCLAB[s.sr]||s.sr)+'</span>':''):'';}
+function relTag(s){if(!s.rc)return '';const c=sentCat({},s);
+ const src=s.sr==='both'?('BioRED: '+esc(s.rc)+' · PPI: '+esc(ppiCat(s))):(s.sr?esc(SRCLAB[s.sr]||s.sr):'');
+ return ' <span class=mut style="color:'+(CCOLOR[c]||'#888')+'">['+esc(c)+(s.sp?' ?':'')+']</span>'+(src?' <span class=mut>'+src+'</span>':'');}
 function edgeTip(e,vis,cat){const d=document.createElement('div');let h=edgeHead(e,vis,cat);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span>'+relTag(s)+' '+hl(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
 // --- the disease keep-list ------------------------------------------------------------------
 // A WHITELIST over disease nodes: empty means no constraint (the default), and any tick means
@@ -1162,7 +1198,7 @@ function focusKeep(edges,seeds,hops){
  return edges.filter(o=>seen.has(o.e.from)&&seen.has(o.e.to));
 }
 function build(thr){
- const conf=activeConf(), cats=activeCats(); const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
+ const conf=activeConf(), cats=activeCats(); VIEW_CATS=cats; const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
  const txt=activeText(), tm=textMatcher(txt); TM=tm;
  const kinds=activeKinds();
  let edges=[];
@@ -1291,7 +1327,7 @@ let CATTOT={};
 // 'interacts' and 'activates' readings counts once under each), so the totals add up to more
 // than the edge count -- they answer "how many edges can show me this label", which is the
 // question the tick boxes and the "in view" half answer too.
-function catsOf(e){const c={};e.sents.forEach(s=>c[sentCat(e,s)]=1);return Object.keys(c);}
+function catsOf(e){const c={};e.sents.forEach(s=>sentCats(e,s).forEach(x=>c[x]=1));return Object.keys(c);}
 function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>CATTOT[c]=(CATTOT[c]||0)+1));const cats=Object.keys(CATTOT).sort((a,b)=>CATTOT[b]-CATTOT[a]);document.getElementById('catfilters').innerHTML=cats.map(c=>'<label><input type=checkbox class=catf value="'+esc(c)+'"'+(c==='binds'?' checked':'')+'> <span class=sw style="background:'+(CCOLOR[c]||'#888')+'"></span> '+esc(c)+' <span class=cnt data-cat="'+esc(c)+'">('+CATTOT[c]+')</span></label>').join('');document.querySelectorAll('.catf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));}
 // Counts are LIVE: "(total · N in view)" is recomputed from the sentences actually drawn, so
 // "N in view" is exactly the number of drawn edges that can show you a sentence tagged with
@@ -1301,7 +1337,7 @@ function buildCatFilters(){CATTOT={};DATA.edges.forEach(e=>catsOf(e).forEach(c=>
 // and min-cluster size all prune afterwards. A category pruned to nothing reads 0 (in red)
 // instead of looking available: ticking it alone would leave the canvas blank, typically
 // because its edges form components smaller than "Min cluster size".
-function updateCatCounts(edges,cats){const seen={};edges.forEach(o=>{const c={};o.vis.forEach(s=>c[sentCat(o.e,s)]=1);for(const k in c)seen[k]=(seen[k]||0)+1;});
+function updateCatCounts(edges,cats){const seen={};edges.forEach(o=>{const c={};o.vis.forEach(s=>sentCats(o.e,s).forEach(x=>c[x]=1));for(const k in c)seen[k]=(seen[k]||0)+1;});
  document.querySelectorAll('#catfilters .cnt').forEach(el=>{const c=el.getAttribute('data-cat');
   el.textContent=cats.has(c)?('('+CATTOT[c]+' · '+(seen[c]||0)+' in view)'):('('+CATTOT[c]+' · off)');
   el.style.color=(cats.has(c)&&!seen[c])?'#b3243b':'';});}

@@ -97,7 +97,8 @@ def build_genetic_maps():
         if p.exists():
             for key, e in json.loads(p.read_text(encoding="utf-8")).items():
                 roman_map[key] = {"hgnc_symbol": e.get("hgnc_symbol"),
-                                  "control": e.get("control")}
+                                  "control": e.get("control"),
+                                  "match_mode": e.get("match_mode")}
     for f in ("greek.json", "greek_ambiguous.json", "greek_complex.json",
               "greek_cosine.json"):
         p = GEN_DIR / f
@@ -113,6 +114,44 @@ def build_genetic_maps():
     return roman_map, greek_key_map, greek_exp_map
 
 
+# ---- '-i' inhibitor shorthand ("BRAFi", "MEKi", "CDK4 / 6i") ----------------------------
+# A terminal lower-case 'i' after a symbol names an INHIBITOR of that gene product -- a drug
+# or drug class, not the gene. roman.py's INHIBITOR stage links such surfaces to the target
+# gene (BRAFi -> BRAF, tagged match_mode 'inhibitor-i stripped'), and NON_GENE drops others
+# (MEKi), so "p-AKT was upregulated by BRAFi, but downregulated by MEKi" became "BRAF
+# activates AKT1" -- close to the opposite of the sentence -- with no MEK edge at all.
+# Instead the mention becomes a drug class, "BRAF inhibitor": hgnc_symbol is null (it is not
+# that gene) and inhibitor_class names it, so downstream it is a CHEMICAL-like node.
+INHIBITOR_MODE = "inhibitor-i stripped"
+INHIBITOR_VIA = "inhibitor (-i)"
+_INHIB_RE = re.compile(r"^(?P<stem>.*[A-Z0-9])i$")
+# stems whose 'i' is NOT an inhibitor: RNA interference / CRISPR interference constructs
+# (knock-downs, not drugs), figure panels ("Fig. 5i"), and cell lines spelled the same way
+_INHIB_CELL_LINES = {"caski"}          # CaSki cervical carcinoma cells, not a CASK inhibitor
+_INHIB_NOT = re.compile(r"(?i)(rna|crispr)$|\bfig\b")
+
+
+def inhibitor_class(txt, rec):
+    """'<stem> inhibitor' when `txt` is '-i' inhibitor shorthand, else None.
+
+    A surface roman.py matched through its INHIBITOR stage always qualifies. An unmatched
+    one qualifies when the stem before the 'i' ends in a capital or digit and carries a
+    capital (BRAFi, MEKi, CDK4 / 6i, KRASG12Ci) -- never a surface matched any other way,
+    so real genes ending in 'i' (let-7i -> MIRLET7I, Gtf2i -> GTF2I) are untouched."""
+    if rec is not None and rec.get("match_mode") != INHIBITOR_MODE:
+        return None
+    m = _INHIB_RE.match((txt or "").strip())
+    if not m:
+        return None
+    stem = m.group("stem").strip(" -")
+    if rec is None and (not re.search(r"[A-Z]", stem) or _INHIB_NOT.search(stem)
+                        or txt.strip().lower() in _INHIB_CELL_LINES):
+        return None
+    stem = re.sub(r"(\d)\s*,\s*(\d)", r"\1/\2", stem)              # 'CDK4, 6' -> 'CDK4/6'
+    stem = re.sub(r"\s*/\s*", "/", re.sub(r"\s*-\s*", "-", stem))   # 'CDK4 / 6' -> 'CDK4/6'
+    return f"{stem} inhibitor" if len(stem) >= 2 else None
+
+
 def normalize_genetic(triple, roman_map, greek_key_map, greek_exp_map):
     """Return a copy of `triple` whose GENETIC subject/object carry hgnc_symbol +
     control:
@@ -120,7 +159,9 @@ def normalize_genetic(triple, roman_map, greek_key_map, greek_exp_map):
     (2) text == a greek*.json key (original glyph surface) -> that entry; else
     (3) text == a greek*.json greek_expanded value -> that entry; else null.
     hgnc_via records the route; control is the 'yes'/'no' flag from the matched
-    roman/greek entry (null if unmatched)."""
+    roman/greek entry (null if unmatched). '-i' inhibitor shorthand (BRAFi, MEKi) is not
+    the gene: it gets hgnc_symbol null, hgnc_via 'inhibitor (-i)', inhibitor_class
+    'BRAF inhibitor' and inhibitor_target (the gene roman.py linked it to, if any)."""
     out = {**triple, "subject": dict(triple["subject"]), "object": dict(triple["object"])}
     for role in ("subject", "object"):
         el = out[role]
@@ -135,6 +176,14 @@ def normalize_genetic(triple, roman_map, greek_key_map, greek_exp_map):
             rec, via = greek_exp_map[txt], "greek_expanded"
         else:
             rec, via = None, None
+        el.pop("inhibitor_class", None)
+        el.pop("inhibitor_target", None)
+        ic = inhibitor_class(txt, roman_map.get(txt) if via == "roman key" else None)             if via in ("roman key", None) else None
+        if ic:
+            el["hgnc_symbol"], el["hgnc_via"], el["control"] = None, INHIBITOR_VIA, None
+            el["inhibitor_class"] = ic
+            el["inhibitor_target"] = rec["hgnc_symbol"] if rec else None
+            continue
         el["hgnc_symbol"] = rec["hgnc_symbol"] if rec else None
         el["hgnc_via"] = via
         el["control"] = rec["control"] if rec else None
@@ -350,7 +399,7 @@ def main():
                     ctrl_sym[s] += 1
     gnorm = {"elems": sum(via.values()), "roman": via["roman key"],
              "greek_key": via["greek key"], "greek": via["greek_expanded"],
-             "none": via[None], "top": symcount,
+             "none": via[None], "inhib": via[INHIBITOR_VIA], "top": symcount,
              "ctrl_yes": ctrl["yes"], "ctrl_no": ctrl["no"], "ctrl_null": ctrl[None],
              "ctrl_top": ctrl_sym}
 
@@ -405,6 +454,7 @@ def main():
     print(f"  GENETIC normalization: {gnorm['elems']:,} GENETIC elements -> "
           f"hgnc_symbol via roman key {gnorm['roman']:,}, greek key "
           f"{gnorm['greek_key']:,}, greek_expanded {gnorm['greek']:,}, "
+          f"'-i' inhibitor -> drug class {gnorm['inhib']:,}, "
           f"unmatched {gnorm['none']:,} -> {NORM_OUT.name}")
     print(f"    control flag: yes {gnorm['ctrl_yes']:,}, no {gnorm['ctrl_no']:,}, "
           f"unannotated {gnorm['ctrl_null']:,}")
@@ -526,7 +576,9 @@ too. DISEASE/CHEMICAL elements are unchanged.</p>
 <div class="headline">{gnorm["elems"]:,} GENETIC subject/object elements &mdash;
 normalized to an HGNC symbol via <strong>roman key {gnorm["roman"]:,}</strong>,
 <strong>greek key {gnorm["greek_key"]:,}</strong>,
-<strong>greek_expanded {gnorm["greek"]:,}</strong>; unmatched {gnorm["none"]:,}
+<strong>greek_expanded {gnorm["greek"]:,}</strong>; <strong>{gnorm["inhib"]:,}</strong> are
+&lsquo;-i&rsquo; inhibitor shorthand (BRAFi, MEKi) recast as a drug class (<code>inhibitor_class</code>
+&ldquo;BRAF inhibitor&rdquo;, no gene); unmatched {gnorm["none"]:,}
 ({100*(gnorm["roman"]+gnorm["greek_key"]+gnorm["greek"])/max(1,gnorm["elems"]):.1f}% normalized).</div>
 <h3>Most frequent normalized HGNC symbols (GENETIC elements)</h3>
 <details><summary>show / hide table</summary>

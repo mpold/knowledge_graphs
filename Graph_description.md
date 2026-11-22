@@ -226,8 +226,14 @@ The order is deliberate, and it is what keeps the panel honest:
   they run on what is actually drawn.
 - **Relation type and training set cut at the sentence**, not the edge, and an edge is drawn and
   counted as the relation and provenance of its *visible* sentences. A count reading "0 in view"
-  can therefore never sit above a visible tag, and *PPI-only* equals *All with just `interacts`
-  ticked*.
+  can therefore never sit above a visible tag. Each training-set button shows *every* sentence
+  that model kept, labelled with that model's own reading: *PPI model* shows only `interacts`
+  (its one label), so `binds` and every other typed relation read 0 there. *Kept by both* means
+  both models found a relation in the sentence, not that they agree on its type: PPI's
+  `interacts` is not BioRED's `binds`. Those sentences carry both readings and match either relation
+  box, so under *All* ticking just `interacts` equals *PPI model*, and a typed box equals
+  *BioRED model*; the tooltip gives both readings, and the set is the overlap of the two model views, so it never exceeds either.
+  Each button counts the edges holding at least one such sentence, so the counts sum past *All*.
 - **Focus re-expands after the lens**, so a gene-focus view either contains its seed or is
   empty — never the seed's neighbours drawn around a missing centre.
 
@@ -237,8 +243,13 @@ The order is deliberate, and it is what keeps the panel honest:
   only. Ticking disease alone therefore draws the disease landscape as unconnected nodes rather
   than a blank canvas.
 - **Co-mentions are co-occurrence, not claims.**
-- **Score >=0.95 and >=0.99 are effectively PPI-only** — the BioRED checkpoint's composite tops
-  out around 0.926, as the build log warns.
+- **`-i` shorthand is a drug class, not the gene.** `BRAFi`, `MEKi`, `CDK4 / 6i` name
+  inhibitors, so `triples.py` turns them into chemical nodes (*BRAF inhibitor*, *MEK inhibitor*,
+  *CDK4/6 inhibitor*). "p-AKT was upregulated by BRAFi" is therefore *BRAF inhibitor activates
+  AKT1*, never *BRAF activates AKT1*. Genes that really end in `i` (`let-7i`, `Gtf2i`) are
+  untouched, and so are knock-down constructs (`RNAi`, `CRISPRi`) and the CaSki cell line.
+- **Score >=0.95 is effectively PPI-model-only, and >=0.99 selects nothing** — the BioRED
+  checkpoint's composite tops out around 0.92 (PPI's around 0.95), as the build log warns.
 - **`Min connections` is a single pass**, so nodes that lose links in it can finish below the bar.
 - **Partner enrichment degenerates more readily than publication enrichment.** A gene's whole
   neighbourhood tends to survive into the view while its papers do not, so at a loose view many
