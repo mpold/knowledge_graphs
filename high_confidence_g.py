@@ -862,7 +862,7 @@ __LIBTAG__
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
   <div class="legend" id="disfilters"></div>
   <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> Only their direct neighbours</label>
-  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> goes further: it keeps just the ticked diseases, the genes and drugs with an edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Who counts as a neighbour is decided across <em>all</em> relation types; the relation boxes then choose which edges are drawn among them, so unticking <b>associated</b> hides the disease&rsquo;s own links but keeps the interacts / inhibits / activates edges between its genes. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
+  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> goes further: it keeps just the ticked diseases, the genes and drugs with an edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Only clusters that contain a ticked disease <em>on screen</em> are kept: a gene whose own link to the disease is hidden (its relation unticked, the text or driver lens, min connections, cluster size) does not show up as a detached island of sentences that never name the cancer. Diseases are linked almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood usually shrinks to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
@@ -883,7 +883,7 @@ __LIBTAG__
  <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
   <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. Regular expressions are the way to find edges that describe <b>variants</b>: for example, <code>/\s+[A-Z]\d+[A-Z]\s+/</code> finds edges that describe missense and nonsense variants. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
  <div class="row"><button id="drvbtn" aria-pressed="false">Enrich for drivers</button> <button class="ihelp" aria-label="About enrich for drivers" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence naming a <b>point mutation</b> &mdash; a protein change such as <code>V600E</code> or <code>G12C</code> written as a word of its own or in parentheses, matched by <code>/\s+[A-Z]\d+[A-Z]\s+/</code> or <code>/\([A-Z]\d+[A-Z]\)/</code> (case-sensitive) &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It combines with the text box (a sentence must match both) and, like it, is a lens: the thresholds above weigh an edge's full support, and only <b>Min connections</b> and <b>Min cluster size</b> are re-applied to what it leaves. Click again to switch it off.</div></div>
+  <div class="mut help">Keeps only edges with a sentence naming a <b>point mutation</b> &mdash; a protein change such as <code>V600E</code> or <code>G12C</code> written as a word of its own or in parentheses, matched by <code>/\s+[A-Z]\d+[A-Z]\s+/</code> or <code>/\([A-Z]\d+[A-Z]\)/</code> (case-sensitive). Supplementary figure and table panels have the same shape, so a hit such as <i>Figure S6K</i>, <i>Fig. S4A and S4B</i>, <i>Table S2A</i> or <i>S8B Fig</i> is not counted &mdash; while <i>S768I</i> or <i>S70E</i> outside such a reference still is &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It combines with the text box (a sentence must match both) and, like it, is a lens: the thresholds above weigh an edge's full support, and only <b>Min connections</b> and <b>Min cluster size</b> are re-applied to what it leaves. Click again to switch it off.</div></div>
 __KINDROW__
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
@@ -971,27 +971,48 @@ function textMatcher(q){
  let src=null,flags='i';
  if(m){try{new RegExp(m[1],m[2]);src=m[1];flags=(m[2].indexOf('i')>=0?m[2]:m[2]+'i').replace(/g/g,'');}catch(err){src=null;}}
  if(src===null)src=reEsc(q);
- const re=new RegExp(src,flags);
- return {test:t=>re.test(t||''),hlre:new RegExp(src,flags+'g')};
+ const re=new RegExp(src,flags),g=new RegExp(src,flags+'g');
+ return {test:t=>re.test(t||''),hits:t=>reHits(g,t)};
 }
+// every [start,end) span a global regex matches in t
+function reHits(g,t){const iv=[];g.lastIndex=0;let m;
+ while((m=g.exec(t))!==null){
+  if(!m[0].length){g.lastIndex++;continue;}   // zero-length match (e.g. /x*/): skip, never loop
+  iv.push([m.index,m.index+m[0].length]);
+ }
+ return iv;}
 // "Enrich for drivers": a fixed, case-SENSITIVE point-mutation lens (V600E, G12C as a word of
-// their own, or in parentheses: "KRAS (G12C)"), ANDed with the text box -- textMatcher would add the i flag and let "a12b" match
-const DRIVER_RE=/\s+[A-Z]\d+[A-Z]\s+|\([A-Z]\d+[A-Z]\)/;
+// their own, or in parentheses: "KRAS (G12C)"), ANDed with the text box -- textMatcher would
+// add the i flag and let "a12b" match.
+const DRIVER_RE=/\s+[A-Z]\d+[A-Z]\s+|\([A-Z]\d+[A-Z]\)/g;
+// Figure/table panels have the same shape -- "Figure S6D and E", "Supplementary Fig. S7G and
+// S7H", "Figs. 6A and B, S3A", "Table S2A" -- so a hit is dropped when the text before it
+// ends in a figure or table reference, optionally followed by a list of other panels (or, PLOS
+// style, when "Fig" follows it). Only the
+// last 80 characters are looked at: a reference is never far from its panels.
+const FIG_CTX=/\b(?:fig(?:ure)?s?|tables?)\.?\s*(?:(?:[A-Z]?\d+[A-Za-z]{0,2}|[A-Za-z])\s*(?:[-–,;&]|\band\b|\bor\b)?\s*)*$/i;
+// PLOS puts the word AFTER the panel: "S8B Fig", "(S2A and S2B Fig)", "S5B–S5D Figs"
+const FIG_POST=/^(?:\s*(?:[-–,;&]|and|or)?\s*S\d{1,2}[A-Za-z]{0,2})*\s*Figs?\b/;
 let DRIVERS=false;
-function driverMatcher(){return {test:t=>DRIVER_RE.test(t||''),hlres:[new RegExp(DRIVER_RE.source,'g')]};}
-function andMatchers(a,b){if(!a||!b)return a||b;return {test:t=>a.test(t)&&b.test(t),hlres:[...(a.hlres||[a.hlre]),...(b.hlres||[b.hlre])]};}
+function driverHits(t){t=t||'';
+ return reHits(DRIVER_RE,t).filter(([a])=>{
+  while(/[\s(]/.test(t[a]))a++;            // the hit's own leading space / parenthesis
+  // only a supplementary panel can be a figure label -- S, one or two digits, a letter (S6K,
+  // S12B; a main-text panel is "3B", which the pattern never matches) -- so "Figure 3 and V600E
+  // cells" keeps its V600E and "Fig. 2B and S768I mutants" its S768I
+  const m=/^S\d{1,2}[A-Z]\b/.exec(t.slice(a));
+  if(!m)return true;
+  return !FIG_CTX.test(t.slice(Math.max(0,a-80),a))&&!FIG_POST.test(t.slice(a+m[0].length,a+m[0].length+80));
+ });}
+function driverMatcher(){return {test:t=>driverHits(t).length>0,hits:driverHits};}
+function andMatchers(a,b){if(!a||!b)return a||b;return {test:t=>a.test(t)&&b.test(t),hits:t=>[...a.hits(t),...b.hits(t)]};}
 let TM=null;   // matcher in force for the current view; used to highlight hits in sentence text
 // mark hits on the RAW text (so a query containing <, > or & still highlights), escaping each piece as we go
 function hl(t){
  t=t||'';
  if(!TM)return esc(t);
- // collect the hits of every pattern in force (text box and/or driver lens), merge overlaps
- const iv=[];
- (TM.hlres||[TM.hlre]).forEach(re=>{re.lastIndex=0;let m;
-  while((m=re.exec(t))!==null){
-   if(!m[0].length){re.lastIndex++;continue;}   // zero-length match (e.g. /x*/): skip, never loop
-   iv.push([m.index,m.index+m[0].length]);
-  }});
+ // the hits of every pattern in force (text box and/or driver lens), overlaps merged
+ const iv=TM.hits(t);
  iv.sort((x,y)=>x[0]-y[0]);
  let out='',last=0;
  iv.forEach(([a,b])=>{if(b<=last)return;a=Math.max(a,last);out+=esc(t.slice(last,a))+'<mark>'+esc(t.slice(a,b))+'</mark>';last=b;});
@@ -1315,6 +1336,19 @@ function build(thr){
  // further reaches nearly everything whatever is ticked.
  const disConn=disConnOn;
  if(disConn)edges=edges.filter(o=>nearAll.has(o.e.from)&&nearAll.has(o.e.to));
+ // ...and only the clusters that still contain a ticked disease ON SCREEN. A neighbour's link to
+ // the disease can be hidden (relation unticked, text / driver lens, min-connections, cluster
+ // size) while its links to other neighbours are drawn; those then formed small islands of
+ // gene-gene and drug-gene sentences that never name the cancer. Every drawn cluster now hangs
+ // off its disease, so a view whose disease links are all hidden shows the diseases alone.
+ if(disConn){
+   const adj={};
+   edges.forEach(o=>{(adj[o.e.from]=adj[o.e.from]||[]).push(o.e.to);(adj[o.e.to]=adj[o.e.to]||[]).push(o.e.from);});
+   const reach=new Set(),sk=[...DIS_KEEP].filter(id=>adj[id]);
+   sk.forEach(id=>reach.add(id));
+   while(sk.length){const x=sk.pop();adj[x].forEach(y=>{if(!reach.has(y)){reach.add(y);sk.push(y);}});}
+   edges=edges.filter(o=>reach.has(o.e.from));
+ }
  // A kept disease the other settings left without a single link -- typically because only
  // relation types it never carries are ticked (diseases are linked by "associated", almost never
  // by "binds") -- used to vanish, and under "Only their direct neighbours" it took the whole

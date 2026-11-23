@@ -46,7 +46,8 @@ floored at 2); gene and drug search; focus-on-gene with 1 or 2 hops; drug filter
 sentence match (substring, or `/regex/` when wrapped in slashes); an **Enrich for drivers**
 toggle that keeps only edges with a sentence naming a point mutation as a word of its own
 or in parentheses (`/\s+[A-Z]\d+[A-Z]\s+/` or `/\([A-Z]\d+[A-Z]\)/`, case-sensitive: *V600E*,
-*KRAS (G12C)*), ANDed with the text match; node-type, relation-type and
+*KRAS (G12C)*; supplementary figure / table panels such as *Fig. S6K* or *S8B Fig* are not
+counted), ANDed with the text match; node-type, relation-type and
 training-set filters; the score slider — 0.5 to 0.95 in steps of 0.05, then 0.96 to 0.99 — and a
 live stats line.
 
@@ -248,12 +249,13 @@ The order is deliberate, and it is what keeps the panel honest:
   It is then drawn on its own and the stats line says so (and to tick `associated`), instead of
   *Only their direct neighbours* blanking the canvas. The stats line also says when no relation
   type is ticked at all.
-- **The disease neighbourhood is chosen across all relation types.** *Only their direct
-  neighbours* keeps every node one link from a kept disease under the other settings (score,
-  years, training set, node types, min sentences / publications), whatever relation that link
-  carries; the relation boxes only choose which edges are drawn among them. Unticking
-  `associated` therefore hides the disease's own links but keeps the `interacts` / `inhibits` /
-  `activates` edges between its genes.
+- **Every disease-neighbourhood cluster hangs off its disease.** *Only their direct neighbours*
+  keeps the nodes one link from a kept disease, the drawn edges among them, and then only the
+  clusters that contain a kept disease on screen. A neighbour whose own disease link is hidden
+  (relation unticked, text or driver lens, min connections / cluster size) used to appear as a
+  detached island of gene-gene and drug-gene sentences that never named the cancer; it no longer
+  does. The cost: with `associated` unticked, diseases' links are mostly gone, so the view
+  usually shrinks to the kept diseases drawn on their own.
 
 ## Limits worth carrying
 
