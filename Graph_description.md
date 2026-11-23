@@ -47,7 +47,8 @@ sentence match (substring, or `/regex/` when wrapped in slashes); an **Enrich fo
 toggle that keeps only edges with a sentence naming a point mutation as a word of its own
 or in parentheses (`/\s+[A-Z]\d+[A-Z]\s+/` or `/\([A-Z]\d+[A-Z]\)/`, case-sensitive: *V600E*,
 *KRAS (G12C)*; supplementary figure / table panels such as *Fig. S6K* or *S8B Fig* are not
-counted), ANDed with the text match; node-type, relation-type and
+counted, nor a stoplist of look-alikes: *S6K*, *E2F*, *G2M*, *S1P* and the cell lines *T47D*,
+*T98G*, *M059J*), ANDed with the text match; node-type, relation-type and
 training-set filters; the score slider — 0.5 to 0.95 in steps of 0.05, then 0.96 to 0.99 — and a
 live stats line.
 

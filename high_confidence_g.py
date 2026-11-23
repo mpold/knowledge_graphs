@@ -883,7 +883,7 @@ __LIBTAG__
  <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
   <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. Regular expressions are the way to find edges that describe <b>variants</b>: for example, <code>/\s+[A-Z]\d+[A-Z]\s+/</code> finds edges that describe missense and nonsense variants. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
  <div class="row"><button id="drvbtn" aria-pressed="false">Enrich for drivers</button> <button class="ihelp" aria-label="About enrich for drivers" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence naming a <b>point mutation</b> &mdash; a protein change such as <code>V600E</code> or <code>G12C</code> written as a word of its own or in parentheses, matched by <code>/\s+[A-Z]\d+[A-Z]\s+/</code> or <code>/\([A-Z]\d+[A-Z]\)/</code> (case-sensitive). Supplementary figure and table panels have the same shape, so a hit such as <i>Figure S6K</i>, <i>Fig. S4A and S4B</i>, <i>Table S2A</i> or <i>S8B Fig</i> is not counted &mdash; while <i>S768I</i> or <i>S70E</i> outside such a reference still is &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It combines with the text box (a sentence must match both) and, like it, is a lens: the thresholds above weigh an edge's full support, and only <b>Min connections</b> and <b>Min cluster size</b> are re-applied to what it leaves. Click again to switch it off.</div></div>
+  <div class="mut help">Keeps only edges with a sentence naming a <b>point mutation</b> &mdash; a protein change such as <code>V600E</code> or <code>G12C</code> written as a word of its own or in parentheses, matched by <code>/\s+[A-Z]\d+[A-Z]\s+/</code> or <code>/\([A-Z]\d+[A-Z]\)/</code> (case-sensitive) &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. Two kinds of look-alike are not counted: supplementary figure and table panels (<i>Figure S6K</i>, <i>Fig. S4A and S4B</i>, <i>Table S2A</i>, <i>S8B Fig</i>), though <i>S768I</i> or <i>S70E</i> outside such a reference still counts; and a few names that are not mutations &mdash; <i>S6K</i>, <i>E2F</i>, <i>G2M</i>, <i>S1P</i> and the cell lines <i>T47D</i>, <i>T98G</i>, <i>M059J</i>. A sentence that also names a real mutation still counts. It combines with the text box (a sentence must match both) and, like it, is a lens: the thresholds above weigh an edge's full support, and only <b>Min connections</b> and <b>Min cluster size</b> are re-applied to what it leaves. Click again to switch it off.</div></div>
 __KINDROW__
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
@@ -993,9 +993,16 @@ const DRIVER_RE=/\s+[A-Z]\d+[A-Z]\s+|\([A-Z]\d+[A-Z]\)/g;
 const FIG_CTX=/\b(?:fig(?:ure)?s?|tables?)\.?\s*(?:(?:[A-Z]?\d+[A-Za-z]{0,2}|[A-Za-z])\s*(?:[-–,;&]|\band\b|\bor\b)?\s*)*$/i;
 // PLOS puts the word AFTER the panel: "S8B Fig", "(S2A and S2B Fig)", "S5B–S5D Figs"
 const FIG_POST=/^(?:\s*(?:[-–,;&]|and|or)?\s*S\d{1,2}[A-Za-z]{0,2})*\s*Figs?\b/;
+// Words of the same letter-digits-letter shape that are not amino-acid changes; a sentence
+// matched only by these does not count (one naming a real mutation as well still does).
+//   S6K  ribosomal S6 kinase (RPS6KB1)    E2F  transcription-factor family
+//   T47D breast-cancer cell line          T98G, M059J  glioblastoma cell lines
+//   G2M  the G2/M cell-cycle phase        S1P  sphingosine-1-phosphate, a lipid
+const DRIVER_STOP=new Set(['S6K','E2F','T47D','T98G','M059J','G2M','S1P']);
 let DRIVERS=false;
 function driverHits(t){t=t||'';
- return reHits(DRIVER_RE,t).filter(([a])=>{
+ return reHits(DRIVER_RE,t).filter(([a,b])=>{
+  if(DRIVER_STOP.has(t.slice(a,b).replace(/[\s()]/g,'')))return false;
   while(/[\s(]/.test(t[a]))a++;            // the hit's own leading space / parenthesis
   // only a supplementary panel can be a figure label -- S, one or two digits, a letter (S6K,
   // S12B; a main-text panel is "3B", which the pattern never matches) -- so "Figure 3 and V600E
