@@ -815,6 +815,13 @@ __LIBTAG__
     carry a trailing margin -- 6px of it would push Fit onto a second line */
  #zoom button:last-child{margin-right:0}
  #srcbtns button.on,#labelbtns button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
+ /* the name buttons must not move when one is toggled: bold text is wider, so each button reserves
+    its bold width up front (a hidden bold copy of its own label) and switching weight changes nothing */
+ /* ...and 3px less side padding (no trailing margin) pays for that reserve, so the pair still
+    fits on one line in the left column, which is sized to the zoom row */
+ #labelbtns button{display:inline-flex;flex-direction:column;align-items:center;vertical-align:top;padding:4px 7px}
+ #labelbtns button:last-child{margin-right:0}
+ #labelbtns button::after{content:attr(data-label);font-weight:600;height:0;overflow:hidden;visibility:hidden;pointer-events:none}
  #srcbtns button:disabled{opacity:.45;cursor:default}
  .vis-tooltip{max-width:480px!important;white-space:normal!important;background:#fff!important;color:#1a1a1a!important;border:1px solid #999!important;border-radius:8px!important;padding:8px 10px!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;font:12px/1.45 Segoe UI,Arial,sans-serif!important}
  .eth{font-size:13px;margin-bottom:6px} .stip{padding:3px 0;border-top:1px solid #e3e3e3}
@@ -839,7 +846,7 @@ __LIBTAG__
  <button class="pclose" data-panel="lpanel" title="Close this menu" aria-label="Close the left menu">&times;</button>
  __PUBMED_QUERY__
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
- <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease">Disease names</button><button class="lblb" data-kind="chemical">Drug names</button></span>
+ <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease" data-label="Disease names">Disease names</button><button class="lblb" data-kind="chemical" data-label="Drug names">Drug names</button></span>
   <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed.</div></div>
  <div class="row">Shrink periphery: <b id="shv">90%</b> <button class="ihelp" aria-label="About shrink periphery" aria-expanded="false">i</button><br><input id="shrink" type="range" min="0" max="90" step="5" value="90" aria-label="Shrink periphery">
   <div class="mut help">Pulls everything past the middle distance inward, so the small clusters physics flung to the edges come back where you can read them without zooming out. The centre is left alone.</div></div>
@@ -851,7 +858,7 @@ __LIBTAG__
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
   <div class="legend" id="disfilters"></div>
   <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> Only their direct neighbours</label>
-  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> goes further: it keeps just the ticked diseases, the genes and drugs with an edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. It does nothing until a disease is ticked.</div></div>
+  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> goes further: it keeps just the ticked diseases, the genes and drugs with an edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Who counts as a neighbour is decided across <em>all</em> relation types; the relation boxes then choose which edges are drawn among them, so unticking <b>associated</b> hides the disease&rsquo;s own links but keeps the interacts / inhibits / activates edges between its genes. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
@@ -1217,8 +1224,20 @@ function build(thr){
  // of an unticked type -- so a disease-only view shows the disease landscape (sized by
  // evidence, pooled by tissue) rather than nothing. `orphan` collects that evidence as we go.
  let kindOK=false; const orphan={};
+ // "Only their direct neighbours" picks its NODES relation-blind: who is one link from a kept
+ // disease under every other setting (score, years, training set, node types, min sentences /
+ // publications), whatever relation that link carries. The relation boxes then choose which
+ // edges are drawn among them. Taken from the ticked relations instead, unticking "associated"
+ // -- the only relation a disease carries -- emptied the neighbourhood, and the interacts /
+ // inhibits / activates edges between its genes went with it.
+ const disConnOn=DIS_KEEP.size>0&&document.getElementById('disconn').checked;
+ const nearAll=new Set(DIS_KEEP);
  DATA.edges.forEach(e=>{
    const kf=!kinds||(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to]));
+   if(disConnOn&&kf&&(DIS_KEEP.has(e.from)||DIS_KEEP.has(e.to))){
+     const sa=visSents(e,conf,ylo,yhi,null,null,SRC_MODE);
+     if(sa.length&&sa.length>=thr&&(mp<=1||new Set(sa.map(s=>s.pmid)).size>=mp)){nearAll.add(e.from);nearAll.add(e.to);}
+   }
    if(kf)kindOK=true;
    const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
    const np=new Set(sup.map(s=>s.pmid)).size;
@@ -1274,17 +1293,24 @@ function build(thr){
  // menu never filters itself out of existence (see buildDiseaseFilter)
  buildDiseaseFilter(edges);
  if(DIS_KEEP.size)edges=edges.filter(o=>disPass(o.e.from)&&disPass(o.e.to));
- // direct neighbours: the ticked diseases plus every node one edge away from them, and only the
- // edges among that set. One step, not "connected to": the gene graph is one giant component
- // through hubs like TP53, so walking further reaches nearly everything whatever is ticked.
- const disConn=DIS_KEEP.size>0&&document.getElementById('disconn').checked;
- if(disConn){
-   const near=new Set(DIS_KEEP);
-   edges.forEach(o=>{if(DIS_KEEP.has(o.e.from))near.add(o.e.to);if(DIS_KEEP.has(o.e.to))near.add(o.e.from);});
-   edges=edges.filter(o=>near.has(o.e.from)&&near.has(o.e.to));
+ // direct neighbours: the ticked diseases plus every node one edge away from them (nearAll,
+ // relation-blind -- see above), and only the drawn edges among that set. One step, not
+ // "connected to": the gene graph is one giant component through hubs like TP53, so walking
+ // further reaches nearly everything whatever is ticked.
+ const disConn=disConnOn;
+ if(disConn)edges=edges.filter(o=>nearAll.has(o.e.from)&&nearAll.has(o.e.to));
+ // A kept disease the other settings left without a single link -- typically because only
+ // relation types it never carries are ticked (diseases are linked by "associated", almost never
+ // by "binds") -- used to vanish, and under "Only their direct neighbours" it took the whole
+ // canvas with it, unexplained. It is drawn on its own instead, and the stats line says why.
+ const loneDis=[];
+ if(DIS_KEEP.size&&(!kinds||kinds.has('disease'))){
+   const linked=new Set();edges.forEach(o=>{linked.add(o.e.from);linked.add(o.e.to);});
+   DIS_KEEP.forEach(id=>{if(!linked.has(id))loneDis.push(id);});
  }
  updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text, disease)
  const keep=new Set();edges.forEach(o=>{keep.add(o.e.from);keep.add(o.e.to);});
+ loneDis.forEach(id=>keep.add(id));
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  // the edgeless fallback, sized by the same measure as everything else: unique sentences in view
  const isoSz={}, isoPub=new Set();
@@ -1307,7 +1333,10 @@ function build(thr){
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
  // name what is actually on screen: "378 diseases" beats "378 genes" in a disease-only view
  const KLAB={gene:'genes',disease:'diseases',chemical:'chemicals'};
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(nIso?' &middot; <b>'+nIso+'</b> drawn unconnected: nothing in the corpus relates these node types to each other':'');
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes').replace(/s$/,nodes.length===1?'':'s')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(nIso?' &middot; <b>'+nIso+'</b> drawn unconnected: nothing in the corpus relates these node types to each other':'')
+   +(cats.size?'':' &middot; <b>no relation type is ticked</b>')
+   +(loneDis.length?' &middot; <b>'+loneDis.length+'</b> kept disease'+(loneDis.length>1?'s have':' has')+' no link under these settings, drawn on '+(loneDis.length>1?'their':'its')+' own'
+     +(cats.has('associated')?'':' &mdash; diseases are linked by <b>associated</b>, so tick it to see '+(loneDis.length>1?'their':'its')+' genes and drugs'):'');
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  NODEDS=data.nodes;
  const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};

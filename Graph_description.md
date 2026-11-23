@@ -238,6 +238,17 @@ The order is deliberate, and it is what keeps the panel honest:
   Each button counts the edges holding at least one such sentence, so the counts sum past *All*.
 - **Focus re-expands after the lens**, so a gene-focus view either contains its seed or is
   empty — never the seed's neighbours drawn around a missing centre.
+- **A kept disease never vanishes silently.** Diseases are linked by `associated`, almost never
+  by `binds`, so with `associated` unticked a disease ticked under *Keep diseases* has no link.
+  It is then drawn on its own and the stats line says so (and to tick `associated`), instead of
+  *Only their direct neighbours* blanking the canvas. The stats line also says when no relation
+  type is ticked at all.
+- **The disease neighbourhood is chosen across all relation types.** *Only their direct
+  neighbours* keeps every node one link from a kept disease under the other settings (score,
+  years, training set, node types, min sentences / publications), whatever relation that link
+  carries; the relation boxes only choose which edges are drawn among them. Unticking
+  `associated` therefore hides the disease's own links but keeps the `interacts` / `inhibits` /
+  `activates` edges between its genes.
 
 ## Limits worth carrying
 
