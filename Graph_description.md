@@ -43,7 +43,10 @@ it. Each section's explanation is behind a small round **i** beside its heading.
 **Right column — what is in the picture.** Support thresholds (min unique sentences, min unique
 publications); label font size; structural pruning (min cluster size, min connections, both
 floored at 2); gene and drug search; focus-on-gene with 1 or 2 hops; drug filter; free-text
-sentence match (substring, or `/regex/` when wrapped in slashes); node-type, relation-type and
+sentence match (substring, or `/regex/` when wrapped in slashes); an **Enrich for drivers**
+toggle that keeps only edges with a sentence naming a point mutation as a word of its own
+or in parentheses (`/\s+[A-Z]\d+[A-Z]\s+/` or `/\([A-Z]\d+[A-Z]\)/`, case-sensitive: *V600E*,
+*KRAS (G12C)*), ANDed with the text match; node-type, relation-type and
 training-set filters; the score slider — 0.5 to 0.95 in steps of 0.05, then 0.96 to 0.99 — and a
 live stats line.
 
@@ -255,8 +258,10 @@ The order is deliberate, and it is what keeps the panel honest:
 ## Limits worth carrying
 
 - **No disease–disease relations exist.** The routing pairs a disease with a gene or a chemical
-  only. Ticking disease alone therefore draws the disease landscape as unconnected nodes rather
-  than a blank canvas.
+  only. Ticking disease alone therefore leaves the canvas empty, and the stats line says to
+  tick genes or chemicals. (Diseases you kept in the disease menu are still drawn, on their
+  own.) Unticking a node type only ever removes nodes; it never brings back ones the other
+  filters dropped.
 - **Co-mentions are co-occurrence, not claims.**
 - **`-i` shorthand is a drug class, not the gene.** `BRAFi`, `MEKi`, `CDK4 / 6i` name
   inhibitors, so `triples.py` turns them into chemical nodes (*BRAF inhibitor*, *MEK inhibitor*,

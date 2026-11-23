@@ -396,8 +396,11 @@ def delsep_key_alias(s):
 
 # a bare 'p' prefix (no delimiter) before an upper-case letter: the no-hyphen
 # phospho/protein convention (pAKT, pSTAT3, pVHL). Distinct from the PHOSPHO
-# stage, which needs a 'p-'/'phospho-' delimiter.
-_PPREFIX_RE = re.compile(r"^p[A-Z]")
+# stage, which needs a 'p-'/'phospho-' delimiter. At least TWO characters must remain:
+# 'pY'/'pS'/'pT' are phospho-tyrosine/-serine/-threonine (the residue, not a gene), and
+# stripping them left a one-letter alias -- 'Y' is an HGNC alias of PSMB6, so every
+# "ALK-associated pY" became a PSMB6 node. No real p+gene form has a one-letter gene.
+_PPREFIX_RE = re.compile(r"^p[A-Z].")
 # constructs / vectors / reporters that coincidentally hit a symbol once de-p'd
 PPREFIX_EXCLUDE = {
     "pMIR",    # pMIR-REPORT luciferase vector
@@ -411,7 +414,8 @@ PPREFIX_EXCLUDE = {
 def pprefix_strip_hsfold(s):
     """Strip a bare leading 'p' before an upper-case letter, then hsfold
     (pAKT -> AKT, pSTAT3 -> STAT3). Captures the no-delimiter phospho/protein
-    convention. Excluded constructs/vectors are left intact. Query-only.
+    convention. Excluded constructs/vectors, and the one-letter phospho-residues
+    pY/pS/pT (_PPREFIX_RE needs >=2 chars after the 'p'), are left intact. Query-only.
     """
     if s not in PPREFIX_EXCLUDE and _PPREFIX_RE.match(s):
         return hsfold(s[1:])

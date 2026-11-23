@@ -167,7 +167,11 @@ NODE_STYLE = {                                   # kind -> vis shape + default c
 #             "lung neoplasm" are NOT caught by these two.
 #   os        a SURFACE: "OS" is overall survival, a metric the NER mislabels as DISEASE.
 #             It never appears as a MONDO label, so a label-only check would never fire.
-DISEASE_IGNORE = {"neoplasm", "cancer", "os"}
+#   sd        a SURFACE: "SD" is stable disease (a RECIST response category, next to PR/CR),
+#             which MONDO's exact synonym maps to "Salla disease", e.g. "a MEK2 mutation ...
+#             in one patient with SD" (PMC3296083). Matching the surface leaves a genuine
+#             "Salla disease" mention, should one ever appear, untouched.
+DISEASE_IGNORE = {"neoplasm", "cancer", "os", "sd"}
 
 # Chemical surfaces/labels that ChEBI resolves correctly but that are not COMPOUNDS UNDER STUDY,
 # and so do not belong in a list the panel calls "drugs".
@@ -805,8 +809,8 @@ __LIBTAG__
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
  #catfilters .cnt{color:#5b6677;font-size:11px}
- #zoom button,#srcbtns button,#labelbtns button{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
- #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover{background:#dde4ee}
+ #zoom button,#srcbtns button,#labelbtns button,#drvbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
+ #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#drvbtn:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button{margin-bottom:4px}
  #disfilters{max-height:148px;overflow-y:auto;margin-top:4px}
  #disfilters label{display:block}
@@ -814,7 +818,7 @@ __LIBTAG__
  /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
     carry a trailing margin -- 6px of it would push Fit onto a second line */
  #zoom button:last-child{margin-right:0}
- #srcbtns button.on,#labelbtns button.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
+ #srcbtns button.on,#labelbtns button.on,#drvbtn.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  /* the name buttons must not move when one is toggled: bold text is wider, so each button reserves
     its bold width up front (a hidden bold copy of its own label) and switching weight changes nothing */
  /* ...and 3px less side padding (no trailing margin) pays for that reserve, so the pair still
@@ -878,6 +882,8 @@ __LIBTAG__
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
  <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
   <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. Regular expressions are the way to find edges that describe <b>variants</b>: for example, <code>/\s+[A-Z]\d+[A-Z]\s+/</code> finds edges that describe missense and nonsense variants. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
+ <div class="row"><button id="drvbtn" aria-pressed="false">Enrich for drivers</button> <button class="ihelp" aria-label="About enrich for drivers" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence naming a <b>point mutation</b> &mdash; a protein change such as <code>V600E</code> or <code>G12C</code> written as a word of its own or in parentheses, matched by <code>/\s+[A-Z]\d+[A-Z]\s+/</code> or <code>/\([A-Z]\d+[A-Z]\)/</code> (case-sensitive) &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It combines with the text box (a sentence must match both) and, like it, is a lens: the thresholds above weigh an edge's full support, and only <b>Min connections</b> and <b>Min cluster size</b> are re-applied to what it leaves. Click again to switch it off.</div></div>
 __KINDROW__
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
@@ -968,18 +974,27 @@ function textMatcher(q){
  const re=new RegExp(src,flags);
  return {test:t=>re.test(t||''),hlre:new RegExp(src,flags+'g')};
 }
+// "Enrich for drivers": a fixed, case-SENSITIVE point-mutation lens (V600E, G12C as a word of
+// their own, or in parentheses: "KRAS (G12C)"), ANDed with the text box -- textMatcher would add the i flag and let "a12b" match
+const DRIVER_RE=/\s+[A-Z]\d+[A-Z]\s+|\([A-Z]\d+[A-Z]\)/;
+let DRIVERS=false;
+function driverMatcher(){return {test:t=>DRIVER_RE.test(t||''),hlres:[new RegExp(DRIVER_RE.source,'g')]};}
+function andMatchers(a,b){if(!a||!b)return a||b;return {test:t=>a.test(t)&&b.test(t),hlres:[...(a.hlres||[a.hlre]),...(b.hlres||[b.hlre])]};}
 let TM=null;   // matcher in force for the current view; used to highlight hits in sentence text
 // mark hits on the RAW text (so a query containing <, > or & still highlights), escaping each piece as we go
 function hl(t){
  t=t||'';
  if(!TM)return esc(t);
- const re=TM.hlre;re.lastIndex=0;
- let out='',last=0,m;
- while((m=re.exec(t))!==null){
-  if(!m[0].length){re.lastIndex++;continue;}   // zero-length match (e.g. /x*/): skip, never loop
-  out+=esc(t.slice(last,m.index))+'<mark>'+esc(m[0])+'</mark>';
-  last=m.index+m[0].length;
- }
+ // collect the hits of every pattern in force (text box and/or driver lens), merge overlaps
+ const iv=[];
+ (TM.hlres||[TM.hlre]).forEach(re=>{re.lastIndex=0;let m;
+  while((m=re.exec(t))!==null){
+   if(!m[0].length){re.lastIndex++;continue;}   // zero-length match (e.g. /x*/): skip, never loop
+   iv.push([m.index,m.index+m[0].length]);
+  }});
+ iv.sort((x,y)=>x[0]-y[0]);
+ let out='',last=0;
+ iv.forEach(([a,b])=>{if(b<=last)return;a=Math.max(a,last);out+=esc(t.slice(last,a))+'<mark>'+esc(t.slice(a,b))+'</mark>';last=b;});
  return out+esc(t.slice(last));
 }
 // The relation-type boxes filter SENTENCES, not whole edges. An edge's payload "cat" is the
@@ -1208,7 +1223,7 @@ function focusKeep(edges,seeds,hops){
 }
 function build(thr){
  const conf=activeConf(), cats=activeCats(); VIEW_CATS=cats; const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
- const txt=activeText(), tm=textMatcher(txt); TM=tm;
+ const txt=activeText(), tm=andMatchers(textMatcher(txt),DRIVERS?driverMatcher():null); TM=tm;
  const kinds=activeKinds();
  let edges=[];
  // The text query is a LENS, not a threshold input: an edge's support is what survives the
@@ -1220,12 +1235,12 @@ function build(thr){
  // measured text-blind here; the lens comes further down, and only min-connections/min-cluster
  // are re-judged on what it leaves (they describe the picture, so they have to).
  // Some node types have no relations OF THEIR OWN: the RE routing pairs a disease with a gene
- // or a chemical, never with another disease, so ticking disease alone can never draw an edge
- // and the canvas went blank. When the ticked types admit no edge anywhere in the file, the
- // nodes are drawn on their own instead -- each one that still has evidence through a partner
- // of an unticked type -- so a disease-only view shows the disease landscape (sized by
- // evidence, pooled by tissue) rather than nothing. `orphan` collects that evidence as we go.
- let kindOK=false; const orphan={};
+ // or a chemical, never with another disease, so ticking disease alone can never draw an edge.
+ // Such a view is left empty and the stats line says why. (It once fell back to drawing those
+ // nodes unconnected, but that fallback skipped min-connections, min-cluster and the disease
+ // keep-list, so unticking gene and chemical brought back diseases the full view had filtered
+ // out. Unticking a node type now only ever removes nodes.) kindOK: any edge fits the ticks.
+ let kindOK=false;
  // "Only their direct neighbours" picks its NODES relation-blind: who is one link from a kept
  // disease under every other setting (score, years, training set, node types, min sentences /
  // publications), whatever relation that link carries. The relation boxes then choose which
@@ -1244,8 +1259,7 @@ function build(thr){
    const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
    const np=new Set(sup.map(s=>s.pmid)).size;
    if(mp>1&&np<mp)return;
-   if(kf){edges.push({e:e,sup:sup,vis:sup,w:sup.length,np:np,cat:viewCat(e,sup)});return;}
-   if(kinds)[e.from,e.to].forEach(nd=>{if(kinds.has(KIND[nd]))(orphan[nd]=orphan[nd]||[]).push(...sup);});
+   if(kf)edges.push({e:e,sup:sup,vis:sup,w:sup.length,np:np,cat:viewCat(e,sup)});
  });
  const gf=(document.getElementById('genefilter').value||'').trim().toLowerCase();
  const chemSel=document.getElementById('chemfilter').value;
@@ -1314,15 +1328,7 @@ function build(thr){
  const keep=new Set();edges.forEach(o=>{keep.add(o.e.from);keep.add(o.e.to);});
  loneDis.forEach(id=>keep.add(id));
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
- // the edgeless fallback, sized by the same measure as everything else: unique sentences in view
- const isoSz={}, isoPub=new Set();
- if(kinds&&!kindOK)Object.keys(orphan).forEach(nd=>{
-   if(disConn&&!DIS_KEEP.has(nd))return;   // an edgeless node connects to nothing
-   const t=new Set(),p=new Set();
-   orphan[nd].forEach(s=>{if(!tm||tm.test(s.text)){t.add(s.text);p.add(s.pmid);}});
-   if(t.size){isoSz[nd]=t.size;keep.add(nd);p.forEach(x=>isoPub.add(x));}});
- const nIso=Object.keys(isoSz).length;
- const nsz=id=>(nss[id]?nss[id].size:(isoSz[id]||0));
+ const nsz=id=>(nss[id]?nss[id].size:0);
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
   const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
   return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
@@ -1331,11 +1337,11 @@ function build(thr){
  // arrowheads only on directed (signed) relations; interacts/associated/binds are symmetric,
  // so an arrow there would only show which entity the sentence happened to mention first
  const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:DIRECTED.has(o.cat.replace(/^not /,'')),scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
- const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));isoPub.forEach(p=>vpub.add(p));
+ const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
  // name what is actually on screen: "378 diseases" beats "378 genes" in a disease-only view
  const KLAB={gene:'genes',disease:'diseases',chemical:'chemicals'};
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes').replace(/s$/,nodes.length===1?'':'s')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(nIso?' &middot; <b>'+nIso+'</b> drawn unconnected: nothing in the corpus relates these node types to each other':'')
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes').replace(/s$/,nodes.length===1?'':'s')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(DRIVERS?' &middot; <b>enriched for drivers</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(kinds&&!kindOK?' &middot; <b>nothing relates '+(kinds.size===1?'a '+[...kinds][0]+' to another '+[...kinds][0]:'these node types to each other')+'</b> &mdash; '+(kinds.has('disease')&&kinds.size===1?'diseases link only to genes and chemicals, so tick one of them':'tick another node type'):'')
    +(cats.size?'':' &middot; <b>no relation type is ticked</b>')
    +(loneDis.length?' &middot; <b>'+loneDis.length+'</b> kept disease'+(loneDis.length>1?'s have':' has')+' no link under these settings, drawn on '+(loneDis.length>1?'their':'its')+' own'
      +(cats.has('associated')?'':' &mdash; diseases are linked by <b>associated</b>, so tick it to see '+(loneDis.length>1?'their':'its')+' genes and drugs'):'');
@@ -1424,6 +1430,7 @@ const confEl=document.getElementById('conf');function updScore(){document.getEle
 document.getElementById('genefilter').addEventListener('change',()=>build(+thr.value));
 document.getElementById('genefilter').addEventListener('keydown',ev=>{if(ev.key==='Enter')build(+thr.value);});
 document.getElementById('hops').addEventListener('change',()=>build(+thr.value));
+document.getElementById('drvbtn').addEventListener('click',ev=>{DRIVERS=!DRIVERS;ev.currentTarget.classList.toggle('on',DRIVERS);ev.currentTarget.setAttribute('aria-pressed',DRIVERS);build(+thr.value);});
 const txtEl=document.getElementById('textfilter');let txtTimer=null;   // debounce: each keystroke would otherwise rebuild the whole network
 txtEl.addEventListener('input',()=>{clearTimeout(txtTimer);txtTimer=setTimeout(()=>build(+thr.value),350);});
 txtEl.addEventListener('keydown',ev=>{if(ev.key==='Enter'){clearTimeout(txtTimer);build(+thr.value);}});
