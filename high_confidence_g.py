@@ -780,7 +780,9 @@ __LIBTAG__
  #panel{right:12px}
  /* left column: what the picture LOOKS like (names, spacing, grouping) -- the right one keeps
     what is IN it (thresholds, filters, provenance), so the two columns split by question */
- #lpanel{left:12px}
+ #lpanel{left:12px;scrollbar-gutter:stable}
+ /* an 'on' Enrich button turns bold: reserve the bold width up front so the grid never widens */
+ #enrichgrid button::after{content:attr(data-t);display:block;height:0;overflow:hidden;visibility:hidden;font-weight:600}
  /* each column can be shut to free the canvas: the x sits in the panel's top corner, and a
     closed panel leaves a small tab at the same corner that brings it back */
  .pclose{float:right;margin:-8px -10px 4px 8px;width:22px;height:22px;padding:0;border:1px solid #cdd5e0;border-radius:50%;background:#eef2f7;color:#1c2330;font:600 15px/1 Segoe UI,Arial,sans-serif;cursor:pointer}
@@ -799,6 +801,14 @@ __LIBTAG__
  .ihelp{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:6px;padding:0;border:1px solid #cdd5e0;border-radius:50%;background:#eef2f7;color:#2b6cb0;font:600 11px/1 Segoe UI,Arial,sans-serif;cursor:pointer;vertical-align:1px}
  .ihelp:hover{background:#dde4ee}
  .ihelp.on{background:#0969da;border-color:#0969da;color:#fff}
+ /* the Enrich buttons, two per row: each .row dissolves into the grid (display:contents) so its
+    button and "i" are two cells, and its help note spans the full width under the pair when
+    opened ("dense" lets the next button back-fill the row the note would otherwise break) */
+ #enrichgrid{display:grid;grid-template-columns:max-content max-content max-content max-content;column-gap:0;row-gap:4px;align-items:center;grid-auto-flow:row dense;margin:2px 0 8px;border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}   /* boxed like #catfilters */
+ #enrichgrid>.row{display:contents}
+ #enrichgrid>.row>button:first-child{margin:0}
+ #enrichgrid .ihelp{margin:0 10px 0 3px}
+ #enrichgrid .help{grid-column:1/-1;margin:0 0 4px;width:0;min-width:100%}   /* adds no width of its own: wraps to the grid */
  .help{display:none;margin-top:4px} .help.open{display:block}
  #conf{width:190px;cursor:pointer}
  select,#search,#genefilter,#drugsearch,#textfilter{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
@@ -809,16 +819,18 @@ __LIBTAG__
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
  #catfilters .cnt{color:#5b6677;font-size:11px}
- #zoom button,#srcbtns button,#labelbtns button,#drvbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
- #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#drvbtn:hover{background:#dde4ee}
+ #zoom button,#srcbtns button,#labelbtns button,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
+ #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#catall:hover,#drvbtn:hover,#fusbtn:hover,#itdbtn:hover,#oexbtn:hover,#ampbtn:hover,#delbtn:hover,#trubtn:hover,#exobtn:hover,#cnbtn:hover,#metbtn:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button{margin-bottom:4px}
- #disfilters{max-height:148px;overflow-y:auto;margin-top:4px}
- #disfilters label{display:block}
+ #disfilters{display:block;max-height:148px;overflow-y:auto;margin-top:4px}
+ #disfilters label{display:block;margin:1px 0}
+ #disfilters .dist{font-weight:600;margin-top:3px}
+ #disfilters .dism{padding-left:18px}
  #disclear:hover{color:#0969da}
  /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
     carry a trailing margin -- 6px of it would push Fit onto a second line */
  #zoom button:last-child{margin-right:0}
- #srcbtns button.on,#labelbtns button.on,#drvbtn.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
+ #srcbtns button.on,#labelbtns button.on,#drvbtn.on,#fusbtn.on,#itdbtn.on,#oexbtn.on,#ampbtn.on,#delbtn.on,#trubtn.on,#exobtn.on,#cnbtn.on,#metbtn.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  /* the name buttons must not move when one is toggled: bold text is wider, so each button reserves
     its bold width up front (a hidden bold copy of its own label) and switching weight changes nothing */
  /* ...and 3px less side padding (no trailing margin) pays for that reserve, so the pair still
@@ -862,7 +874,30 @@ __LIBTAG__
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
   <div class="legend" id="disfilters"></div>
   <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> Only their direct neighbours</label>
-  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> goes further: it keeps just the ticked diseases, the genes and drugs with an edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Only clusters that contain a ticked disease <em>on screen</em> are kept: a gene whose own link to the disease is hidden (its relation unticked, the text or driver lens, min connections, cluster size) does not show up as a detached island of sentences that never name the cancer. Diseases are linked almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood usually shrinks to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
+  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. Diseases of the same tissue (read from the name, as for <em>Stack same-tissue diseases</em>) are listed together under a bold tissue heading whose box ticks or unticks them all &mdash; half-ticked when only some are kept; the number beside it is how many diseases it holds and their edges in all. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> switches on by itself when you tick the first disease (untick it to see the whole graph with only those diseases), and goes further: it keeps just the ticked diseases, the genes and drugs with a <em>drawn</em> edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Every other setting counts: a gene whose own link to the disease is hidden (its relation unticked, the text or driver lens, min sentences, min connections, cluster size) is not a neighbour, however it connects to the ones that are. Genes are linked to diseases almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood shrinks to a few drugs, or to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
+ <div class="row" id="enrichhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for alteration:</b></div>
+ <div id="enrichgrid">
+ <div class="row"><button id="drvbtn" aria-pressed="false">Drivers</button> <button class="ihelp" aria-label="About enrich for drivers" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, matched by <code>/\s+[A-Z]\d+[A-Z]\s+/</code> or <code>/\([A-Z]\d+[A-Z]\)/</code> (case-sensitive), and excluding the figure, table and cell-line look-alikes.</div></div>
+ <div class="row"><button id="fusbtn" aria-pressed="false">Fusions</button> <button class="ihelp" aria-label="About enrich for fusions" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about a <b>gene fusion</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. A sentence counts if it says <i>fusion</i> (<i>EML4-ALK fusion</i>, <i>RET fusion-positive</i>; not <i>infusion</i>), or uses <i>translocation</i> in the chromosomal sense: after a fusion pair or a gene that drives fusions (<i>EML4-ALK translocation</i>, <i>ROS1 translocation</i>, <i>ALK-translocated</i>), with a karyotype (<i>t(11;22) translocation</i>), after <i>chromosomal</i>, <i>balanced</i>, <i>reciprocal</i> or <i>gene</i>, or as <i>translocation involving MLL</i>. A protein moving inside the cell &mdash; <i>nuclear translocation of p65</i>, <i>translocation of YAP to the nucleus</i> &mdash; does not count.</div></div>
+ <div class="row"><button id="oexbtn" aria-pressed="false">Overexpression</button> <button class="ihelp" aria-label="About enrich for overexpression" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>overexpression</b> &mdash; any word starting <i>overexpres</i> or <i>over-expres</i>, in any case (<i>overexpression</i>, <i>overexpressed</i>, <i>over-expressing</i>) &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. Note it catches both senses: a gene found overexpressed in tumours, and a gene overexpressed in an experiment.</div></div>
+ <div class="row"><button id="ampbtn" aria-pressed="false">Amplification</button> <button class="ihelp" aria-label="About enrich for amplification" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>amplification</b> &mdash; any word starting <i>amplif</i>, in any case (<i>amplification</i>, <i>amplified</i>, <i>ERBB2-amplified</i>) &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. The laboratory sense is not counted &mdash; a method or tool attached to the word (<i>PCR-amplified</i>, <i>amplified by PCR</i>, <i>amplified using primers</i>, <i>whole-genome amplification</i>), an assay noun after it (<i>amplification curve</i>, <i>amplification primers</i>), or a lab object amplified (<i>amplification of the cDNA</i>, <i>amplified fragments</i>) &mdash; while a gene amplification merely <em>measured</em> by PCR (<i>MET amplification detected by ddPCR</i>) still is.</div></div>
+ <div class="row"><button id="delbtn" aria-pressed="false">Deletion / loss</button> <button class="ihelp" aria-label="About enrich for deletion / loss" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about a gene <b>deleted or lost</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>deletion</i> / <i>deleted</i> / <i>co-deletion</i> (<i>PTEN homozygous deletion</i>, <i>SMAD4-deleted</i>, <i>1p19q co-deletion</i>), a gene's <i>del</i> (<i>CDKN2A del</i>, <i>del(17p)</i>), <i>loss of heterozygosity</i> / <i>LOH</i>, <i>loss of function</i>, and <i>loss</i> tied to a gene or chromosome (<i>PTEN loss</i>, <i>loss of SMAD4</i>, <i>copy-number loss</i>, <i>9p loss</i>). Not counted: activating in-frame deletions (<i>EGFR exon 19 deletion</i>), engineered constructs (<i>domain deletion mutant</i>, <i>deletion constructs</i>), generic loss (<i>weight loss</i>, <i>cell loss</i>, <i>loss of viability</i>), and a lost signal rather than a lost gene (<i>loss of ERK phosphorylation</i>, <i>loss of AKT activity</i>).</div></div>
+ <div class="row"><button id="trubtn" aria-pressed="false">Truncation</button> <button class="ihelp" aria-label="About enrich for truncation" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about a <b>truncating variant</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>truncating</i>, <i>truncation</i> as a mutation (<i>ASXL3 truncations</i>, <i>truncation mutations</i>, <i>premature truncation</i>), <i>truncated</i> with a mutation word (<i>truncated mutations</i>), <i>frameshift</i> / <i>frame-shift</i>, <i>nonsense</i>, <i>stop-gain</i>, <i>premature stop / termination codon</i>, splice-site variants (<i>NF2 splice-site variants</i>, <i>splicing mutation</i>), and stop or frameshift notation (<i>Q55*</i>, <i>R213Ter</i>, <i>P191fs</i>). Not counted: engineered truncated proteins (<i>truncated form of</i>, <i>truncation mutants</i>), splice isoforms (<i>AR splice variant AR-V7</i>), splicing biology and splicing-factor mutations (<i>alternative splicing</i>, <i>splicing factor mutations</i>), and <i>X</i> notation (<i>G719X</i>, where X is any amino acid).</div></div>
+ <div class="row"><button id="exobtn" aria-pressed="false">Exon variants</button> <button class="ihelp" aria-label="About enrich for exon variants" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence naming a variant <b>by its exon</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>exon N</i> with a variant word close after it (<i>EGFR exon 19 deletion</i>, <i>HER2 exon 20 insertion</i>, <i>MET exon 14 skipping</i>, <i>PIK3CA exon 20 mutations</i>, <i>exon 9 PIK3CA mutations</i>, <i>exon 21 L858R</i>, <i>PDGFRA exon 18 (D842V)</i>), and the compact forms (<i>METex14</i>, <i>MET&Delta;ex14</i>, <i>ERBB2&Delta;Ex16</i>, <i>ex19del</i>, <i>EGFRex20ins</i>, <i>Ex20Ins</i>, <i>EGFR ex20</i>). Not counted: an exon named without a variant (<i>in exons 1 and 2</i>, <i>IRAK4 exon 4 by PRMT5</i>), fusion breakpoints (<i>FGFR3-TACC3 Ex14-16</i>), and look-alikes (the drug <i>EX527</i>, the gene <i>Deltex1</i>, guide RNAs such as <i>sgPpm1dexon6</i>).</div></div>
+ <div class="row"><button id="cnbtn" aria-pressed="false">Copy number</button> <button class="ihelp" aria-label="About enrich for copy number" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>copy-number change</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>copy number</i> in any form (<i>copy number gain / loss / alteration / variation</i>, <i>copy-number</i>), the abbreviations <i>CNV</i>, <i>CNA</i>, <i>SCNA</i> and <i>CN gain / loss</i>, chromosome-arm and whole-chromosome changes (<i>1q gain</i>, <i>gain of 1q</i>, <i>8p loss</i>, <i>17q12 amplification</i>, <i>11q deletion</i>, <i>chromosome 7 gain</i>, <i>loss of chromosome 10</i>), and <i>copy-neutral LOH</i>. Not counted: the copy number of something that is not the tumour genome (<i>mtDNA / mitochondrial DNA / plasmid / viral / transgene copy number</i>).</div></div>
+ <div class="row"><button id="metbtn" aria-pressed="false">Methylation</button> <button class="ihelp" aria-label="About enrich for methylation" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>DNA methylation or epigenetic silencing</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>hyper-</i> / <i>hypo-</i> / <i>de-methylation</i> (<i>BCAT1 promoter hypermethylation</i>, <i>hypomethylated CpGs</i>, <i>demethylating agent</i>), <i>DNA</i> / <i>promoter</i> / <i>CpG</i> / <i>cytosine</i> / <i>gene-body</i> methylation, <i>unmethylated</i> and <i>differentially methylated</i>, <i>methylome</i>, <i>DNA methyltransferase</i>, <i>CpG island</i>, and <i>epigenetic(ally) silenced</i>; a bare <i>methylation</i> (<i>MGMT methylation</i>, <i>methylation in SFRP2</i>) only when the sentence also speaks of DNA &mdash; a promoter, CpG, DNA, MGMT, bisulfite, 5-aza or decitabine. Not counted: RNA methylation (<i>m6A methylation</i>), histone and protein methylation (<i>H3K27 methylation</i>, <i>arginine methylation</i>, <i>PRMT5-mediated</i>, <i>p53 methylation</i>), and look-alikes such as <i>methylcellulose</i>.</div></div>
+ <div class="row"><button id="itdbtn" aria-pressed="false">ITD</button> <button class="ihelp" aria-label="About enrich for ITD" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about an <b>internal tandem duplication</b> &mdash; <i>ITD</i> in capitals as a word of its own (<i>FLT3-ITD</i>, <i>FLT3/ITD</i>, <i>ITD-positive</i>) or <i>internal tandem duplication</i> spelled out &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted.</div></div>
+ </div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
@@ -881,12 +916,10 @@ __LIBTAG__
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
  <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
-  <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. Regular expressions are the way to find edges that describe <b>variants</b>: for example, <code>/\s+[A-Z]\d+[A-Z]\s+/</code> finds edges that describe missense and nonsense variants. The thresholds above weigh an edge's <em>full</em> support, so a match is never dropped for evidence the query happened to hide &mdash; min-publications judges all of an edge's papers, not just the matching ones. <b>Min connections</b> and <b>Min cluster size</b> are the exception: they describe the picture, so they are re-applied to what the query leaves.</div></div>
- <div class="row"><button id="drvbtn" aria-pressed="false">Enrich for drivers</button> <button class="ihelp" aria-label="About enrich for drivers" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence naming a <b>point mutation</b> &mdash; a protein change such as <code>V600E</code> or <code>G12C</code> written as a word of its own or in parentheses, matched by <code>/\s+[A-Z]\d+[A-Z]\s+/</code> or <code>/\([A-Z]\d+[A-Z]\)/</code> (case-sensitive) &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. Two kinds of look-alike are not counted: supplementary figure and table panels (<i>Figure S6K</i>, <i>Fig. S4A and S4B</i>, <i>Table S2A</i>, <i>S8B Fig</i>), though <i>S768I</i> or <i>S70E</i> outside such a reference still counts; and a few names that are not mutations &mdash; <i>S6K</i>, <i>E2F</i>, <i>G2M</i>, <i>S1P</i> and the cell lines <i>T47D</i>, <i>T98G</i>, <i>M059J</i>. A sentence that also names a real mutation still counts. It combines with the text box (a sentence must match both) and, like it, is a lens: the thresholds above weigh an edge's full support, and only <b>Min connections</b> and <b>Min cluster size</b> are re-applied to what it leaves. Click again to switch it off.</div></div>
+  <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. Regular expressions are the way to find edges that describe <b>variants</b>: for example, <code>/\s+[A-Z]\d+[A-Z]\s+/</code> finds edges that describe missense and nonsense variants. <b>Min unique sentences</b> and <b>Min unique publications</b> count the <em>matching</em> sentences only, so every edge drawn shows at least that many; <b>Min connections</b> and <b>Min cluster size</b> are then applied to what the query leaves. A narrow query at a high floor can therefore leave little or nothing.</div></div>
 __KINDROW__
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
-  <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div>
+  <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div><div class="row" style="margin-top:4px"><button id="catall" type="button">Check all</button></div>
  <div class="row mut help" data-help="rel">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. Only <b>activates</b>/<b>inhibits</b> edges have an arrowhead (agent &rarr; target); <b>interacts</b>, <b>associated</b> and <b>binds</b> are symmetric and drawn without one. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels. Thickness and arrowhead size follow the number of <b>independent publications</b> behind the edge, not its sentence count &mdash; one paper repeating itself never thickens a line.</div>
  <div class="row mut help" data-help="rel">Counts read <em>total &middot; in view</em>: the total is every edge in the file carrying at least one sentence of that type (an edge with mixed readings counts under each, so the totals exceed the edge count), &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
  <div class="row">Training set behind the edge <button class="ihelp" data-help="src" aria-label="About training sets" aria-expanded="false">i</button></div>
@@ -940,6 +973,30 @@ const net=document.getElementById('net'); let network=null, NODEDS=null;
 // the layout exactly as physics left it, plus the tissue groups of what is on screen; every
 // position control replays from these, so they compose and none of them accumulates drift
 let BASEPOS=null, TGROUPS=[];
+// Every node's last stabilized position, kept across rebuilds (and across the times a filter
+// hides it), so changing a filter does not re-roll the whole layout: nodes seen before go back
+// where they were and are held there while physics places only the new ones, next to their
+// neighbours. A position, once learned, is only replaced when the node is laid out afresh.
+const LAYOUT={};
+// Fit, but never closer than FIT_MAX_SCALE (the size nodes and labels are designed for): a view of
+// three nodes used to be blown up to fill the whole screen. Frames the drawn positions, with margin.
+const FIT_MAX_SCALE=1.0;
+function safeFit(anim){
+ const P=Object.values(network.getPositions());if(!P.length)return;
+ let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+ P.forEach(p=>{x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y);});
+ const W=net.clientWidth||800,H=net.clientHeight||600,pad=80;
+ const sc=Math.min(FIT_MAX_SCALE,0.92*Math.min(W/(x1-x0+2*pad),H/(y1-y0+2*pad)));
+ network.moveTo({position:{x:(x0+x1)/2,y:(y0+y1)/2},scale:sc,animation:anim?{duration:400}:false});
+}
+// every drawn node inside the current viewport?
+function allInView(){
+ const W=net.clientWidth||800,H=net.clientHeight||600;
+ const a=network.DOMtoCanvas({x:0,y:0}),b=network.DOMtoCanvas({x:W,y:H});
+ return Object.values(network.getPositions()).every(p=>p.x>=a.x&&p.x<=b.x&&p.y>=a.y&&p.y<=b.y);
+}
+function idJitter(id,r){let h=0;for(const c of String(id))h=(h*31+c.charCodeAt(0))|0;
+ const a=(h%360)*Math.PI/180;return [Math.cos(a)*r,Math.sin(a)*r];}
 function applyLayoutShape(){
  if(!network||!BASEPOS)return;
  reshapeRadial(network,BASEPOS,activeShrink(),activeExpand());
@@ -991,6 +1048,9 @@ const DRIVER_RE=/\s+[A-Z]\d+[A-Z]\s+|\([A-Z]\d+[A-Z]\)/g;
 // style, when "Fig" follows it). Only the
 // last 80 characters are looked at: a reference is never far from its panels.
 const FIG_CTX=/\b(?:fig(?:ure)?s?|tables?)\.?\s*(?:(?:[A-Z]?\d+[A-Za-z]{0,2}|[A-Za-z])\s*(?:[-–,;&]|\band\b|\bor\b)?\s*)*$/i;
+// "fig. X1Y" with nothing in between: any letter-digits-letter label straight after a figure /
+// table word is a panel, not a mutation (case-insensitive, "fig" / "fig." / "figure(s)" / "table")
+const FIG_DIRECT=/\b(?:fig(?:ure)?s?|tables?)\.?\s*$/i;
 // PLOS puts the word AFTER the panel: "S8B Fig", "(S2A and S2B Fig)", "S5B–S5D Figs"
 const FIG_POST=/^(?:\s*(?:[-–,;&]|and|or)?\s*S\d{1,2}[A-Za-z]{0,2})*\s*Figs?\b/;
 // Words of the same letter-digits-letter shape that are not amino-acid changes; a sentence
@@ -1004,7 +1064,10 @@ function driverHits(t){t=t||'';
  return reHits(DRIVER_RE,t).filter(([a,b])=>{
   if(DRIVER_STOP.has(t.slice(a,b).replace(/[\s()]/g,'')))return false;
   while(/[\s(]/.test(t[a]))a++;            // the hit's own leading space / parenthesis
-  // only a supplementary panel can be a figure label -- S, one or two digits, a letter (S6K,
+  // a label RIGHT after the word is a panel whatever its letter -- "Fig. S6K", "Fig. E3B"
+  // (extended data), "Figure A1C" (appendix), "Table R2A": no mutation is written that way
+  if(FIG_DIRECT.test(t.slice(Math.max(0,a-40),a)))return false;
+  // further along a panel list, only a supplementary panel can be a figure label -- S, one or two digits, a letter (S6K,
   // S12B; a main-text panel is "3B", which the pattern never matches) -- so "Figure 3 and V600E
   // cells" keeps its V600E and "Fig. 2B and S768I mutants" its S768I
   const m=/^S\d{1,2}[A-Z]\b/.exec(t.slice(a));
@@ -1012,7 +1075,219 @@ function driverHits(t){t=t||'';
   return !FIG_CTX.test(t.slice(Math.max(0,a-80),a))&&!FIG_POST.test(t.slice(a+m[0].length,a+m[0].length+80));
  });}
 function driverMatcher(){return {test:t=>driverHits(t).length>0,hits:driverHits};}
+// "Enrich for fusions": a sentence about a gene fusion. "fusion(s)" as a word of its own counts
+// as it stands (so "infusion" / "transfusion" do not); "translocation" only in the CHROMOSOMAL
+// sense -- in this corpus it is mostly a protein moving ("nuclear translocation of p65"), and a
+// hit counts only with a fusion cue next to it and no compartment word before it.
+const FUSION_WORD=/\bfusions?\b/gi;
+const TRANSLOC_WORD=/\btransloca(?:tions?|ted)\b/gi;
+// genes whose translocations are the fusion drivers of this literature (partners included)
+const FUSION_GENES='ALK|ROS-?1|RET|NTRK[123]|NRG1|FGFR[123]|MYC|MLL|KMT2A|BCR|ABL1?|BCL2|BCL6|CCND1|IGH|ETV6|RUNX1|EWSR1|FLI1|PAX[37]|FOXO1|TFE3|TFEB|NUTM1|BRD4|PML|RARA|CBFB|MYH11|SS18|SSX[12]?|CIC|DUX4|NUP98|MECOM|NAB2|STAT6|MAML2|CRTC1|TMPRSS2|ERG|ETV[145]|EML4|KIF5B|CD74|CCDC6|NCOA4|CAMTA1|WWTR1|TAZ|YAP1|MA9|AF4|AF9|MLLT3|AFF1|PDGFR[AB]|JAK2|CRLF2|ZNF384|PBX1|TCF3|RSPO[23]';
+// a compartment / direction before it: the protein-trafficking sense
+const TL_NEG_PRE=/\b(?:nuclear|nucleus|cytoplasm(?:ic)?|cytosolic|mitochondrial|membrane|plasma|lysosomal|subcellular|golgi)\s*-?\s*$/i;
+// the chromosomal cues: a karyotype or chromosomal word just before ("balanced", "truncating",
+// "fusion/"), a fusion pair "X-Y" / "X::Y" / "X/Y" or a fusion gene just before ("ALK
+// translocation", "RSPO3-translocated"), or a fusion gene with a sibling alteration ("MYC
+// amplification or translocation")
+// (String.raw keeps every backslash as written: in a plain '...' string "\b" is a backspace)
+const TL_POS_PRE=new RegExp(String.raw`(?:\bt\(\d+;\d+\)|\b(?:chromosom\w*|balanced|reciprocal|genomic|gene|recurrent|truncating|fusion\s*/)|\b(?:`+FUSION_GENES+String.raw`)\s+(?:\w+\s+){0,2}(?:or|and)|\b[A-Z][A-Za-z0-9]{1,9}\s*(?:-|–|::|/)\s*[A-Z][A-Za-z0-9]{1,9}|\b(?:`+FUSION_GENES+String.raw`))[\s-]*$`);
+// ... or a karyotype / fusion gene just after: "translocation t(9;22)", "translocations of MYC",
+// "a translocation involving MLL"
+const TL_POS_POST=new RegExp(String.raw`^\s*(?:\(?t\(\d+;\d+\)|(?:of|involving|between|affecting)\s+(?:the\s+)?(?:`+FUSION_GENES+String.raw`)\b)`);
+function fusionHits(t){t=t||'';
+ const iv=reHits(FUSION_WORD,t);
+ reHits(TRANSLOC_WORD,t).forEach(([a,b])=>{
+   const pre=t.slice(Math.max(0,a-40),a),post=t.slice(b,b+40);
+   if(TL_NEG_PRE.test(pre))return;
+   if(TL_POS_PRE.test(pre)||TL_POS_POST.test(post))iv.push([a,b]);
+ });
+ return iv;}
+let FUSIONS=false;
+function fusionMatcher(){return {test:t=>fusionHits(t).length>0,hits:fusionHits};}
+// "Enrich for ITD": internal tandem duplications, nearly all FLT3-ITD in this corpus. "ITD" is
+// matched case-SENSITIVELY as a word ("FLT3-ITD", "FLT3/ITD", "ITD-positive"), the long form
+// in any case.
+const ITD_RE=/\bITDs?\b|\binternal tandem duplications?\b/gi;
+let ITDS=false;
+function itdHits(t){t=t||'';return reHits(ITD_RE,t).filter(([a,b])=>{const w=t.slice(a,b);return w.length>4||/^ITDs?$/.test(w);});}
+function itdMatcher(){return {test:t=>itdHits(t).length>0,hits:itdHits};}
+// "Enrich for overexpression": "overexpres" / "over-expres" (any hyphen glyph), any case, as the
+// start of a word -- the rest of the word is highlighted with it
+const OEX_RE=/\bover[-‐‑–]?expres\w*/gi;
+let OEXS=false;
+function oexHits(t){return reHits(OEX_RE,t||'');}
+function oexMatcher(){return {test:t=>oexHits(t).length>0,hits:oexHits};}
+// "Enrich for amplification": any word starting "amplif" (also after a hyphen: "ERBB2-amplified")
+const AMP_RE=/\bamplif\w*/gi;
+let AMPS=false;
+// The laboratory sense -- copying DNA, not a gene gained in the genome -- is recognised from what
+// is attached to the word itself, never from lab words elsewhere in the sentence: "MET
+// amplification detected by FISH and plasma ddPCR" is a gene amplification MEASURED by PCR and
+// must count. A hit is the lab sense when
+//   just before it: a method ("PCR-amplified", "RT-PCR amplification", "whole-genome
+//     amplification", "isothermal / rolling-circle / tyramide signal amplification"; a bare
+//     "signal amplification" is not one -- under FISH it IS the gene amplification, and
+//     "death signal amplification" is biology), or
+//   just after it: the method or the tool ("amplified by PCR", "amplified using primers"), a
+//     run-of-the-assay noun ("amplification curve / efficiency / cycle / primers / kit /
+//     reaction / products"), or a lab object amplified ("amplification of the cDNA / DNA
+//     fragment / PCR product / exon 19", "amplified fragments").
+const AMP_LAB_PRE=/\b(?:(?:RT-?|q|dd|nested\s|real-time\s|multiplex\s)?PCR|whole[- ]genome|isothermal|rolling[- ]circle|tyramide(?:\s+signal)?|loop-mediated|library)[\s-]*$/i;
+const AMP_LAB_POST=/^\s*(?:(?:was|were|is|are)\s+)?(?:(?:by|via|through)\s+(?:RT-?|q|dd|nested\s|real-time\s)?PCR|(?:using|with)\s+(?:the\s+|specific\s+|gene-specific\s+)?primers?|(?:curves?|efficienc\w*|plots?|cycles?|primers?|kits?|reactions?|steps?|products?|fragments?|amplicons?)\b|of\s+(?:the\s+)?(?:cDNA|DNA\s+fragments?|fragments?|PCR\s+products?|amplicons?|templates?|exons?\s*\d+)\b)/i;
+function ampHits(t){t=t||'';return reHits(AMP_RE,t).filter(([a,b])=>!AMP_LAB_PRE.test(t.slice(Math.max(0,a-40),a))&&!AMP_LAB_POST.test(t.slice(b,b+60)));}
+function ampMatcher(){return {test:t=>ampHits(t).length>0,hits:ampHits};}
+// "Enrich for deletion / loss": a gene, region or allele deleted or lost.
+//   deletion words: deletion(s) / deleted / deleting / co-deletion -- but not "deleterious"; not
+//     an activating in-frame deletion ("exon 19 deletion" is an EGFR driver, not a loss); not an
+//     engineered construct ("domain deletion mutant", "deletion constructs").
+//   "del": only as a gene's call ("CDKN2A del", "PTEN del") or a karyotype ("del(17p)").
+//   loss: "loss of heterozygosity" / LOH / "loss of function" always; otherwise only tied to a
+//     gene or chromosome -- a gene-like symbol before it ("PTEN loss", "Smad4 loss", "p53 loss")
+//     or after "loss of" ("loss of PTEN", "loss of the SMAD4 gene"), or a genomic word before it
+//     ("copy-number / allelic / biallelic / genomic / chromosomal / 9p loss"). "weight loss",
+//     "cell loss", "loss of viability" therefore do not count.
+const DEL_WORD=/\b(?:co-?)?delet(?:ions?|ed|ing)\b/gi;
+const DEL_EXON_PRE=/\bexons?\s*\d+\s*(?:in-frame\s+)?$/i;
+const DEL_CONSTRUCT_PRE=/\b(?:domain|region|motif|site|binding|terminal|truncation)\s*$/i;
+const DEL_CONSTRUCT_POST=/^\s*(?:mutants?|constructs?|variants?\s+of\s+the\s+protein)\b/i;
+const DEL_CALL=/\b[A-Z][A-Z0-9]{1,9}\s+del\b|\bdel\s*\(\s*\d+[pq]/g;
+// a gene-like symbol: capitals with a digit or 2+ capitals (PTEN, SMAD4, RB1), Smad4-style, or p53-style
+const GENE_TOKEN=String.raw`(?:[A-Z][A-Z0-9-]*[0-9][A-Za-z0-9-]*|[A-Z]{2,}[A-Z0-9-]*|[A-Z][a-z]+[0-9]+[a-z]?|p[0-9]{2,3}(?:ARF|INK4a)?)`;
+const LOSS_WORD=/\bloss(?:es)?\b|\bLOH\b/g;
+const LOSS_ALWAYS_POST=/^\s*of\s+(?:heterozygosity|function)\b/i;
+const LOSS_PRE_GENE=new RegExp(GENE_TOKEN+String.raw`\s*-?\s*$`);
+const LOSS_PRE_GENOMIC=/\b(?:copy[- ]number|allelic|biallelic|monoallelic|genomic|genetic|chromosom\w*|arm|\d{1,2}[pq]\d*(?:\.\d+)?)\s*-?\s*$/i;
+const LOSS_POST_GENE=new RegExp(String.raw`^\s*of\s+(?:the\s+)?(?:wild-type\s+)?(?:`+GENE_TOKEN+String.raw`\s+)?`+GENE_TOKEN+String.raw`\b`);
+// ...unless what is lost is the protein's SIGNAL, not the gene: "loss of ERK phosphorylation",
+// "loss of S473 AKT phosphorylation", "loss of AKT activity" are pathway read-outs
+const LOSS_SIGNAL_POST=new RegExp(String.raw`^\s*of\s+(?:the\s+)?(?:\S+\s+){0,3}?(?:phospho\w*|activit\w*|activation|signal\w*|binding|dimeri\w*|kinase\s+activit\w*)\b`,'i');
+// words that look like symbols but are not genes, whose "loss" is generic
+const LOSS_NOT_GENE=/\b(?:DNA|RNA|ATP|ROS|MMP|ECM|EMT|PFS|OS|II|III|IV)\s*-?\s*$/;
+const LOSS_NOT_GENE_POST=/^\s*of\s+(?:the\s+)?(?:DNA|RNA|ATP|ROS|MMP|ECM|EMT|PFS|OS)\b/;
+let DELS=false;
+function delHits(t){t=t||'';const iv=[];
+ reHits(DEL_WORD,t).forEach(([a,b])=>{const pre=t.slice(Math.max(0,a-30),a),post=t.slice(b,b+40);
+   if(DEL_EXON_PRE.test(pre)||DEL_CONSTRUCT_PRE.test(pre)||DEL_CONSTRUCT_POST.test(post))return;iv.push([a,b]);});
+ reHits(DEL_CALL,t).forEach(x=>iv.push(x));
+ reHits(LOSS_WORD,t).forEach(([a,b])=>{const w=t.slice(a,b),pre=t.slice(Math.max(0,a-30),a),post=t.slice(b,b+50);
+   if(w==='LOH'||LOSS_ALWAYS_POST.test(post)||(LOSS_PRE_GENE.test(pre)&&!LOSS_NOT_GENE.test(pre))||LOSS_PRE_GENOMIC.test(pre)||(LOSS_POST_GENE.test(post)&&!LOSS_SIGNAL_POST.test(post)&&!LOSS_NOT_GENE_POST.test(post)))iv.push([a,b]);});
+ return iv;}
+function delMatcher(){return {test:t=>delHits(t).length>0,hits:delHits};}
+// "Enrich for truncation": truncating variants -- the protein cut short.
+//   always: truncating, frameshift / frame-shift, nonsense, stop-gain, premature stop / termination
+//   "truncation(s)": as a mutation -- a gene symbol before it, "premature" before it, or a
+//     mutation word after it; "truncated" only with a mutation word after it ("truncated form
+//     of", "truncated PTCH1" constructs are engineered proteins)
+//   splice: only a splice-SITE variant ("splice-site", "splice mutation", "splicing mutation",
+//     "NF2 splice-site variants"); alternative splicing and splicing-factor mutations (SF3B1, U2AF1) are
+//     biology, not a truncation of the gene in hand
+//   notation: Q55* / R213Ter / P191fs; never "X", which in G719X / C797X means ANY amino acid
+const TRU_ALWAYS=/\btruncating\b|\bframe[- ]?shifts?\b|\bnonsense\b|\bstop[- ]?gain\w*|\bpremature\s+(?:stop|termination)(?:\s+codons?)?/gi;
+const TRU_NOUN=/\btruncat(?:ions?|ed)\b/gi;
+// (not "mutants" / "variant": "TLOC1 truncation mutants", "CAD-truncated variant" are constructs)
+const TRU_MUT_POST=/^\s*(?:mutations?|alleles?|alterations?|events?)\b/i;
+const TRU_PRE_GENE=new RegExp(GENE_TOKEN+String.raw`\s*-?\s*$|\bpremature\s*$`);
+// ("splice variant" is left out: "AR splice variant AR-V7", "a shorter splice variant of TLOC1"
+// name protein isoforms, not mutations)
+const TRU_SPLICE=/\bsplice[- ]site\w*|\bsplic(?:e|ing)\s+(?:site\s+)?(?:mutations?|alterations?)/gi;
+const TRU_SPLICE_FACTOR=/^\s*(?:factor|machinery|regulator)/i;
+const TRU_NOTATION=/\b[A-Z]\d{1,4}(?:\*|Ter\b|[A-Z]?fs\b(?:\*\d+)?)/g;
+let TRUS=false;
+function truHits(t){t=t||'';const iv=reHits(TRU_ALWAYS,t);
+ reHits(TRU_NOUN,t).forEach(([a,b])=>{const w=t.slice(a,b).toLowerCase(),pre=t.slice(Math.max(0,a-30),a),post=t.slice(b,b+30);
+   if(/^\s*(?:mutants?|constructs?|forms?|proteins?)\b/i.test(post))return;   // engineered, not found in a tumour
+   if(TRU_MUT_POST.test(post)||(w!=='truncated'&&TRU_PRE_GENE.test(pre)))iv.push([a,b]);});
+ reHits(TRU_SPLICE,t).forEach(([a,b])=>{if(!TRU_SPLICE_FACTOR.test(t.slice(b,b+20)))iv.push([a,b]);});
+ reHits(TRU_NOTATION,t).forEach(x=>iv.push(x));
+ return iv;}
+function truMatcher(){return {test:t=>truHits(t).length>0,hits:truHits};}
+// "Enrich for exon variants": a variant named by its exon.
+//   spelled out: "exon(s) N" (with ranges / lists: "exons 19 and 20") and a variant word within
+//     two words after it -- deletion / del / insertion / ins / skipping / duplication / dup /
+//     mutation / mutant / mutated / alteration / variant / substitution / hotspot, or a protein
+//     change ("exon 21 L858R", "exon 18 (D842V)") -- so "exon 9 PIK3CA mutations" counts and
+//     "in exons 1 and 2" does not
+//   compact: a gene glued to the exon ("METex14", "METΔex14", "ERBB2ΔEx16", "EGFRex20ins",
+//     "PIK3CAEx9"), an exon with a variant suffix ("ex19del", "Ex20Ins", "exon19del"), or a
+//     one-/two-digit "ex20" right after a gene symbol ("EGFR ex20") -- but not a breakpoint range
+//     ("FGFR3-TACC3 Ex14-16"), and never 3+ digits ("EX527" is a sirtuin inhibitor)
+const EXO_SPELLED=/\bexons?\s*\d{1,2}(?:\s*(?:-|–|,|\/|and|or|to)\s*(?:exons?\s*)?\d{1,2})*/gi;
+const EXO_VARIANT_POST=/^\s*(?:\S+\s+){0,2}?\(?(?:deletions?|del\b|insertions?|ins\b|skipping|skip\b|duplications?|dup\b|mutations?|mutants?|mutated|alterations?|altered|variants?|substitutions?|hotspot|[A-Z]\d+[A-Z]\b)/i;
+const EXO_GLUED=/\b[A-Z][A-Z0-9]{1,9}-?(?:Δ|Delta)?[Ee]x(?:on)?\d{1,2}(?!\d)(?:del|ins|dup|skip|mut)?\w*/g;
+const EXO_SUFFIX=/(?:^|[^A-Za-z])(?:Δ)?[Ee][Xx](?:on)?\d{1,2}(?:[Dd]el|[Ii]ns|[Dd]up|[Ss]kip|[Mm]ut)\w*/g;
+const EXO_BARE=/\b[Ee][Xx](?:on)?\d{1,2}(?!\d)/g;
+const EXO_GENE_PRE=new RegExp(GENE_TOKEN+String.raw`\s*/?\s*(?:`+GENE_TOKEN+String.raw`\s+)?$`);
+let EXOS=false;
+function exoHits(t){t=t||'';const iv=[];
+ // spelled out: highlight through the variant word ("exon 19 deletion", not just "exon 19")
+ reHits(EXO_SPELLED,t).forEach(([a,b])=>{const m=EXO_VARIANT_POST.exec(t.slice(b,b+50));if(m)iv.push([a,b+m[0].length]);});
+ const range=b=>/^\s*[-–]\s*\d/.test(t.slice(b,b+4));   // "Ex14-16": a fusion breakpoint span
+ // a HYPHEN-glued exon needs a variant suffix: "ERBB2-Ex20mut" counts, "FLI1-EX9" (an editing
+ // construct) does not; glued without a hyphen ("METex14", "PIK3CAEx9") counts as it stands
+ reHits(EXO_GLUED,t).forEach(([a,b])=>{const w=t.slice(a,b);if(range(b))return;
+   if(/-(?:Δ|Delta)?[Ee]x/.test(w)&&!/\d(?:del|ins|dup|skip|mut)/i.test(w))return;iv.push([a,b]);});
+ reHits(EXO_SUFFIX,t).forEach(([a,b])=>{while(a<b&&!/[ΔEe]/.test(t[a]))a++;iv.push([a,b]);});
+ reHits(EXO_BARE,t).forEach(([a,b])=>{if(range(b))return;
+   // the gene must stand apart ("EGFR ex20"); hyphened on ("FLI1-EX9") it is a construct name
+   if((t[a-1]!=='-'&&EXO_GENE_PRE.test(t.slice(Math.max(0,a-20),a)))||EXO_VARIANT_POST.test(t.slice(b,b+50)))iv.push([a,b]);});
+ return iv;}
+function exoMatcher(){return {test:t=>exoHits(t).length>0,hits:exoHits};}
+// "Enrich for copy number": copy-number change of the tumour genome.
+//   "copy number(s)" / "copy-number" in any phrasing, highlighted with a following gain / loss /
+//     alteration / variation / change / aberration / amplification / deletion; CNV / CNA / SCNA
+//     (case-sensitive) and "CN gain / loss"; chromosome-arm or whole-chromosome gains and losses
+//     ("1q gain", "17q12 amplification", "gain of 1q", "chromosome 7 gain", "loss of chromosome
+//     10"); "copy-neutral" (LOH)
+//   not: mtDNA / mitochondrial DNA / plasmid / viral / transgene copy number
+const CN_WORD=/\bcopy[- ]?numbers?(?:[- ](?:gains?|loss(?:es)?|alterations?|variations?|variants?|changes?|aberrations?|amplifications?|deletions?|status|profiles?))?|\bcopy[- ]neutral\b/gi;
+const CN_NOT_PRE=/\b(?:mtDNA|mitochondrial\s+DNA|mitochondrial|plasmid|viral|virus|transgene|vector)\s*$/i;
+const CN_ABBR=/\b(?:S?CNAs?|CNVs?|CN[- ](?:gains?|loss(?:es)?|amplifications?))\b/g;
+const CN_ARM=/\b(?:[1-9]|1\d|2[0-2]|X|Y)[pq](?:\d+(?:\.\d+)?)?\s*-?\s*(?:gains?|loss(?:es)?|amplifications?|deletions?)\b|\b(?:gains?|loss(?:es)?)\s+of\s+(?:chromosomes?\s+)?(?:[1-9]|1\d|2[0-2]|X|Y)[pq]?\b|\bchromosomes?\s+(?:[1-9]|1\d|2[0-2]|X|Y)[pq]?\s+(?:gains?|loss(?:es)?)\b|\bchromosom(?:e|al)\s+(?:gains?|loss(?:es)?)\b/gi;
+let CNS=false;
+function cnHits(t){t=t||'';const iv=[];
+ reHits(CN_WORD,t).forEach(([a,b])=>{if(!CN_NOT_PRE.test(t.slice(Math.max(0,a-30),a)))iv.push([a,b]);});
+ reHits(CN_ABBR,t).forEach(x=>iv.push(x));
+ reHits(CN_ARM,t).forEach(x=>iv.push(x));
+ return iv;}
+function cnMatcher(){return {test:t=>cnHits(t).length>0,hits:cnHits};}
+// "Enrich for methylation": DNA methylation and epigenetic silencing of the tumour genome.
+//   strong (count as they stand): hyper- / hypo- / de-methylat*, "DNA / promoter / CpG /
+//     cytosine / gene-body / global methylation", (un / differentially) methylated CpGs or genes,
+//     methylome, DNA methyltransferase, CpG island, epigenetic(ally) silenc*
+//   bare "methylation / methylated": only if the sentence also speaks of DNA -- promoter, CpG,
+//     DNA, MGMT, bisulfite, 5-aza / azacitidine / decitabine
+//   never near an RNA, histone or protein cue: m6A / m5C / RNA, histone / H3K27 / H4K20 / H3R,
+//     arginine / lysine, PRMT / EZH2 / SETD / SMYD / KMT-mediated, "protein methylation",
+//     "p53 methylation" (protein); "methylcellulose" never matches (only methylat* is read)
+const MET_STRONG=/\b(?:hyper|hypo|de)-?methylat\w*|\b(?:DNA|promoter|CpG|cytosine|gene[- ]body|global|genome[- ]wide)\s+(?:hyper|hypo)?methylat\w*|\b(?:un|differentially\s+)methylated\b|\bmethylomes?\b|\bDNA\s+methyltransferases?\b|\bCpG\s+islands?\b|\bepigenetic(?:ally)?\s+silenc\w*/gi;
+const MET_BARE=/\bmethylat(?:ion|ed)\b/gi;
+const MET_DNA_CUE=/\bpromoters?\b|\bCpG|\bc?t?DNA\b|\bcfDNA\b|\bMGMT\b|bisulfite|\b5-aza|azacitidine|decitabine/i;
+// a bare methylation also counts when it is plainly about a gene's DNA: a biomarker word after it
+// ("methylation status / levels / markers / pattern"), "gene methylation", a gene symbol right
+// before it ("TBX15 methylation", "Shox2 and Rassf1a methylation"), or "methylation of (the) GENE"
+const MET_QUAL_POST=/^\s*(?:status|levels?|markers?|biomarkers?|patterns?|profil\w*|signatures?|analys[ie]s|-?driven)\b/i;
+// (a trailing "p" is the promoter: "TERTp methylation")
+const MET_GENE_PRE=new RegExp(String.raw`(?:\bgenes?|\bdifferential|`+GENE_TOKEN+String.raw`p?|\b[A-Z][a-z]+[0-9]+[a-z]?)\s*$`);
+// "methylation of (the) GENE", "Methylated Shox2"
+const MET_GENE_POST=new RegExp(String.raw`^\s*(?:(?:levels?\s+)?of\s+(?:the\s+)?(?:specific\s+)?)?(?:`+GENE_TOKEN+String.raw`|[A-Z][a-z]+[0-9]+[a-z]?)\b`);
+// RNA / histone / protein methylation: the RNA marks are case-SENSITIVE ("m6A"; with /i, "me"
+// and "my" matched too), the rest case-insensitive
+// (an RNA MARK, not the word RNA: "RNA abundance and DNA methylation" is DNA methylation)
+const MET_NOT_RNA=/\bm[1-9][A-Z]\b|2['’‘]?[-‐]?O[-‐]methyl|\bm?RNA\s+methylat/;
+const MET_NOT_CTX=/histone|\bH[234][A-Z]?\d*[KR]\d+|arginine|lysine|\bPRMT\d*|\bEZH2\b|\bPRC2\b|\bSETD\w*|\bSET7|\bSMYD\d*|\bKMT\w*-mediated|protein\s+methyl|\bp53\s+methylation|\bSTAT3\s+methylation|methylat\w*\s+STAT3/i;
+let METS=false;
+function metHits(t){t=t||'';const iv=[];
+ const near=(a,b)=>{const w=t.slice(Math.max(0,a-60),Math.min(t.length,b+25));return MET_NOT_CTX.test(w)||MET_NOT_RNA.test(w);};
+ reHits(MET_STRONG,t).forEach(([a,b])=>{if(!near(a,b))iv.push([a,b]);});
+ const dna=MET_DNA_CUE.test(t);
+ reHits(MET_BARE,t).forEach(([a,b])=>{if(near(a,b))return;
+   const pre=t.slice(Math.max(0,a-30),a),post=t.slice(b,b+40);
+   if(dna||MET_QUAL_POST.test(post)||MET_GENE_PRE.test(pre)||MET_GENE_POST.test(post))iv.push([a,b]);});
+ return iv;}
+function metMatcher(){return {test:t=>metHits(t).length>0,hits:metHits};}
 function andMatchers(a,b){if(!a||!b)return a||b;return {test:t=>a.test(t)&&b.test(t),hits:t=>[...a.hits(t),...b.hits(t)]};}
+// the two Enrich buttons widen each other: a sentence naming a mutation OR a fusion counts
+function orMatchers(a,b){if(!a||!b)return a||b;return {test:t=>a.test(t)||b.test(t),hits:t=>[...a.hits(t),...b.hits(t)]};}
 let TM=null;   // matcher in force for the current view; used to highlight hits in sentence text
 // mark hits on the RAW text (so a query containing <, > or & still highlights), escaping each piece as we go
 function hl(t){
@@ -1093,6 +1368,10 @@ function disPass(id){return !DIS_KEEP.size||KIND[id]!=='disease'||DIS_KEEP.has(i
 // caller passes the pre-filter edges); and it must not drop a ticked disease that the current
 // filters have starved, or that tick could never be undone --
 // those stay listed at (0).
+// Keeping a disease is almost always a question about ITS neighbourhood, so the first tick (the
+// keep-list going from empty to non-empty) switches "Only their direct neighbours" on. Unticking
+// that box afterwards is respected until the keep-list is emptied again.
+function disConnDefault(was){if(was===0&&DIS_KEEP.size>0){const d=document.getElementById('disconn');if(d)d.checked=true;}}
 function buildDiseaseFilter(edges){
  const box=document.getElementById('disfilters'); if(!box)return;
  const seen={};
@@ -1100,15 +1379,31 @@ function buildDiseaseFilter(edges){
  const ids=Object.keys(seen);
  DIS_KEEP.forEach(id=>{if(seen[id]===undefined)ids.push(id);});
  const lab=id=>String(labelById[id]||id);
- ids.sort((a,b)=>(seen[b]||0)-(seen[a]||0)||lab(a).localeCompare(lab(b)));
+ const byCount=(a,b)=>(seen[b]||0)-(seen[a]||0)||lab(a).localeCompare(lab(b));
+ // same-tissue diseases stacked under one heading (the tissue read off the name, as for the
+ // canvas stacking); a tissue with a single disease, or none, stays a plain row. Blocks are
+ // ordered by their edge total, members inside by their own count.
+ const by={};ids.forEach(id=>{const t=tissueOf(lab(id));(by[t||'~'+id]=by[t||'~'+id]||[]).push(id);});
+ const blocks=Object.keys(by).map(k=>({tissue:by[k].length>1?k:'',ids:by[k].sort(byCount),n:by[k].reduce((a,id)=>a+(seen[id]||0),0)}));
+ blocks.sort((a,b)=>b.n-a.n||lab(a.ids[0]).localeCompare(lab(b.ids[0])));
+ const row=(id,ind)=>{const n=seen[id]||0;
+   return '<label'+(ind?' class=dism':'')+'><input type=checkbox class=disf value="'+esc(id)+'"'+(DIS_KEEP.has(id)?' checked':'')
+     +'> '+esc(lab(id))+' <span class=cnt'+(n?'':' style="color:#b3243b"')+'>('+n+')</span></label>';};
  box.innerHTML=ids.length
-   ? ids.map(id=>{const n=seen[id]||0;
-       return '<label><input type=checkbox class=disf value="'+esc(id)+'"'+(DIS_KEEP.has(id)?' checked':'')
-         +'> '+esc(lab(id))+' <span class=cnt'+(n?'':' style="color:#b3243b"')+'>('+n+')</span></label>';}).join('')
+   ? blocks.map(bk=>bk.tissue
+       ? '<label class=dist><input type=checkbox class=disg data-ids="'+esc(bk.ids.join('|'))+'"> '+esc(bk.tissue)
+         +' <span class=cnt>('+bk.ids.length+' diseases, '+bk.n+')</span></label>'+bk.ids.map(id=>row(id,true)).join('')
+       : row(bk.ids[0],false)).join('')
    : '<span class="mut">no diseases in view</span>';
+ // a heading is ticked when all its diseases are kept, half-ticked when some are
+ box.querySelectorAll('.disg').forEach(g=>{const m=g.dataset.ids.split('|'),k=m.filter(id=>DIS_KEEP.has(id)).length;
+   g.checked=k===m.length;g.indeterminate=k>0&&k<m.length;
+   g.addEventListener('change',()=>{const was=DIS_KEEP.size;m.forEach(id=>{if(g.checked)DIS_KEEP.add(id);else DIS_KEEP.delete(id);});
+     disConnDefault(was);build(+document.getElementById('thr').value);});});
  box.querySelectorAll('.disf').forEach(c=>c.addEventListener('change',()=>{
+   const was=DIS_KEEP.size;
    if(c.checked)DIS_KEEP.add(c.value);else DIS_KEEP.delete(c.value);
-   build(+document.getElementById('thr').value);
+   disConnDefault(was);build(+document.getElementById('thr').value);
  }));
 }
 // --- same-tissue disease stacking ------------------------------------------------------
@@ -1200,7 +1495,7 @@ let FSCALE=1;
 // runs to twice that. The divisor -- not the range -- is what fixes where 1.0x lands.
 const FS_BASE=50;
 function activeFontScale(){const el=document.getElementById('fscale');const v=el?parseInt(el.value):FS_BASE;return (isNaN(v)?FS_BASE:v)/FS_BASE;}
-function scaledFont(b){return Math.max(4,Math.round(b*FSCALE));}
+function scaledFont(b){return Math.max(8,Math.round(b*FSCALE));}   // 8px floor: no label drawn smaller
 // Which node kinds have their NAME DRAWN on the canvas. Disease and chemical names are long,
 // repeat across many edges and out-shout the gene symbols simply by being wordy, so those
 // nodes start unlabelled -- shape and colour say what they are, and the name is one hover
@@ -1251,17 +1546,17 @@ function focusKeep(edges,seeds,hops){
 }
 function build(thr){
  const conf=activeConf(), cats=activeCats(); VIEW_CATS=cats; const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
- const txt=activeText(), tm=andMatchers(textMatcher(txt),DRIVERS?driverMatcher():null); TM=tm;
+ const txt=activeText(), tm=andMatchers(textMatcher(txt),orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(DRIVERS?driverMatcher():null,FUSIONS?fusionMatcher():null),ITDS?itdMatcher():null),OEXS?oexMatcher():null),AMPS?ampMatcher():null),DELS?delMatcher():null),TRUS?truMatcher():null),EXOS?exoMatcher():null),CNS?cnMatcher():null),METS?metMatcher():null)); TM=tm;
  const kinds=activeKinds();
  let edges=[];
- // The text query is a LENS, not a threshold input: an edge's support is what survives the
- // score, year, relation and source settings, and the thresholds below judge THAT. Feeding the
- // matched-only sentences to them instead made typing a word collapse the graph -- "lung" cut
- // MALAT1-non-small cell lung carcinoma from 8 publications to 2 (under min-publications 7),
- // and thinning the edge set dropped whole genes under min-connections, whose components then
- // fell under min-cluster: an empty canvas from a query with thousands of hits. So support is
- // measured text-blind here; the lens comes further down, and only min-connections/min-cluster
- // are re-judged on what it leaves (they describe the picture, so they have to).
+ // An edge's support is what survives the score, year, relation and source settings, and the
+ // thresholds below judge that first. The text box / driver lens comes further down and the
+ // support thresholds are judged AGAIN on the sentences it leaves, so "min 2 sentences" holds
+ // for what is drawn: with the lens text-blind, an edge with 4 sentences of which 1 named a
+ // mutation was drawn showing that one sentence under a floor of 2. The price is deliberate:
+ // a query asks for matching evidence, so an edge with too little of it goes, and a narrow query
+ // at a high floor can leave little or nothing (the min-connections / min-cluster pruning after
+ // it then judges what is left).
  // Some node types have no relations OF THEIR OWN: the RE routing pairs a disease with a gene
  // or a chemical, never with another disease, so ticking disease alone can never draw an edge.
  // Such a view is left empty and the stats line says why. (It once fell back to drawing those
@@ -1269,20 +1564,9 @@ function build(thr){
  // keep-list, so unticking gene and chemical brought back diseases the full view had filtered
  // out. Unticking a node type now only ever removes nodes.) kindOK: any edge fits the ticks.
  let kindOK=false;
- // "Only their direct neighbours" picks its NODES relation-blind: who is one link from a kept
- // disease under every other setting (score, years, training set, node types, min sentences /
- // publications), whatever relation that link carries. The relation boxes then choose which
- // edges are drawn among them. Taken from the ticked relations instead, unticking "associated"
- // -- the only relation a disease carries -- emptied the neighbourhood, and the interacts /
- // inhibits / activates edges between its genes went with it.
  const disConnOn=DIS_KEEP.size>0&&document.getElementById('disconn').checked;
- const nearAll=new Set(DIS_KEEP);
  DATA.edges.forEach(e=>{
    const kf=!kinds||(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to]));
-   if(disConnOn&&kf&&(DIS_KEEP.has(e.from)||DIS_KEEP.has(e.to))){
-     const sa=visSents(e,conf,ylo,yhi,null,null,SRC_MODE);
-     if(sa.length&&sa.length>=thr&&(mp<=1||new Set(sa.map(s=>s.pmid)).size>=mp)){nearAll.add(e.from);nearAll.add(e.to);}
-   }
    if(kf)kindOK=true;
    const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
    const np=new Set(sup.map(s=>s.pmid)).size;
@@ -1301,17 +1585,16 @@ function build(thr){
    edges=focusKeep(edges,focusSeeds,focusHops);
    focusLabel=labs.join(', ');
  }
- // the lens: keep the edges that still say the word, and show those sentences only
- if(tm)edges=edges.filter(o=>{const v=o.sup.filter(s=>tm.test(s.text));if(!v.length)return false;o.vis=v;o.w=v.length;o.np=new Set(v.map(s=>s.pmid)).size;o.cat=viewCat(o.e,v);return true;});
+ // the lens: keep the edges that still say the word in at least `thr` sentences from at least
+ // `mp` publications, and show those sentences only
+ if(tm)edges=edges.filter(o=>{const v=o.sup.filter(s=>tm.test(s.text));if(!v.length||v.length<thr)return false;if(mp>1&&new Set(v.map(s=>s.pmid)).size<mp)return false;o.vis=v;o.w=v.length;o.np=new Set(v.map(s=>s.pmid)).size;o.cat=viewCat(o.e,v);return true;});
  // and re-cut the neighbourhood on what the lens left, so a focus view never shows the seed's
  // neighbours to each other with the seed itself missing
  if(tm&&focusActive)edges=focusKeep(edges,focusSeeds,focusHops);
  // Structure comes LAST, on the edges that are actually drawn: min-connections peels the
  // single-link fringe, then min-cluster drops the small components -- so "min cluster size 6"
  // is a statement about the picture, not about some graph behind it. (It once ran before the
- // lens, and typing a word then shattered a 6-node floor into pairs and triples.) The support
- // thresholds above stay text-blind, which is what keeps a query from collapsing the view:
- // min-publications judges an edge's whole evidence, only these two judge the query's leavings.
+ // lens, and typing a word then shattered a 6-node floor into pairs and triples.)
  // Skipped under gene/chem focus, where you asked for a neighborhood and want all of it.
  if(!focusActive){
    // degree floor, peeled until it holds (the md-core): drop the edges of every node with fewer
@@ -1337,24 +1620,20 @@ function build(thr){
  // menu never filters itself out of existence (see buildDiseaseFilter)
  buildDiseaseFilter(edges);
  if(DIS_KEEP.size)edges=edges.filter(o=>disPass(o.e.from)&&disPass(o.e.to));
- // direct neighbours: the ticked diseases plus every node one edge away from them (nearAll,
- // relation-blind -- see above), and only the drawn edges among that set. One step, not
- // "connected to": the gene graph is one giant component through hubs like TP53, so walking
- // further reaches nearly everything whatever is ticked.
+ // Direct neighbours, strictly: the ticked diseases, every node with a DRAWN edge to one of
+ // them, and the drawn edges among that set. Judged on the final edges, so every gene or drug on
+ // screen is one visible step from a kept disease under all settings -- relation boxes, text box,
+ // driver lens, min sentences / publications / connections / cluster size. (It was once chosen
+ // relation- and lens-blind, so a gene whose own disease link was hidden stayed on through its
+ // links to other neighbours, two steps out; with "associated" unticked that was most of them.)
+ // One step, not "connected to": the gene graph is one giant component through hubs like TP53,
+ // so walking further reaches nearly everything whatever is ticked. The price: a disease whose
+ // links are all hidden (say, only relations it never carries are ticked) stands alone.
  const disConn=disConnOn;
- if(disConn)edges=edges.filter(o=>nearAll.has(o.e.from)&&nearAll.has(o.e.to));
- // ...and only the clusters that still contain a ticked disease ON SCREEN. A neighbour's link to
- // the disease can be hidden (relation unticked, text / driver lens, min-connections, cluster
- // size) while its links to other neighbours are drawn; those then formed small islands of
- // gene-gene and drug-gene sentences that never name the cancer. Every drawn cluster now hangs
- // off its disease, so a view whose disease links are all hidden shows the diseases alone.
  if(disConn){
-   const adj={};
-   edges.forEach(o=>{(adj[o.e.from]=adj[o.e.from]||[]).push(o.e.to);(adj[o.e.to]=adj[o.e.to]||[]).push(o.e.from);});
-   const reach=new Set(),sk=[...DIS_KEEP].filter(id=>adj[id]);
-   sk.forEach(id=>reach.add(id));
-   while(sk.length){const x=sk.pop();adj[x].forEach(y=>{if(!reach.has(y)){reach.add(y);sk.push(y);}});}
-   edges=edges.filter(o=>reach.has(o.e.from));
+   const near=new Set(DIS_KEEP);
+   edges.forEach(o=>{if(DIS_KEEP.has(o.e.from))near.add(o.e.to);if(DIS_KEEP.has(o.e.to))near.add(o.e.from);});
+   edges=edges.filter(o=>near.has(o.e.from)&&near.has(o.e.to));
  }
  // A kept disease the other settings left without a single link -- typically because only
  // relation types it never carries are ticked (diseases are linked by "associated", almost never
@@ -1382,23 +1661,43 @@ function build(thr){
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
  // name what is actually on screen: "378 diseases" beats "378 genes" in a disease-only view
  const KLAB={gene:'genes',disease:'diseases',chemical:'chemicals'};
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes').replace(/s$/,nodes.length===1?'':'s')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(DRIVERS?' &middot; <b>enriched for drivers</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(kinds&&!kindOK?' &middot; <b>nothing relates '+(kinds.size===1?'a '+[...kinds][0]+' to another '+[...kinds][0]:'these node types to each other')+'</b> &mdash; '+(kinds.has('disease')&&kinds.size===1?'diseases link only to genes and chemicals, so tick one of them':'tick another node type'):'')
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes').replace(/s$/,nodes.length===1?'':'s')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(DRIVERS||FUSIONS||ITDS||OEXS||AMPS||DELS||TRUS||EXOS||CNS||METS?' &middot; <b>enriched for '+[DRIVERS&&'drivers',FUSIONS&&'fusions',ITDS&&'ITD',OEXS&&'overexpression',AMPS&&'amplification',DELS&&'deletion / loss',TRUS&&'truncation',EXOS&&'exon variants',CNS&&'copy number',METS&&'methylation'].filter(Boolean).join(' or ')+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(kinds&&!kindOK?' &middot; <b>nothing relates '+(kinds.size===1?'a '+[...kinds][0]+' to another '+[...kinds][0]:'these node types to each other')+'</b> &mdash; '+(kinds.has('disease')&&kinds.size===1?'diseases link only to genes and chemicals, so tick one of them':'tick another node type'):'')
    +(cats.size?'':' &middot; <b>no relation type is ticked</b>')
    +(loneDis.length?' &middot; <b>'+loneDis.length+'</b> kept disease'+(loneDis.length>1?'s have':' has')+' no link under these settings, drawn on '+(loneDis.length>1?'their':'its')+' own'
      +(cats.has('associated')?'':' &mdash; diseases are linked by <b>associated</b>, so tick it to see '+(loneDis.length>1?'their':'its')+' genes and drugs'):'');
+ // seed positions: known nodes where they were (held fixed while physics settles the rest), new
+ // nodes at the mean of their already-placed neighbours, nudged apart so they do not coincide
+ const known=nodes.filter(n=>LAYOUT[n.id]);
+ known.forEach(n=>{n.x=LAYOUT[n.id].x;n.y=LAYOUT[n.id].y;n.fixed={x:true,y:true};});
+ const nbr={};eds.forEach(e=>{(nbr[e.from]=nbr[e.from]||[]).push(e.to);(nbr[e.to]=nbr[e.to]||[]).push(e.from);});
+ nodes.forEach(n=>{if(LAYOUT[n.id])return;const p=(nbr[n.id]||[]).map(m=>LAYOUT[m]).filter(Boolean);
+   if(p.length){const [jx,jy]=idJitter(n.id,40);n.x=p.reduce((a,q)=>a+q.x,0)/p.length+jx;n.y=p.reduce((a,q)=>a+q.y,0)/p.length+jy;}});
+ const nNew=nodes.length-known.length;
+ // the camera before this rebuild: kept if the new picture still fits inside it (see settled)
+ const view=network?{position:network.getViewPosition(),scale:network.getScale()}:null;
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  NODEDS=data.nodes;
- const options={layout:{improvedLayout:false},physics:{stabilization:{iterations:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
+ const options={layout:{improvedLayout:false},physics:{enabled:nNew>0,stabilization:{iterations:known.length?120:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
  network=new vis.Network(net,data,options);
  LABEL_N=nodes.length; LABEL_A=-1;
  // reshape once physics is off, so nothing pulls the moved nodes back, and fit afterwards so the
  // new positions are inside the view. BASEPOS is captured first: it is the layout to replay from.
  TGROUPS=tissueGroups(nodes);
- network.on('stabilizationIterationsDone',()=>{network.setOptions({physics:false});
+ const settled=()=>{network.setOptions({physics:false});
+   if(known.length)data.nodes.update(known.map(n=>({id:n.id,fixed:false})));   // draggable again
    BASEPOS=network.getPositions();
+   Object.assign(LAYOUT,BASEPOS);
    applyLayoutShape();
-   network.fit({animation:false});LABEL_A=-1;updateLabels();network.redraw();});
+   // Camera: stay put when every node is still inside the old view; otherwise frame them with
+   // safeFit. A plain fit zoomed straight in on a handful of nodes until they filled the screen,
+   // and re-fitting on every tick made the view lurch in and out as relation boxes were ticked.
+   if(view){network.moveTo({position:view.position,scale:view.scale,animation:false});
+     if(!allInView())safeFit(false);}
+   else safeFit(false);
+   LABEL_A=-1;updateLabels();network.redraw();};
+ // nothing new to place: no physics runs, so no stabilization event will come
+ if(nNew>0)network.on('stabilizationIterationsDone',settled);else settled();
  network.on('zoom',updateLabels);
  network.on('animationFinished',updateLabels);
  fitLeftPanel();    // self-correcting: a panel narrowed by anything recovers on the next redraw
@@ -1471,6 +1770,17 @@ const confEl=document.getElementById('conf');function updScore(){document.getEle
 document.getElementById('genefilter').addEventListener('change',()=>build(+thr.value));
 document.getElementById('genefilter').addEventListener('keydown',ev=>{if(ev.key==='Enter')build(+thr.value);});
 document.getElementById('hops').addEventListener('change',()=>build(+thr.value));
+document.getElementById('metbtn').addEventListener('click',ev=>{METS=!METS;ev.currentTarget.classList.toggle('on',METS);ev.currentTarget.setAttribute('aria-pressed',METS);build(+thr.value);});
+document.getElementById('cnbtn').addEventListener('click',ev=>{CNS=!CNS;ev.currentTarget.classList.toggle('on',CNS);ev.currentTarget.setAttribute('aria-pressed',CNS);build(+thr.value);});
+document.getElementById('exobtn').addEventListener('click',ev=>{EXOS=!EXOS;ev.currentTarget.classList.toggle('on',EXOS);ev.currentTarget.setAttribute('aria-pressed',EXOS);build(+thr.value);});
+document.getElementById('trubtn').addEventListener('click',ev=>{TRUS=!TRUS;ev.currentTarget.classList.toggle('on',TRUS);ev.currentTarget.setAttribute('aria-pressed',TRUS);build(+thr.value);});
+document.getElementById('delbtn').addEventListener('click',ev=>{DELS=!DELS;ev.currentTarget.classList.toggle('on',DELS);ev.currentTarget.setAttribute('aria-pressed',DELS);build(+thr.value);});
+document.getElementById('ampbtn').addEventListener('click',ev=>{AMPS=!AMPS;ev.currentTarget.classList.toggle('on',AMPS);ev.currentTarget.setAttribute('aria-pressed',AMPS);build(+thr.value);});
+document.getElementById('oexbtn').addEventListener('click',ev=>{OEXS=!OEXS;ev.currentTarget.classList.toggle('on',OEXS);ev.currentTarget.setAttribute('aria-pressed',OEXS);build(+thr.value);});
+document.getElementById('itdbtn').addEventListener('click',ev=>{ITDS=!ITDS;ev.currentTarget.classList.toggle('on',ITDS);ev.currentTarget.setAttribute('aria-pressed',ITDS);build(+thr.value);});
+// tick every relation type at once (one rebuild, not one per box)
+document.getElementById('catall').addEventListener('click',()=>{document.querySelectorAll('.catf').forEach(c=>c.checked=true);build(+thr.value);});
+document.getElementById('fusbtn').addEventListener('click',ev=>{FUSIONS=!FUSIONS;ev.currentTarget.classList.toggle('on',FUSIONS);ev.currentTarget.setAttribute('aria-pressed',FUSIONS);build(+thr.value);});
 document.getElementById('drvbtn').addEventListener('click',ev=>{DRIVERS=!DRIVERS;ev.currentTarget.classList.toggle('on',DRIVERS);ev.currentTarget.setAttribute('aria-pressed',DRIVERS);build(+thr.value);});
 const txtEl=document.getElementById('textfilter');let txtTimer=null;   // debounce: each keystroke would otherwise rebuild the whole network
 txtEl.addEventListener('input',()=>{clearTimeout(txtTimer);txtTimer=setTimeout(()=>build(+thr.value),350);});
@@ -1482,7 +1792,7 @@ searchBox.addEventListener('change',()=>doSearch(searchBox.value));
 function zoomBy(f){if(!network)return;const s=network.getScale();network.moveTo({scale:s*f,animation:{duration:200}});}
 document.getElementById('zin').addEventListener('click',()=>zoomBy(1.25));
 document.getElementById('zout').addEventListener('click',()=>zoomBy(0.8));
-document.getElementById('zfit').addEventListener('click',()=>{if(network)network.fit({animation:true});});
+document.getElementById('zfit').addEventListener('click',()=>{if(network)safeFit(true);});
 // the year range: dragging either handle relabels it and rebuilds the graph
 const yl=document.getElementById('yrlo'),yh=document.getElementById('yrhi');
 [yl,yh].forEach(el=>{el.min=MINY;el.max=MAXY;});
@@ -1517,19 +1827,32 @@ const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'
 // calling this. Clearing the width first lets the row lay out at its natural size; the same-line
 // and range checks refuse a nonsense measurement rather than acting on it.
 const FIT_MIN=160, FIT_MAX=520;
+// measured once, then locked: the panel keeps one static width whatever the filters do
+let LP_W=0;
 function fitLeftPanel(){
  const lp=document.getElementById('lpanel'), z=document.getElementById('zoom');
  if(!lp||!z)return;
  if(window.innerWidth<=700||lp.style.display==='none'){lp.style.width='';lp.style.maxWidth='';return;}
+ if(LP_W){lp.style.maxWidth='none';lp.style.width=LP_W+'px';return;}
  const b=z.getElementsByTagName?z.getElementsByTagName('button'):[];
  if(!b.length||!b[0].getBoundingClientRect)return;   // nothing measurable: keep the CSS width
  const prevW=lp.style.width, prevM=lp.style.maxWidth;
  lp.style.maxWidth='none';lp.style.width='auto';     // shrink-to-fit: the row cannot wrap here
  const first=b[0].getBoundingClientRect(), last=b[b.length-1].getBoundingClientRect();
- const w=Math.ceil(last.right-first.left);
- if(Math.abs(last.top-first.top)<2&&w>=FIT_MIN&&w<=FIT_MAX){lp.style.width=w+'px';}
+ // the panel is as wide as the zoom row, or as the two-column Enrich grid if that is wider
+ const eg=document.getElementById('enrichgrid');
+ // ...and wide enough for an indented 'non-small cell lung carcinoma (9999)' row in Keep diseases
+ // on one line, plus the list's scrollbar: a fixed probe, so the width does not follow the data
+ const df=document.getElementById('disfilters');let dw=0;
+ if(df){const p=document.createElement('label');p.className='dism';
+   p.style.cssText='position:absolute;visibility:hidden;white-space:nowrap;display:inline-block;box-sizing:content-box';
+   p.innerHTML='<input type=checkbox> non-small cell lung carcinoma <span class=cnt>(9999)</span>';
+   df.appendChild(p);dw=Math.ceil(p.getBoundingClientRect().width)+18;df.removeChild(p);}
+ const w=Math.max(Math.ceil(last.right-first.left),eg?Math.ceil(eg.offsetWidth):0,dw);   // offsetWidth: the box's padding and border included
+ if(Math.abs(last.top-first.top)<2&&w>=FIT_MIN&&w<=FIT_MAX){LP_W=w+3;lp.style.width=LP_W+'px';}   // +3px of breathing room
  else {lp.style.width=prevW;lp.style.maxWidth=prevM;}
 }
+document.querySelectorAll('#enrichgrid button').forEach(b=>{b.dataset.t=b.textContent;});
 fitLeftPanel();
 window.addEventListener('resize',()=>{fitLeftPanel();if(network)network.redraw();});
 document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));

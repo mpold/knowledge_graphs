@@ -36,19 +36,44 @@ name it but no model claimed a relation. Never coloured like a prediction.
 whether disease and drug names are drawn (gene symbols always are); *Shrink periphery* and
 *Expand center*, two radial reshapers that pull in outlying clusters or thin the crowded core
 without reordering anything; tissue stacking, which pools same-tissue disease nodes onto one
-overlapping spot; the co-mention picker; zoom/fit; *Significance in view*; and the details box,
+overlapping spot; the *Keep diseases* list, with same-tissue diseases grouped under a tissue
+heading that ticks them all at once; the co-mention picker; two sentence lenses -- an **Enrich for drivers**
+toggle that keeps only edges with a sentence naming a point mutation as a word of its own
+or in parentheses (`/\s+[A-Z]\d+[A-Z]\s+/` or `/\([A-Z]\d+[A-Z]\)/`, case-sensitive: *V600E*,
+*KRAS (G12C)*; figure / table panels are not counted -- any label right after the word, as in *Fig. S6K*,
+*Fig. E3B* or *Figure A1C*, and supplementary panels in a list or PLOS-style (*S8B Fig*) -- and neither is a stoplist of look-alikes: *S6K*, *E2F*, *G2M*, *S1P* and the cell lines *T47D*,
+*T98G*, *M059J*); an **Enrich for fusions** toggle that keeps only
+edges with a sentence saying *fusion* (as a word: not *infusion*) or *translocation* in the
+chromosomal sense -- after a fusion pair or fusion gene (*EML4-ALK translocation*,
+*ALK-translocated*), with a karyotype (*t(11;22)*), after *chromosomal* / *balanced* /
+*reciprocal* / *truncating*, or as *translocation involving MLL* -- never a protein moving
+(*nuclear translocation of p65*, *translocation of YAP into the nucleus*); an **Enrich for ITD** toggle for internal tandem duplications (*ITD* in capitals as a word,
+as in *FLT3-ITD*, or *internal tandem duplication* spelled out); an **Enrich for
+overexpression** toggle (*overexpres* / *over-expres*, any case); an **Enrich for
+amplification** toggle (*amplif*, any case, minus the laboratory sense: *PCR-amplified*, *amplified
+using primers*, *amplification of the cDNA* -- but *MET amplification detected by ddPCR* counts); an **Enrich for deletion / loss** toggle (*deletion* / *deleted* / *co-deletion*, a gene's *del* or
+*del(17p)*, *LOH* / *loss of heterozygosity* / *loss of function*, and *loss* tied to a gene or
+chromosome such as *PTEN loss* or *9p loss*; not *EGFR exon 19 deletion*, engineered deletion
+mutants, generic loss like *weight loss*, or a lost signal like *loss of ERK phosphorylation*); an **Enrich for truncation** toggle (*truncating*, *frameshift*, *nonsense*,
+*stop-gain*, splice-site variants, and *Q55\** / *R213Ter* / *P191fs* notation; not engineered
+truncated proteins, splicing biology or splicing-factor mutations, or *G719X*-style X notation); an **Enrich for exon variants** toggle (*exon N* with a variant word close
+after it -- *EGFR exon 19 deletion*, *HER2 exon 20 insertion*, *MET exon 14 skipping*, *exon 21
+L858R* -- and compact forms such as *METex14*, *ex19del*, *EGFRex20ins*, *ERBB2ΔEx16*; not an exon
+named without a variant, fusion breakpoints such as *Ex14-16*, the drug *EX527* or the gene
+*Deltex1*); an **Enrich for copy number** toggle (*copy number* in any phrasing, *CNV* / *CNA* /
+*SCNA* / *CN gain*, chromosome-arm and whole-chromosome gains and losses such as *1q gain* or
+*loss of chromosome 10*, and *copy-neutral* LOH; not mtDNA, plasmid or viral copy number); an **Enrich for methylation** toggle (promoter / DNA / CpG
+(hyper/hypo)methylation, methylomes, CpG islands, epigenetic silencing, and a bare *methylation*
+only in a sentence that speaks of DNA; never RNA (*m6A*), histone or protein methylation); the Enrich toggles are ORed
+(a sentence matching any of those on counts) and ANDed with the text match; zoom/fit (filters keep each node where it was and keep the camera unless something new
+falls outside it, and Fit never zooms closer than 100%, so a small view is not blown up); *Significance in view*; and the details box,
 headed *Sentences of interest*, which lists an edge's sentences with linked PMIDs when you click
 it. Each section's explanation is behind a small round **i** beside its heading.
 
 **Right column — what is in the picture.** Support thresholds (min unique sentences, min unique
 publications); label font size; structural pruning (min cluster size, min connections, both
 floored at 2); gene and drug search; focus-on-gene with 1 or 2 hops; drug filter; free-text
-sentence match (substring, or `/regex/` when wrapped in slashes); an **Enrich for drivers**
-toggle that keeps only edges with a sentence naming a point mutation as a word of its own
-or in parentheses (`/\s+[A-Z]\d+[A-Z]\s+/` or `/\([A-Z]\d+[A-Z]\)/`, case-sensitive: *V600E*,
-*KRAS (G12C)*; supplementary figure / table panels such as *Fig. S6K* or *S8B Fig* are not
-counted, nor a stoplist of look-alikes: *S6K*, *E2F*, *G2M*, *S1P* and the cell lines *T47D*,
-*T98G*, *M059J*), ANDed with the text match; node-type, relation-type and
+sentence match (substring, or `/regex/` when wrapped in slashes); node-type, relation-type and
 training-set filters; the score slider — 0.5 to 0.95 in steps of 0.05, then 0.96 to 0.99 — and a
 live stats line.
 
@@ -222,11 +247,12 @@ LY294002 ranks among the leaders and has never been given to a patient.
 The order is deliberate, and it is what keeps the panel honest:
 
 - **Support** — an edge's evidence is what survives score, year, relation type and training set.
-  `Min unique sentences` and `Min unique publications` judge *that*, measured blind to the text
-  query.
-- **The text query is a lens applied late** — it selects among edges that already qualify and
-  shows only the matching sentences. Typing can only remove edges from the view you had; it
-  cannot collapse the graph by shrinking an edge's apparent evidence.
+  `Min unique sentences` and `Min unique publications` judge *that*.
+- **The text query and the driver lens are applied late, and the thresholds hold for them.**
+  They keep the edges with a matching sentence and show only those sentences, and `Min unique
+  sentences` / `Min unique publications` are judged again on the matching sentences alone, so
+  every edge drawn shows at least the minimum. Typing can only remove edges from the view you
+  had, and a narrow query at a high floor can remove most of them.
 - **Structure comes last** — `Min connections` and `Min cluster size` describe the picture, so
   they run on what is actually drawn. `Min connections` is peeled until it holds, so every node
   left has at least that many links on screen, and a node that is not drawn (say, a chemical
@@ -250,13 +276,15 @@ The order is deliberate, and it is what keeps the panel honest:
   It is then drawn on its own and the stats line says so (and to tick `associated`), instead of
   *Only their direct neighbours* blanking the canvas. The stats line also says when no relation
   type is ticked at all.
-- **Every disease-neighbourhood cluster hangs off its disease.** *Only their direct neighbours*
-  keeps the nodes one link from a kept disease, the drawn edges among them, and then only the
-  clusters that contain a kept disease on screen. A neighbour whose own disease link is hidden
-  (relation unticked, text or driver lens, min connections / cluster size) used to appear as a
-  detached island of gene-gene and drug-gene sentences that never named the cancer; it no longer
-  does. The cost: with `associated` unticked, diseases' links are mostly gone, so the view
-  usually shrinks to the kept diseases drawn on their own.
+- **Direct neighbours are strictly one drawn step away, and on by default.** Ticking the first
+  disease under *Keep diseases* switches *Only their direct neighbours* on; unticking it is then
+  respected until the keep-list is emptied. The option keeps
+  the kept diseases, every node with a *drawn* edge to one of them, and the drawn edges among
+  those. It is judged after every other setting (relation boxes, text box, driver lens, min
+  sentences / publications / connections / cluster size), so a gene whose own disease link is
+  hidden is not shown, however it connects to the neighbours that are. The cost: with
+  `associated` unticked, gene-disease links are mostly gone, so the view shrinks to a few drugs
+  (linked by `inhibits`) or to the kept diseases drawn on their own.
 
 ## Limits worth carrying
 
