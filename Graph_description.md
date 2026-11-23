@@ -230,11 +230,13 @@ The order is deliberate, and it is what keeps the panel honest:
   counted as the relation and provenance of its *visible* sentences. A count reading "0 in view"
   can therefore never sit above a visible tag. Each training-set button shows *every* sentence
   that model kept, labelled with that model's own reading: *PPI model* shows only `interacts`
-  (its one label), so `binds` and every other typed relation read 0 there. *Kept by both* means
-  both models found a relation in the sentence, not that they agree on its type: PPI's
-  `interacts` is not BioRED's `binds`. Those sentences carry both readings and match either relation
-  box, so under *All* ticking just `interacts` equals *PPI model*, and a typed box equals
-  *BioRED model*; the tooltip gives both readings, and the set is the overlap of the two model views, so it never exceeds either.
+  (its one label), so `binds` and every other typed relation read 0 there. When both models keep
+  a sentence they agree a relation is there, not on its type: PPI's `interacts` is not BioRED's
+  `binds`. Since the two models share no relation type, there is no
+  "kept by both" view: such a sentence appears under each model's button with that model's
+  reading, and the tooltip gives both. Under *All* the same sentences carry both readings and
+  match either relation box, so ticking just `interacts` equals *PPI model*, and a typed box
+  equals *BioRED model*.
   Each button counts the edges holding at least one such sentence, so the counts sum past *All*.
 - **Focus re-expands after the lens**, so a gene-focus view either contains its seed or is
   empty — never the seed's neighbours drawn around a missing centre.

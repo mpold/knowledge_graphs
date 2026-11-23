@@ -885,7 +885,7 @@ __KINDROW__
  <div class="row mut help" data-help="rel">Counts read <em>total &middot; in view</em>: the total is every edge in the file carrying at least one sentence of that type (an edge with mixed readings counts under each, so the totals exceed the edge count), &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
  <div class="row">Training set behind the edge <button class="ihelp" data-help="src" aria-label="About training sets" aria-expanded="false">i</button></div>
  <div class="row" id="srcbtns"></div>
- <div class="row mut help" data-help="src" id="srchint">Which model kept each <em>sentence</em>. <b>PPI model</b> = every sentence the BioInfer/PPI model kept, shown with <em>its</em> reading &mdash; it has one label, <b>interacts</b>, so every other relation type reads 0 there. <b>BioRED model</b> = every sentence the BioRED model kept, with its typed (often signed) label. <b>Kept by both</b> = sentences both models kept: they agree a relation is there, not on its type (PPI&rsquo;s &ldquo;interacts&rdquo; is not BioRED&rsquo;s &ldquo;binds&rdquo;), so each carries both readings (BioRED&rsquo;s type and PPI&rsquo;s interacts) and matches either relation box; the tooltip gives both. Under <b>All</b>, ticking just <b>interacts</b> therefore shows exactly the PPI-model view, and a typed box exactly the BioRED-model view. Kept by both is the overlap of the two model views, so it can never exceed either. Each count is the number of <b>edges holding at least one such sentence</b>, over the whole graph rather than the current filters; an edge counts under every model behind it, so the counts sum past All.</div>
+ <div class="row mut help" data-help="src" id="srchint">Which model kept each <em>sentence</em>. <b>PPI model</b> = every sentence the BioInfer/PPI model kept, shown with <em>its</em> reading &mdash; it has one label, <b>interacts</b>, so every other relation type reads 0 there. <b>BioRED model</b> = every sentence the BioRED model kept, with its typed (often signed) label. A sentence both models kept appears under each button with that model&rsquo;s reading (the tooltip gives both); there is no &ldquo;both&rdquo; view, because the two models do not share relation types. Under <b>All</b> each such sentence carries both readings and matches either relation box, so ticking just <b>interacts</b> shows exactly the PPI-model view, and a typed box exactly the BioRED-model view. Each count is the number of <b>edges holding at least one such sentence</b>, over the whole graph rather than the current filters; an edge counts under every model behind it, so the counts sum past All.</div>
  <div class="row">Relationship score: <b id="scval">&ge;0.99</b><br><input id="conf" type="range" min="0" max="13" step="1" value="__CONFDEF__" aria-label="Minimum relationship score"></div>
  <div class="row mut" id="stats"></div>
 </div>
@@ -908,12 +908,15 @@ const KIND={};DATA.nodes.forEach(n=>{KIND[n.id]=n.kind||'gene';});
 // inferring it from counts -- and they cut at the sentence, so an edge the two models split
 // between them shows up under each, carrying only that model's half of the evidence.
 let SRC_MODE='all';
-const SRC_BTN=[['all','All'],['ppi','PPI model'],['biored','BioRED model'],['both','Kept by both']];
+// No "kept by both" button: the two models have different relation vocabularies (PPI says only
+// "interacts", BioRED types the relation), so the overlap has no relation type of its own. A
+// sentence both kept shows under each model's button with that model's reading.
+const SRC_BTN=[['all','All'],['ppi','PPI model'],['biored','BioRED model']];
 function buildSrcButtons(){
  // counted like the relation types: edges holding at least one sentence that model kept, so an
  // edge counts under every model behind it (the parts sum past the edge total)
  const n={all:DATA.edges.length,ppi:0,biored:0,both:0};
- DATA.edges.forEach(e=>{const r={};e.sents.forEach(s=>['ppi','biored','both'].forEach(k=>{if(srcPass(e,s,k))r[k]=1;}));for(const k in r)n[k]=(n[k]||0)+1;});
+ DATA.edges.forEach(e=>{const r={};e.sents.forEach(s=>['ppi','biored'].forEach(k=>{if(srcPass(e,s,k))r[k]=1;}));for(const k in r)n[k]=(n[k]||0)+1;});
  document.getElementById('srcbtns').innerHTML=SRC_BTN.map(([k,lab])=>
    '<button class="srcb'+(k===SRC_MODE?' on':'')+'" data-src="'+k+'"'+(n[k]?'':' disabled')+'>'
    +lab+' ('+(n[k]||0)+' edges)</button>').join('');
@@ -922,7 +925,7 @@ function buildSrcButtons(){
    document.querySelectorAll('.srcb').forEach(x=>x.classList.toggle('on',x===b));
    build(+thr.value);}));
  // one checkpoint in the run -> nothing to separate; keep the row but say so
- if(!n.biored&&!n.both)document.getElementById('srchint').innerHTML=
+ if(!n.biored)document.getElementById('srchint').innerHTML=
    'Only one RE checkpoint stands behind this graph, so every sentence comes from the <b>PPI model</b>; '
    +'run step&nbsp;2 with both models (<code>--route-mode additive</code>) to split them.';
 }
@@ -987,10 +990,10 @@ function hl(t){
 // 0 in view" then means no visible sentence says activates, which is what the reader sees.
 // A sentence BOTH models kept carries BioRED's typed label (rc) and PPI's own reading (pc,
 // always "interacts" / "not interacts"). They agree that a relation exists, not on its type,
-// so such a sentence holds BOTH readings and matches a relation box if either is ticked --
-// except in a single-model view, which shows only that model's reading. That makes ticking
-// "interacts" give the same sentences (hence edges, nodes, PMIDs) under All as under PPI
-// model, and "binds" the same under All as under BioRED model.
+// so under All such a sentence holds BOTH readings and matches a relation box if either is
+// ticked: "interacts" then gives the same sentences (hence edges, nodes, PMIDs) under All as
+// under PPI model, and "binds" the same under All as under BioRED model. A single-model view
+// shows only that model's reading; the tooltip gives both.
 function ppiCat(s){return s.pc||((s.rc||'').indexOf('not ')===0?'not interacts':'interacts');}
 function sentCats(e,s){const b=s.rc||e.cat;if(sentSrc(e,s)!=='both')return [b];
  if(SRC_MODE==='ppi')return [ppiCat(s)];if(SRC_MODE==='biored')return [b];
@@ -1004,9 +1007,8 @@ function sentCat(e,s){const c=sentCats(e,s);if(VIEW_CATS)for(const x of c)if(VIE
 // another is tagged 'both' -- and an edge-level filter then hid its PPI-only sentences from the
 // PPI view. Filtering per sentence makes the buttons agree with the relation boxes.
 function sentSrc(e,s){return s.sr||e.src||'ppi';}
-// a model's button shows EVERY sentence that model kept, corroborated ones included, so
-// "Kept by both" is the overlap of the PPI-model and BioRED-model views, never more than either
-function srcPass(e,s,mode){if(!mode||mode==='all')return true;const r=sentSrc(e,s);return r===mode||(r==='both'&&mode!=='both');}
+// a model's button shows EVERY sentence that model kept, corroborated ones included
+function srcPass(e,s,mode){if(!mode||mode==='all')return true;const r=sentSrc(e,s);return r===mode||r==='both';}
 function visSents(e,conf,lo,hi,tm,cats,mode){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&(!tm||tm.test(s.text))&&(!cats||sentCats(e,s).some(c=>cats.has(c)))&&srcPass(e,s,mode));}
 // The relation an edge is DRAWN as: whichever label carries the most sentences in view. A tie
 // keeps the payload's own cat if it is among the leaders, else the last alphabetically --
