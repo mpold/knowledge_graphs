@@ -27,6 +27,13 @@ dashed. Thickness and arrowhead size scale with **independent publications**, sq
 capped, so a paper repeating itself never outweighs several papers agreeing once each. An edge
 takes its best-supported direction.
 
+**Distance** — each edge is a spring whose rest length shrinks with its sentence count *in
+view*, on a log scale: 1 sentence 200, 2 → 165, 4 → 130, 8 → 95, 16 → 60, floored at 45. Node
+repulsion still spreads things out, so it is a tendency, not a ruler: in the default view the
+median drawn length runs 224 (1 sentence), 183 (2), 171 (3–4), 134 (5–8), 82 (9–16). Nodes
+already on screen keep their place when filters change (only newcomers are placed), so the
+distances reflect the counts of the view in which each node first appeared.
+
 **Co-mention links** — optional dashed grey lines to a chosen disease, drawn where sentences
 name it but no model claimed a relation. Never coloured like a prediction.
 
@@ -38,15 +45,24 @@ whether disease and drug names are drawn (gene symbols always are); *Shrink peri
 without reordering anything; tissue stacking, which pools same-tissue disease nodes onto one
 overlapping spot; the *Keep diseases* list, with same-tissue diseases grouped under a tissue
 heading that ticks them all at once; the co-mention picker; two sentence lenses -- an **Enrich for drivers**
-toggle that keeps only edges with a sentence naming a point mutation as a word of its own
-or in parentheses (`/\s+[A-Z]\d+[A-Z]\s+/` or `/\([A-Z]\d+[A-Z]\)/`, case-sensitive: *V600E*,
-*KRAS (G12C)*; figure / table panels are not counted -- any label right after the word, as in *Fig. S6K*,
-*Fig. E3B* or *Figure A1C*, and supplementary panels in a list or PLOS-style (*S8B Fig*) -- and neither is a stoplist of look-alikes: *S6K*, *E2F*, *G2M*, *S1P* and the cell lines *T47D*,
-*T98G*, *M059J*); an **Enrich for fusions** toggle that keeps only
+toggle that keeps only edges with a sentence naming an amino-acid change, case-sensitive, one-letter
+(*V600E*, *G12C*) or three-letter (*p.Gly12Cys*). Any punctuation may stand around it -- *KRAS
+G12C,*, *V600E-mutant*, *KRAS-G12V*, *L858R/T790M*, *(G12C)*, HGVS *p.L747P* -- and it may be glued
+to a whole gene symbol of the graph (*KRASG12C*, *TP53R273H*) or a Greek letter (*p110αH1047R*),
+but not to the front of a longer symbol (*CDKN2A*, *PPARGC1A*); no letter or digit may follow, nor
+*.X* (*H2A.X*). Figure / table panels are not counted -- any label right after the word, as in
+*Fig. S6K*, *Fig.S2F*, *Fig. E3B* or *Figure A1C*, and supplementary panels in a list or PLOS-style
+(*S8B Fig*) -- and neither is a stoplist of look-alikes: *S6K*, *S6R*, *E2F*, *E2A*, *G9A*, *G2M*,
+*S1P*, *S100P*, *B2M*, the histones *H2A* / *H2B*, the drug code *H3B*, and the cell lines *T47D*,
+*T98G*, *M059J*, *NCI-H295R*. (Until 2026-11-24 the change had to stand between spaces or in
+parentheses, which caught 1,076 sentences; it now catches 2,110.); an **Enrich for fusions** toggle that keeps only
 edges with a sentence saying *fusion* (as a word: not *infusion*) or *translocation* in the
 chromosomal sense -- after a fusion pair or fusion gene (*EML4-ALK translocation*,
 *ALK-translocated*), with a karyotype (*t(11;22)*), after *chromosomal* / *balanced* /
-*reciprocal* / *truncating*, or as *translocation involving MLL* -- never a protein moving
+*reciprocal* / *truncating*, or as *translocation involving MLL*; or karyotype notation on its own, with no other word
+(*t(4;14)*, *t(11;14)*, *t(9;22)(q34;q11)*, *ins(3;3)*, *inv(16)*, *der(22)*: myeloma and leukemia
+papers write their translocations this way; a *t(28) = 3.1* t-statistic has no semicolon and never
+matches) -- never a protein moving
 (*nuclear translocation of p65*, *translocation of YAP into the nucleus*); an **Enrich for ITD** toggle for internal tandem duplications (*ITD* in capitals as a word,
 as in *FLT3-ITD*, or *internal tandem duplication* spelled out); an **Enrich for
 overexpression** toggle (*overexpres* / *over-expres*, any case); an **Enrich for
@@ -82,17 +98,23 @@ outcome, hazard ratios, Kaplan-Meier; *OS* only beside a survival cue and *HR* o
 survival excluded) and **In vivo** (*in vivo*, xenografts / PDX / allografts, orthotopic or syngeneic
 models, mice, rats, animals, mouse / murine models and tumours; not mouse cells, fibroblasts or
 reagents); a fourth box, **Enrich for gene role and biology:**, holds **Tumor suppressor**
-(*tumor / tumour suppressor(s)*, *tumor-suppressive*, *TSG*, *anti-oncogene*; not plain *tumor
-suppression*, usually a treatment's result), **Oncogene** (*oncogene(s)*, *proto-oncogene*,
-*oncogenicity*, and *oncogenic* naming a role or a gene -- *oncogenic role / driver*, *oncogenic
-KRAS* -- but not *oncogenic signalling / pathways / mutations*), **Metastasis / EMT** (*metasta\**,
+and **Oncogene**, which -- unlike every other Enrich button -- judge the GENE, not the sentence: an
+edge counts when either end is a gene the **OncoKB Cancer Gene List** classes as a tumor suppressor
+(*TSG*) / an oncogene (*ONCOGENE*), genes classed as both (*NOTCH1*, *TP63*, *EZH2*, ...) counting for
+each; all its sentences pass and nothing is highlighted. The list (1,247 genes; 518 oncogenes and
+408 tumor suppressors, 68 of them both) is read from `databases/oncokb_cancerGeneList.tsv`, fetched
+2026-11-24 from `https://www.oncokb.org/api/v1/utils/cancerGeneList.txt`; 403 oncogenes and 296
+tumor suppressors are genes of this graph. (Until then the two matched the words *oncogene* /
+*tumor suppressor*, which few sentences use -- *Drivers* + *Oncogene* drew 8 nodes; it now draws
+334.) The box's other two buttons still read the sentence: **Metastasis / EMT** (*metasta\**,
 *EMT*, epithelial-mesenchymal transition and EMT markers; not the mesenchymal GBM subtype) and
 **Immune** (*immune*, *immunity*, *immunotherapy*, checkpoint inhibitors, PD-1 / PD-L1 / CTLA-4 and
 the other checkpoints, T / NK cells, CD8+, TILs, macrophages / TAMs, MDSCs, Tregs; not the lab
 methods named *immuno-* such as immunoblot or immunohistochemistry, cell-cycle checkpoints, T-cell
 lymphomas or a singular *TAM*, which is also tamoxifen). Within a box the toggles are ORed (a sentence matching any of those on counts); the boxes
 are ANDed with each other (*Drivers* + *Resistance* keeps sentences such as *T790M confers resistance
-to gefitinib*), and with the text match; zoom/fit (filters keep each node where it was and keep the camera unless something new
+to gefitinib*; *Drivers* + *Oncogene* only sentences that name a point mutation and speak of an
+oncogene, so the view is small by design), and with the text match; zoom/fit (filters keep each node where it was and keep the camera unless something new
 falls outside it, and Fit never zooms closer than 100%, so a small view is not blown up); *Significance in view*; and the details box,
 headed *Sentences of interest*, which lists an edge's sentences with linked PMIDs when you click
 it. Each section's explanation is behind a small round **i** beside its heading.
@@ -338,6 +360,13 @@ The order is deliberate, and it is what keeps the panel honest:
   neighbourhood tends to survive into the view while its papers do not, so at a loose view many
   genes have no partner outside it and go untested. Prune first — the floor of 2 on
   `Min connections` exists for this.
+- **A disease is a node only when its name resolves to exactly one MONDO term.** Abbreviations
+  the normalizer cannot place (*PDAC*, *LUAD*) and plain names it resolves to several terms
+  (*pancreatic cancer*, *CRC*) used to be dropped -- 95% of pancreatic mentions, which kept
+  KRAS G12 nearly off pancreatic cancer. `DISEASE_SURFACE` now maps ~35 such surfaces that mean
+  one thing in a cancer corpus (*PDAC*, *CRC*, *LUAD*, *pancreatic cancer*, *colon cancer*,
+  *bladder cancer*, *RCC*, *HNSC*, ...; 7,802 mentions). Still dropped, as ambiguous: *ALL*,
+  *BC*, *GC*, *PCa*, *PD*, *EC*, *OC*, *UC*, *PDA*.
 - **A few chemicals are blocked from being nodes at all** (`CHEMICAL_IGNORE`: tyrosine, glucose).
   ChEBI resolves them correctly, but their mentions are residue names and culture conditions, not
   compounds under study. The match is exact, so `2-deoxy-D-glucose` and
@@ -360,6 +389,11 @@ it is re-run:
 ```bash
 python high_confidence_g.py --data-root kaggle_working   # gene + disease + chemical
 ```
+
+The Oncogene / Tumor suppressor roles come from `databases/oncokb_cancerGeneList.tsv` (the data
+root is not in git, so a fresh checkout needs it fetched again:
+`curl -o kaggle_working/databases/oncokb_cancerGeneList.tsv https://www.oncokb.org/api/v1/utils/cancerGeneList.txt`).
+Without it the build warns and the two buttons keep nothing.
 
 Publication years come from `databases/pmc_years.json`, built by `pub_years.py` (stage-2
 step 4); re-run it if the corpus has grown, or the year slider will silently drop undated

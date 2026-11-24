@@ -102,14 +102,14 @@ DATA_ROOT = ROOT / "kaggle_working"
 
 # module-level paths; (re)bound to DATA_ROOT by set_data_root() so --data-root can retarget them
 OUT_DIR = XML_DIR = SENT_DIR = None
-RE_FILE = PMC_YEARS = TARGET_FILE = None
+RE_FILE = PMC_YEARS = TARGET_FILE = CANCER_GENES = None
 DISEASE_LIB = CHEM_LIB = None
 JSON_OUT = GRAPH_OUT = None
 
 
 def set_data_root(data_root):
     """Point every input/output path at `data_root` (the pipeline's output tree)."""
-    global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, PMC_YEARS
+    global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, PMC_YEARS, CANCER_GENES
     global TARGET_FILE, DISEASE_LIB, CHEM_LIB, JSON_OUT, GRAPH_OUT
     DATA_ROOT = Path(data_root).resolve()
     OUT_DIR = DATA_ROOT / "TRIPLES"
@@ -117,6 +117,9 @@ def set_data_root(data_root):
     SENT_DIR = DATA_ROOT / "sentences"         # one JSON per source document (corpus-size fallback)
     RE_FILE = OUT_DIR / "triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"
     PMC_YEARS = DATA_ROOT / "databases" / "pmc_years.json"
+    # OncoKB Cancer Gene List (https://www.oncokb.org/api/v1/utils/cancerGeneList.txt), the
+    # gene -> oncogene / tumor suppressor roles behind the Oncogene and Tumor suppressor buttons
+    CANCER_GENES = DATA_ROOT / "databases" / "oncokb_cancerGeneList.tsv"
     TARGET_FILE = DATA_ROOT / "CHEMICAL" / "chemical_to_target.json"   # gene -> corpus chemicals (in_corpus_GENETIC flag)
     # normalization libraries carrying the in-place phenotype / non_chemical flags
     DISEASE_LIB = DATA_ROOT / "DISEASE" / "disease.json"
@@ -194,7 +197,43 @@ CHEMICAL_IGNORE = {"tyrosine", "glucose"}
 #   mm   disease.py maps it to "Miyoshi myopathy" (413 mentions); in this cancer corpus MM is
 #        multiple myeloma. DISEASE_MERGE below folds MONDO's "plasma cell myeloma" into the same
 #        node, so "MM", "myeloma" and "multiple myeloma" all land on one.
-DISEASE_SURFACE = {"lcc": "lung large cell carcinoma", "mm": "multiple myeloma"}
+#
+# The rest close two holes that hid the commonest cancers (added 2026-11-24): abbreviations the
+# normalizer has no id for ("PDAC" x734, "LUAD" x906), and plain names it resolves to SEVERAL
+# MONDO terms at once -- "pancreatic cancer" to exocrine pancreatic carcinoma + malignant
+# pancreatic neoplasm, "CRC" to colorectal cancer + colorectal carcinoma -- which single() then
+# throws away. Before this, 5% of pancreatic mentions reached the graph and KRAS-PDAC (KRAS G12
+# being the disease's defining driver) was all but absent.
+# Only surfaces that mean one thing in a cancer corpus are listed. Left out on purpose: ALL
+# (the word "all"), BC (breast / bladder), GC (gastric / germinal centre), PCa (also principal
+# component analysis), PD, EC, OC, UC, um (micrometre), fl (floxed, fl/fl), MF, ACC, RMS, PDA
+# (patent ductus arteriosus).
+DISEASE_SURFACE = {
+    "lcc": "lung large cell carcinoma", "mm": "multiple myeloma",
+    # pancreas
+    "pdac": "pancreatic ductal adenocarcinoma", "pdacs": "pancreatic ductal adenocarcinoma",
+    "pdac tumors": "pancreatic ductal adenocarcinoma", "mpdac": "pancreatic ductal adenocarcinoma",
+    "pancreatic cancer": "pancreatic cancer", "pancreatic cancers": "pancreatic cancer",
+    "panin": "pancreatic intraepithelial neoplasia",
+    # colon / rectum
+    "crc": "colorectal cancer", "crcs": "colorectal cancer", "mcrc": "colorectal cancer",
+    "colon cancer": "colon carcinoma", "colon cancers": "colon carcinoma",
+    # lung
+    "luad": "lung adenocarcinoma", "lusc": "squamous cell lung carcinoma",
+    # breast
+    "breast tumor": "breast cancer", "breast tumors": "breast cancer", "mbc": "breast cancer",
+    "tnbcs": "triple-negative breast carcinoma",
+    # others
+    "bladder cancer": "urinary bladder carcinoma",
+    "rcc": "renal cell carcinoma", "prcc": "papillary renal cell carcinoma",
+    "hnsc": "head and neck squamous cell carcinoma", "oscc": "oral squamous cell carcinoma",
+    "scc": "squamous cell carcinoma", "sccs": "squamous cell carcinoma",
+    "crpc": "castration-resistant prostate carcinoma", "hgsoc": "high grade serous ovarian carcinoma",
+    "mpm": "malignant pleural mesothelioma", "mtc": "medullary thyroid gland carcinoma",
+    "ptc": "papillary thyroid carcinoma", "npc": "nasopharyngeal carcinoma",
+    "cca": "cholangiocarcinoma", "gbc": "gallbladder cancer",
+    "t - all": "T-cell acute lymphoblastic leukemia",
+}
 
 # Distinct MONDO terms that name the SAME disease at the same granularity. Splitting one
 # disease across several nodes is an artefact of ontology structure, not a finding: MONDO
@@ -210,6 +249,8 @@ DISEASE_MERGE = {
     "lung neoplasm": "lung cancer",      # surfaces "lung tumor(s)" / "lung tumours"
     "breast carcinoma": "breast cancer",
     "plasma cell myeloma": "multiple myeloma",   # MONDO's label; MM is overridden to the common name
+    "pancreatic neoplasm": "pancreatic cancer",     # "pancreatic tumor(s)", as lung neoplasm above
+    "colorectal carcinoma": "colorectal cancer",
 }
 
 
@@ -685,6 +726,7 @@ def graph_payload_multi(triples, flags):
     except Exception:
         years = {}
     tgt, chems_by_gene, tsrc, tcat = _drug_targets()
+    gene_role = _cancer_gene_roles()     # not `roles`: the loop below reuses that name
     dir_sent = collections.defaultdict(set)            # (a,b,cat) -> sentences
     pair_sent = collections.defaultdict(dict)          # pair -> {sentence: [score, pmid, cat, spec, src]}
     pair_src = collections.defaultdict(set)            # pair -> model roles behind ANY of its triples
@@ -738,8 +780,31 @@ def graph_payload_multi(triples, flags):
                       "target": tgt.get(nd, 0) if k == "gene" else 0,
                       "chems": chems_by_gene.get(nd, []) if k == "gene" else [],
                       "tsource": tsrc.get(nd, "") if k == "gene" else "",
-                      "tcat": tcat.get(nd, "other")})
+                      "tcat": tcat.get(nd, "other"),
+                      **({"role": gene_role[nd]} if k == "gene" and nd in gene_role else {})})
+    nr = collections.Counter(n.get("role") for n in nodes if n.get("role"))
+    print(f"  OncoKB cancer-gene roles on graph genes: oncogene {nr['onc']}, tumor suppressor "
+          f"{nr['tsg']}, both {nr['both']}")
     return {"nodes": nodes, "edges": edges}
+
+
+def _cancer_gene_roles():
+    """{HGNC symbol: 'onc' | 'tsg' | 'both'} from the OncoKB Cancer Gene List's "Gene Type"
+    column (ONCOGENE / TSG / ONCOGENE_AND_TSG; NEITHER, INSUFFICIENT_EVIDENCE and blank carry no
+    role). Missing file -> {} with a warning: the two buttons then keep nothing."""
+    role = {"ONCOGENE": "onc", "TSG": "tsg", "ONCOGENE_AND_TSG": "both"}
+    try:
+        with open(CANCER_GENES, encoding="utf-8", newline="") as fh:
+            rows = list(csv.DictReader(fh, delimiter="	"))
+    except OSError:
+        print(f"  WARNING: {CANCER_GENES} not found -- Oncogene / Tumor suppressor buttons will be empty")
+        return {}
+    out = {}
+    for r in rows:
+        g, t = (r.get("Hugo Symbol") or "").strip(), (r.get("Gene Type") or "").strip().upper()
+        if g and t in role:
+            out[g] = role[t]
+    return out
 
 
 def read_pubmed_query():
@@ -878,9 +943,9 @@ __LIBTAG__
  <div class="row" id="enrichhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for alteration:</b></div>
  <div id="enrichgrid" class="egrid">
  <div class="row"><button id="drvbtn" aria-pressed="false">Drivers</button> <button class="ihelp" aria-label="About enrich for drivers" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, matched by <code>/\s+[A-Z]\d+[A-Z]\s+/</code> or <code>/\([A-Z]\d+[A-Z]\)/</code> (case-sensitive), and excluding the figure, table and cell-line look-alikes.</div></div>
+  <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, one-letter or three-letter, case-sensitive (<i>V600E</i>, <i>p.Gly12Cys</i>), with any punctuation around it (<i>G12C,</i> <i>V600E-mutant</i> <i>KRAS-G12V</i> <i>L858R/T790M</i> <i>p.L747P</i>) or glued to a gene symbol (<i>KRASG12C</i>, <i>p110&alpha;H1047R</i>), and excluding the figure, table, gene-name and cell-line look-alikes.</div></div>
  <div class="row"><button id="fusbtn" aria-pressed="false">Fusions</button> <button class="ihelp" aria-label="About enrich for fusions" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence about a <b>gene fusion</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. A sentence counts if it says <i>fusion</i> (<i>EML4-ALK fusion</i>, <i>RET fusion-positive</i>; not <i>infusion</i>), or uses <i>translocation</i> in the chromosomal sense: after a fusion pair or a gene that drives fusions (<i>EML4-ALK translocation</i>, <i>ROS1 translocation</i>, <i>ALK-translocated</i>), with a karyotype (<i>t(11;22) translocation</i>), after <i>chromosomal</i>, <i>balanced</i>, <i>reciprocal</i> or <i>gene</i>, or as <i>translocation involving MLL</i>. A protein moving inside the cell &mdash; <i>nuclear translocation of p65</i>, <i>translocation of YAP to the nucleus</i> &mdash; does not count.</div></div>
+  <div class="mut help">Keeps only edges with a sentence about a <b>gene fusion</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. A sentence counts if it says <i>fusion</i> (<i>EML4-ALK fusion</i>, <i>RET fusion-positive</i>; not <i>infusion</i>), or uses <i>translocation</i> in the chromosomal sense: after a fusion pair or a gene that drives fusions (<i>EML4-ALK translocation</i>, <i>ROS1 translocation</i>, <i>ALK-translocated</i>), with a karyotype (<i>t(11;22) translocation</i>), after <i>chromosomal</i>, <i>balanced</i>, <i>reciprocal</i> or <i>gene</i>, or as <i>translocation involving MLL</i>. Karyotype notation counts on its own, with no other word: <i>t(4;14)</i>, <i>t(11;14)</i>, <i>t(9;22)(q34;q11)</i>, <i>inv(16)</i>, <i>der(22)</i> &mdash; how myeloma and leukemia papers write their translocations. A protein moving inside the cell &mdash; <i>nuclear translocation of p65</i>, <i>translocation of YAP to the nucleus</i> &mdash; does not count.</div></div>
  <div class="row"><button id="oexbtn" aria-pressed="false">Overexpression</button> <button class="ihelp" aria-label="About enrich for overexpression" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence about <b>overexpression</b> &mdash; any word starting <i>overexpres</i> or <i>over-expres</i>, in any case (<i>overexpression</i>, <i>overexpressed</i>, <i>over-expressing</i>) &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. Note it catches both senses: a gene found overexpressed in tumours, and a gene overexpressed in an experiment.</div></div>
  <div class="row"><button id="ampbtn" aria-pressed="false">Amplification</button> <button class="ihelp" aria-label="About enrich for amplification" aria-expanded="false">i</button>
@@ -899,7 +964,7 @@ __LIBTAG__
   <div class="mut help">Keeps only edges with a sentence about an <b>internal tandem duplication</b> &mdash; <i>ITD</i> in capitals as a word of its own (<i>FLT3-ITD</i>, <i>FLT3/ITD</i>, <i>ITD-positive</i>) or <i>internal tandem duplication</i> spelled out &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted.</div></div>
  </div>
  <div class="row" id="therapyhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for therapy:</b> <button class="ihelp" aria-label="About enrich for therapy" aria-expanded="false">i</button>
-  <div class="mut help">These buttons work like the alteration ones and combine with each other in OR. The two boxes combine in <b>AND</b>: with <i>Drivers</i> and <i>Resistance</i> both on, a sentence must name a point mutation <em>and</em> speak of resistance (<i>T790M confers resistance to gefitinib</i>).</div></div>
+  <div class="mut help">These buttons combine with each other in <b>OR</b>, and in <b>AND</b> with the other Enrich boxes: with <i>Drivers</i> and <i>Resistance</i> both on, a sentence must name a point mutation <em>and</em> speak of resistance (<i>T790M confers resistance to gefitinib</i>).</div></div>
  <div id="therapygrid" class="egrid">
  <div class="row"><button id="acqbtn" aria-pressed="false">Acquired resistance</button> <button class="ihelp" aria-label="About enrich for acquired resistance" aria-expanded="false">i</button>
   <div class="mut help">A narrower view than <i>Resistance</i>: keeps only edges with a sentence about <b>how resistance arises</b>. It counts <i>acquired</i>, <i>secondary</i>, <i>intrinsic</i>, <i>primary</i>, <i>adaptive</i>, <i>innate</i>, <i>de novo</i> and <i>emerging</i> resistance (<i>acquired erlotinib resistance</i>, <i>secondary resistant mutation</i>), <i>acquisition</i> or <i>development of resistance</i>, <i>mechanisms of resistance</i>, <i>resistance mechanisms / mutations</i>, <i>gatekeeper mutations</i>, and <i>bypass</i> signalling in a sentence that speaks of resistance or an inhibitor (<i>MET amplification bypasses EGFR inhibition</i>). With <i>Resistance</i> also on, this adds nothing.</div></div>
@@ -911,7 +976,7 @@ __LIBTAG__
   <div class="mut help">Keeps only edges with a sentence about a <b>biomarker</b>: <i>biomarker</i>, <i>predictive marker</i>, <i>companion diagnostic</i>, and a feature said to predict response, sensitivity, benefit, resistance or efficacy (<i>PBRM1 inactivation may predict benefit from anti-PD-1</i>, <i>predictive of everolimus response</i>). Prognostic biomarkers count too.</div></div>
  </div>
  <div class="row" id="clinhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for clinical relevance:</b> <button class="ihelp" aria-label="About enrich for clinical relevance" aria-expanded="false">i</button>
-  <div class="mut help">These buttons combine with each other in OR, and in <b>AND</b> with the two boxes above: with <i>Drivers</i> and <i>Clinical evidence</i> both on, a sentence must name a point mutation <em>and</em> report patients or a trial.</div></div>
+  <div class="mut help">These buttons combine with each other in <b>OR</b>, and in <b>AND</b> with the other Enrich boxes: with <i>Drivers</i> and <i>Clinical evidence</i> both on, a sentence must name a point mutation <em>and</em> report patients or a trial.</div></div>
  <div id="clingrid" class="egrid">
  <div class="row"><button id="clnbtn" aria-pressed="false">Clinical evidence</button> <button class="ihelp" aria-label="About enrich for clinical evidence" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence reporting <b>patients in a study or on a treatment</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>clinical trial / study / response / benefit</i>, a trial phase (<i>phase II trial</i>, <i>phase I/II study</i>, <i>Phase 3</i>; only beside trial or study wording, so <i>G2/M phase</i> does not count), <i>randomised</i>, <i>open-label</i>, <i>multicentre</i>, <i>prospective</i> / <i>retrospective</i> studies, NCT numbers, response rates (<i>ORR</i>, <i>objective response rate</i>, <i>complete / partial response</i>), and <i>patients treated with / receiving</i> a drug. Plain <i>patients</i> is not enough: most such sentences are database cohorts.</div></div>
@@ -921,12 +986,12 @@ __LIBTAG__
   <div class="mut help">Keeps only edges with a sentence about <b>animal experiments</b>, the level of evidence above cell culture, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>in vivo</i>, xenografts and allografts (<i>PDX</i>, <i>patient-derived xenograft</i>, <i>CDX</i>), <i>GEMM</i>, orthotopic / syngeneic / subcutaneous models, <i>tumour-bearing</i>, <i>mice</i> and <i>rats</i>, <i>mouse / murine / animal / zebrafish models</i>, and <i>knock-in</i> / <i>transgenic</i> mice. Not counted: <i>mouse</i> as a source of cells or reagents (<i>mouse embryonic fibroblasts</i>, <i>mouse anti-</i>), and patient-derived organoids or cells, which are in vitro.</div></div>
  </div>
  <div class="row" id="biohead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for gene role and biology:</b> <button class="ihelp" aria-label="About enrich for gene role and biology" aria-expanded="false">i</button>
-  <div class="mut help">These buttons combine with each other in OR, and in <b>AND</b> with the boxes above: with <i>Drivers</i> and <i>Oncogene</i> both on, a sentence must name a point mutation <em>and</em> speak of an oncogene.</div></div>
+  <div class="mut help">These buttons combine with each other in <b>OR</b>, and in <b>AND</b> with the other Enrich boxes: with <i>Drivers</i> and <i>Oncogene</i> both on, a sentence must name a point mutation <em>and</em> speak of an oncogene.</div></div>
  <div id="biogrid" class="egrid">
  <div class="row"><button id="tsgbtn" aria-pressed="false">Tumor suppressor</button> <button class="ihelp" aria-label="About enrich for tumor suppressor" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence about a gene's role as a <b>tumor suppressor</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>tumor</i> / <i>tumour suppressor(s)</i>, <i>tumor-suppressive</i> (<i>tumor suppressive role</i>, <i>tumor-suppressive effects</i>), <i>tumor suppressor gene</i>, <i>tumor suppression activity / function</i>, <i>TSG(s)</i> and <i>anti-oncogene</i>. Not counted: plain <i>tumor suppression</i>, which is usually a treatment's result (<i>led to tumor suppression in vivo</i>) rather than a gene's role.</div></div>
+  <div class="mut help">Keeps only edges with at least one end that the <b>OncoKB Cancer Gene List</b> classes as a <b>tumor suppressor</b> (<i>TSG</i>, or both oncogene and TSG, such as <i>NOTCH1</i> or <i>TP63</i>), and the nodes those edges connect. The gene decides, not the wording: every sentence of such an edge counts, and nothing is highlighted. OncoKB list of 2026-11-24, 408 tumor suppressors.</div></div>
  <div class="row"><button id="oncbtn" aria-pressed="false">Oncogene</button> <button class="ihelp" aria-label="About enrich for oncogene" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence about a gene's role as an <b>oncogene</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>oncogene(s)</i>, <i>proto-oncogene</i>, <i>oncogenicity</i>, and <i>oncogenic</i> naming a role or a gene (<i>oncogenic role</i>, <i>function</i>, <i>driver</i>, <i>activity</i>, <i>effects</i>, <i>potential</i>; <i>oncogenic KRAS</i>, <i>oncogenic K-Ras</i>). Not counted: <i>oncogenic</i> for a process rather than a gene's role (<i>oncogenic signalling</i>, <i>pathways</i>, <i>stress</i>, <i>mutations</i>, <i>signatures</i>).</div></div>
+  <div class="mut help">Keeps only edges with at least one end that the <b>OncoKB Cancer Gene List</b> classes as an <b>oncogene</b> (<i>ONCOGENE</i>, or both oncogene and TSG), and the nodes those edges connect. The gene decides, not the wording: every sentence of such an edge counts, and nothing is highlighted. OncoKB list of 2026-11-24, 518 oncogenes.</div></div>
  <div class="row"><button id="mtsbtn" aria-pressed="false">Metastasis / EMT</button> <button class="ihelp" aria-label="About enrich for metastasis / EMT" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence about <b>metastasis or the epithelial-mesenchymal transition</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>metastasis</i>, <i>metastases</i>, <i>metastatic</i>, <i>metastasize</i>, <i>EMT</i> (capitals) and <i>epithelial(-to)-mesenchymal transition</i>. Note <i>metastatic</i> also marks a disease stage (<i>metastatic NSCLC patients</i>); those sentences count too.</div></div>
  <div class="row"><button id="immbtn" aria-pressed="false">Immune</button> <button class="ihelp" aria-label="About enrich for immune" aria-expanded="false">i</button>
@@ -1095,7 +1160,33 @@ function reHits(g,t){const iv=[];g.lastIndex=0;let m;
 // "Enrich for drivers": a fixed, case-SENSITIVE point-mutation lens (V600E, G12C as a word of
 // their own, or in parentheses: "KRAS (G12C)"), ANDed with the text box -- textMatcher would
 // add the i flag and let "a12b" match.
-const DRIVER_RE=/\s+[A-Z]\d+[A-Z]\s+|\([A-Z]\d+[A-Z]\)/g;
+// The change itself is the token -- one-letter (G12C) or three-letter (p.Gly12Cys) -- and what
+// may stand on either side is checked separately (driverLeftOK). It once had to sit between
+// whitespace or inside parentheses, which lost "KRAS G12C, ...", "V600E-mutant", "KRAS-G12V",
+// "L858R/T790M", "p.L747P", "KRASG12V" and "p110αH1047R" -- about a third of all mentions.
+// Right side: no letter or digit may follow, nor "." plus one ("H2A.X" is a histone).
+const AA3='Ala|Arg|Asn|Asp|Cys|Gln|Glu|Gly|His|Ile|Leu|Lys|Met|Phe|Pro|Ser|Thr|Trp|Tyr|Val';
+const DRIVER_RE=new RegExp('(?<![A-Za-z0-9])(?:p\\.)?(?:'+AA3+')\\d{1,4}(?:'+AA3+'|Ter)(?![A-Za-z0-9])|[A-Z]\\d{1,4}[A-Z](?![A-Za-z0-9])(?!\\.[A-Za-z0-9])','g');
+// Left side: start, space, bracket or any punctuation ("-", "/", ",", "+", ";", ":"); a "." only
+// in HGVS "p." / "c." ("Fig.S2F" is a panel); glued to letters only when they are a whole gene
+// symbol in this graph (KRASG12C, TP53R273H, KrasG12D -- not CDKN2A, INPP4B, HIF1A, KMT2A, whose
+// front is no gene) or end in a Greek letter (p110αH1047R, ERαY537S). "NCI-H295R" is a cell line.
+let GENESYM=null;
+function driverLeftOK(t,a){
+ const c=t[a-1];
+ if(c===undefined)return true;
+ if(c==='.')return /(?:^|[^A-Za-z0-9])[pc]$/.test(t.slice(Math.max(0,a-3),a-1));
+ if(/[A-Za-z0-9Ͱ-Ͽ]/.test(c)){
+  if(/[Ͱ-Ͽ]/.test(c))return true;
+  const run=/[A-Za-z0-9Ͱ-Ͽ]+$/.exec(t.slice(Math.max(0,a-20),a))[0];
+  if(!GENESYM)GENESYM=new Set(DATA.nodes.filter(n=>n.kind==='gene').map(n=>String(n.id).toUpperCase()));
+  // ...and the glued whole must not itself be a gene: PPARG + C1A is PPARGC1A
+  const word=(run+(/^[A-Za-z0-9]+/.exec(t.slice(a))||[''])[0]).toUpperCase();
+  return run.length>=3&&GENESYM.has(run.toUpperCase())&&!GENESYM.has(word);
+ }
+ if(/NCI-$/i.test(t.slice(Math.max(0,a-4),a)))return false;
+ return true;
+}
 // Figure/table panels have the same shape -- "Figure S6D and E", "Supplementary Fig. S7G and
 // S7H", "Figs. 6A and B, S3A", "Table S2A" -- so a hit is dropped when the text before it
 // ends in a figure or table reference, optionally followed by a list of other panels (or, PLOS
@@ -1112,11 +1203,15 @@ const FIG_POST=/^(?:\s*(?:[-–,;&]|and|or)?\s*S\d{1,2}[A-Za-z]{0,2})*\s*Figs?\b
 //   S6K  ribosomal S6 kinase (RPS6KB1)    E2F  transcription-factor family
 //   T47D breast-cancer cell line          T98G, M059J  glioblastoma cell lines
 //   G2M  the G2/M cell-cycle phase        S1P  sphingosine-1-phosphate, a lipid
-const DRIVER_STOP=new Set(['S6K','E2F','T47D','T98G','M059J','G2M','S1P']);
+//   E2A  TCF3 (E2A-PBX1, E2A-HLF)      G9A  EHMT2               H2A, H2B  histones
+//   S6R  phospho-S6 ribosomal protein   S100P  a gene            B2M  beta-2-microglobulin
+//   H3B  the H3B-6545 drug code
+const DRIVER_STOP=new Set(['S6K','E2F','T47D','T98G','M059J','G2M','S1P','E2A','G9A','H2A','H2B','S6R','S100P','B2M','H3B']);
 let DRIVERS=false;
 function driverHits(t){t=t||'';
  return reHits(DRIVER_RE,t).filter(([a,b])=>{
   if(DRIVER_STOP.has(t.slice(a,b).replace(/[\s()]/g,'')))return false;
+  if(!driverLeftOK(t,a))return false;
   while(/[\s(]/.test(t[a]))a++;            // the hit's own leading space / parenthesis
   // a label RIGHT after the word is a panel whatever its letter -- "Fig. S6K", "Fig. E3B"
   // (extended data), "Figure A1C" (appendix), "Table R2A": no mutation is written that way
@@ -1148,8 +1243,15 @@ const TL_POS_PRE=new RegExp(String.raw`(?:\bt\(\d+;\d+\)|\b(?:chromosom\w*|balan
 // ... or a karyotype / fusion gene just after: "translocation t(9;22)", "translocations of MYC",
 // "a translocation involving MLL"
 const TL_POS_POST=new RegExp(String.raw`^\s*(?:\(?t\(\d+;\d+\)|(?:of|involving|between|affecting)\s+(?:the\s+)?(?:`+FUSION_GENES+String.raw`)\b)`);
+// Karyotype notation counts on its own, as the chromosomal event it names: t(4;14), t(11;14),
+// t(9;22)(q34;q11), t(X;18), ins(3;3), and the one-chromosome inv(16) / der(22) (a deletion,
+// del(17p), is a loss -- the Deletion button's business, not this one).
+// Myeloma's translocations are written almost only this way -- "myeloma cells carrying
+// t(4;14)" -- and none of those sentences said "fusion". A semicolon is required for t / ins,
+// so a t-statistic "t(28) = 3.1" never matches; "non-t(4;14)" still does (it names the event).
+const KARYO_RE=/\b(?:t|ins)\(\s*[0-9XY]{1,2}\s*;\s*[0-9XY]{1,2}\s*\)(?:\s*\(\s*[pq][\d.]*\s*;\s*[pq][\d.]*\s*\))?|\b(?:inv|der)\(\s*[0-9XY]{1,2}\s*\)(?:\s*\(\s*[pq][\d.;pq\s]*\))?/g;
 function fusionHits(t){t=t||'';
- const iv=reHits(FUSION_WORD,t);
+ const iv=reHits(FUSION_WORD,t).concat(reHits(KARYO_RE,t));
  reHits(TRANSLOC_WORD,t).forEach(([a,b])=>{
    const pre=t.slice(Math.max(0,a-40),a),post=t.slice(b,b+40);
    if(TL_NEG_PRE.test(pre))return;
@@ -1340,7 +1442,7 @@ function metHits(t){t=t||'';const iv=[];
  return iv;}
 function metMatcher(){return {test:t=>metHits(t).length>0,hits:metHits};}
 // ---- "Enrich for therapy": a second box. Its buttons combine in OR among themselves, and the
-// box combines in AND with the alteration box: Drivers + Resistance keeps a sentence that names
+// box combines in AND with the other boxes: Drivers + Resistance keeps a sentence that names
 // a point mutation AND speaks of resistance (T790M confers resistance to gefitinib).
 // Resistance: resist* (resistance, resistant, TKI-resistant, multidrug-resistant), chemo- /
 // radio-resist*, refractory. Not counted: a cell surviving something that is not a treatment
@@ -1449,23 +1551,19 @@ let VIVS=false;
 function vivHits(t){return reHits(VIV_RE,t||'');}
 function vivMatcher(){return {test:t=>vivHits(t).length>0,hits:vivHits};}
 // ---- "Enrich for gene role and biology": a fourth box, OR inside, AND with the other boxes.
-// Oncogene: the gene's role as an oncogene -- oncogene(s), proto-oncogene, oncogenicity, and
-// "oncogenic" naming a role or a gene (oncogenic role / function / driver / activity / effects /
-// potential / properties, oncogenic KRAS, oncogenic K-Ras). Not counted: "oncogenic" for a process
-// rather than a gene's role -- oncogenic signalling / pathways / stress / mutations / signatures.
-const ONC_WORD=/\b(?:proto-?)?oncogen(?:e|es|icity)(?![a-z])|\boncogenic\s+(?:roles?|functions?|drivers?|activit(?:y|ies)|effects?|potential|propert(?:y|ies)|capacity|capabilit\w*|dependenc\w*|genes?|proteins?|kinases?|fusions?|isoforms?|variants?|forms?|characteristics|phenotypes?)\b/gi;
-const ONC_GENE=/\boncogenic\s+(?:[A-Z][A-Za-z0-9]*[A-Z0-9]|[A-Z]-?Ras|Ras|p110\S?)(?![A-Za-z])/g;   // case-sensitive: a gene name
-let ONCS=false;
-function oncHits(t){t=t||'';return reHits(ONC_WORD,t).concat(reHits(ONC_GENE,t));}
-function oncMatcher(){return {test:t=>oncHits(t).length>0,hits:oncHits};}
-// Tumour suppressor: tumour / tumor suppressor(s), tumour-suppressive role / function / effects,
-// tumour suppressor gene, TSG(s), anti-oncogene. "Tumour suppression" by a treatment ("led to
-// tumour suppression in vivo") is an outcome, not a gene's role, and does not count.
-const TSG_RE=/\btumou?r[- ]suppress(?:or|ors|ive|ing)(?![a-z])|\btumou?r[- ]suppression\s+(?:activit\w*|functions?|roles?)\b|\b(?:roles?|functions?)\s+(?:of\s+[\w-]+\s+)?in\s+tumou?r[- ]suppression\b|\banti-?oncogenes?\b/gi;
-const TSG_ABBR=/\bTSGs?\b/g;
-let TSGS=false;
-function tsgHits(t){t=t||'';return reHits(TSG_RE,t).concat(reHits(TSG_ABBR,t));}
-function tsgMatcher(){return {test:t=>tsgHits(t).length>0,hits:tsgHits};}
+// Oncogene / Tumor suppressor: not sentence wording but the GENE -- an edge counts when either
+// end is a gene the OncoKB Cancer Gene List classes as an oncogene (ONCOGENE or
+// ONCOGENE_AND_TSG) / a tumor suppressor (TSG or ONCOGENE_AND_TSG). The role rides on each gene
+// node ("role": onc / tsg / both), baked in by _cancer_gene_roles(). Every sentence of such an
+// edge passes, so the matcher takes the edge as a second argument and highlights nothing.
+// (They once matched the words "oncogene" / "tumor suppressor", which few sentences use: the
+// edge's genes say more than the sentence's vocabulary.)
+const ROLE={};DATA.nodes.forEach(n=>{if(n.role)ROLE[n.id]=n.role;});
+function hasRole(id,r){const x=ROLE[id];return x===r||x==='both';}
+let ONCS=false, TSGS=false;
+function roleMatcher(r){return {test:(t,e)=>!!e&&(hasRole(e.from,r)||hasRole(e.to,r)),hits:()=>[]};}
+function oncMatcher(){return roleMatcher('onc');}
+function tsgMatcher(){return roleMatcher('tsg');}
 // Immune: immune (immune checkpoint, immune evasion, immune cells), immunity, immunotherapy,
 // immunosuppressive, immunogenic(ity), immunomodulatory, immunocompetent, immunosurveillance;
 // checkpoint inhibitors / blockade; macrophages, dendritic cells, MDSCs, neoantigens, interferon
@@ -1496,9 +1594,9 @@ function enrichLabel(){const alt=[DRIVERS&&'drivers',FUSIONS&&'fusions',ITDS&&'I
   bio=[ONCS&&'oncogene',TSGS&&'tumor suppressor',IMMS&&'immune',MTSS&&'metastasis / EMT'].filter(Boolean).join(' or ');
  const g=[alt,ther,clin,bio].filter(Boolean);
  return g.length>1?g.map(x=>'('+x+')').join(' and '):g.join('');}
-function andMatchers(a,b){if(!a||!b)return a||b;return {test:t=>a.test(t)&&b.test(t),hits:t=>[...a.hits(t),...b.hits(t)]};}
+function andMatchers(a,b){if(!a||!b)return a||b;return {test:(t,e)=>a.test(t,e)&&b.test(t,e),hits:t=>[...a.hits(t),...b.hits(t)]};}
 // the two Enrich buttons widen each other: a sentence naming a mutation OR a fusion counts
-function orMatchers(a,b){if(!a||!b)return a||b;return {test:t=>a.test(t)||b.test(t),hits:t=>[...a.hits(t),...b.hits(t)]};}
+function orMatchers(a,b){if(!a||!b)return a||b;return {test:(t,e)=>a.test(t,e)||b.test(t,e),hits:t=>[...a.hits(t),...b.hits(t)]};}
 let TM=null;   // matcher in force for the current view; used to highlight hits in sentence text
 // mark hits on the RAW text (so a query containing <, > or & still highlights), escaping each piece as we go
 function hl(t){
@@ -1538,7 +1636,7 @@ function sentCat(e,s){const c=sentCats(e,s);if(VIEW_CATS)for(const x of c)if(VIE
 function sentSrc(e,s){return s.sr||e.src||'ppi';}
 // a model's button shows EVERY sentence that model kept, corroborated ones included
 function srcPass(e,s,mode){if(!mode||mode==='all')return true;const r=sentSrc(e,s);return r===mode||r==='both';}
-function visSents(e,conf,lo,hi,tm,cats,mode){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&(!tm||tm.test(s.text))&&(!cats||sentCats(e,s).some(c=>cats.has(c)))&&srcPass(e,s,mode));}
+function visSents(e,conf,lo,hi,tm,cats,mode){return e.sents.filter(s=>s.sc>=conf&&passYear(s.yr,lo,hi)&&(!tm||tm.test(s.text,e))&&(!cats||sentCats(e,s).some(c=>cats.has(c)))&&srcPass(e,s,mode));}
 // The relation an edge is DRAWN as: whichever label carries the most sentences in view. A tie
 // keeps the payload's own cat if it is among the leaders, else the last alphabetically --
 // mirroring the reverse sort that picked cat in the first place.
@@ -1690,6 +1788,10 @@ function stackTissues(net,groups){
 // band across the canvas. The arrowhead grows with the same measure, so direction stays legible
 // on the thick edges instead of being swallowed by them.
 function edgeWidth(np){return Math.min(1+2.0*Math.sqrt(Math.max(0,np-1)),12);}
+// Spring rest length from the edge's sentence count in view: the better-supported a link, the
+// closer its two ends sit. Log scale, so 1 -> 200, 2 -> 165, 4 -> 130, 8 -> 95, 16 -> 60 and
+// a floor of 45 from about 22 sentences on (a hub's hundreds would otherwise stack its partners).
+function edgeLength(w){return Math.max(45,Math.min(200,200-35*Math.log2(Math.max(1,w))));}
 function arrowScale(np){return Math.min(0.5+0.18*Math.sqrt(Math.max(0,np-1)),1.6);}
 // heads the details box whenever it lists sentences -- above the "A -> B" line, not in the
 // hover tooltip, which is transient and already framed by the edge you are pointing at
@@ -1757,6 +1859,8 @@ function focusKeep(edges,seeds,hops){
 }
 function build(thr){
  const conf=activeConf(), cats=activeCats(); VIEW_CATS=cats; const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
+ // Enrich buttons combine in OR within a box and in AND across boxes: Drivers + Oncogene keeps a
+ // sentence that names a point mutation AND speaks of an oncogene
  const txt=activeText(), tx=textMatcher(txt), lens=andMatchers(andMatchers(andMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(DRIVERS?driverMatcher():null,FUSIONS?fusionMatcher():null),ITDS?itdMatcher():null),OEXS?oexMatcher():null),AMPS?ampMatcher():null),DELS?delMatcher():null),TRUS?truMatcher():null),EXOS?exoMatcher():null),CNS?cnMatcher():null),METS?metMatcher():null),
    orMatchers(orMatchers(orMatchers(RESS?resMatcher():null,ACQS?acqMatcher():null),SLS?slMatcher():null),BMKS?bmkMatcher():null)),
    orMatchers(orMatchers(PRGS?prgMatcher():null,CLNS?clnMatcher():null),VIVS?vivMatcher():null)),
@@ -1809,8 +1913,8 @@ function build(thr){
  // to decide who the neighbours are (see below). `m` is the matcher in force; `menu` rebuilds the
  // Keep diseases list (only the real pass does).
  function shape(es,m,menu){
-  if(m)es=es.filter(o=>{const v=o.sup.filter(s=>m.test(s.text));if(!v.length)return false;
-    if(lens){const L=o.sup.filter(s=>lens.test(s.text));if(L.length<thr)return false;if(mp>1&&new Set(L.map(s=>s.pmid)).size<mp)return false;}
+  if(m)es=es.filter(o=>{const v=o.sup.filter(s=>m.test(s.text,o.e));if(!v.length)return false;
+    if(lens){const L=o.sup.filter(s=>lens.test(s.text,o.e));if(L.length<thr)return false;if(mp>1&&new Set(L.map(s=>s.pmid)).size<mp)return false;}
     o.vis=v;o.w=v.length;o.np=new Set(v.map(s=>s.pmid)).size;o.cat=viewCat(o.e,v);return true;});
   // and re-cut the neighbourhood on what the lens left, so a focus view never shows the seed's
   // neighbours to each other with the seed itself missing
@@ -1889,7 +1993,7 @@ function build(thr){
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  // arrowheads only on directed (signed) relations; interacts/associated/binds are symmetric,
  // so an arrow there would only show which entity the sentence happened to mention first
- const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:DIRECTED.has(o.cat.replace(/^not /,'')),scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
+ const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),length:edgeLength(o.w),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:DIRECTED.has(o.cat.replace(/^not /,'')),scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
  const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
  // name what is actually on screen: "378 diseases" beats "378 genes" in a disease-only view
@@ -1910,7 +2014,9 @@ function build(thr){
  const view=network?{position:network.getViewPosition(),scale:network.getScale()}:null;
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  NODEDS=data.nodes;
- const options={layout:{improvedLayout:false},physics:{enabled:nNew>0,stabilization:{iterations:known.length?120:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60,label:{enabled:false,drawThreshold:1}},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
+ // springConstant 0.2, not 0.02: each edge's length is its sentence count (edgeLength), and at
+ // 0.02 the repulsion swamped the springs -- every link stretched to ~300 whatever its support.
+ const options={layout:{improvedLayout:false},physics:{enabled:nNew>0,stabilization:{iterations:known.length?120:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.2,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60,label:{enabled:false,drawThreshold:1}},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
  network=new vis.Network(net,data,options);
  LABEL_N=nodes.length; LABEL_A=-1;
