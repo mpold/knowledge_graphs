@@ -235,6 +235,51 @@ DISEASE_SURFACE = {
     "t - all": "T-cell acute lymphoblastic leukemia",
 }
 
+# Gene surfaces, the same two holes as for diseases (added 2026-11-24). The normalizer often
+# resolves a surface to SEVERAL HGNC symbols -- "AR" to AR + FDXR + AKR1B1 + AREG, because the
+# approved symbol is also an old alias of three other genes -- and single() then dropped it: all
+# 366 plain "AR" triples were lost, leaving the AR node only glued forms (ARQ62L) and an alias
+# mistake. 17,937 gene mentions went this way. Two fixes, in gene_symbol():
+#  1. EXACT SYMBOL: when the surface IS one of the candidate symbols (case aside), take it --
+#     "AR", "HGF", "RAC1", "BAP1", "ATR", "CDH1" (~4,900 mentions, ~200 genes). Not for the
+#     surfaces in GENE_EXACT_SKIP, whose text is mostly a word or another thing: TF (transcription
+#     factor), cAMP, si(RNA), me2/me3 (histone marks), mOS (median OS), SFN (sulforaphane), SAG
+#     (Smoothened agonist), C6 (glioma line), TTF1 (= NKX2-1, below), Pgp (= ABCB1), ...
+#  2. GENE_SURFACE: names that mean one gene in a cancer corpus. Families are deliberately left
+#     out -- ERK (MAPK3 / MAPK1), NF-kB (five subunits), FGFR (four) -- rather than pick a member.
+# GENE_IGNORE drops surfaces whose single mapping is wrong here: "AIS" is an AR alias (androgen
+# insensitivity syndrome) but in this corpus adenocarcinoma in situ.
+GENE_EXACT_SKIP = {"TF", "CAMP", "SI", "ME2", "ME3", "MOS", "GAL", "PC", "SAG", "C6", "C7", "CPD",
+                   "ARC", "SMS", "HP", "GPT", "LAT", "PGP", "TPO", "SFN", "TTF1", "SRM"}
+GENE_SURFACE = {
+    "ar-v7": "AR", "ar-fl": "AR", "arv7": "AR",
+    "p21": "CDKN1A", "p21waf1": "CDKN1A", "p21cip1": "CDKN1A", "p21waf1/cip1": "CDKN1A",
+    "p16": "CDKN2A", "p16ink4a": "CDKN2A",
+    "p27": "CDKN1B", "p27kip1": "CDKN1B",
+    "nrf2": "NFE2L2",
+    "p38": "MAPK14", "p-p38": "MAPK14", "p38 mapk": "MAPK14", "p38mapk": "MAPK14", "phospho-p38": "MAPK14",
+    "p62": "SQSTM1",
+    "er": "ESR1",
+    "taz": "WWTR1",
+    "s6": "RPS6", "ps6": "RPS6", "p-s6": "RPS6", "phospho-s6": "RPS6",
+    "ttf1": "NKX2-1", "ttf-1": "NKX2-1",
+}
+GENE_IGNORE = {"ais"}
+
+
+def gene_symbol(e, txt):
+    """HGNC symbol for a GENETIC endpoint (txt = its lowercased surface), or None."""
+    if txt in GENE_IGNORE:
+        return None
+    if txt in GENE_SURFACE:
+        return GENE_SURFACE[txt]
+    v = e.get("hgnc_symbol")
+    if isinstance(v, list):
+        up = txt.upper()
+        return up if up in v and up not in GENE_EXACT_SKIP else None
+    return single(v)
+
+
 # Distinct MONDO terms that name the SAME disease at the same granularity. Splitting one
 # disease across several nodes is an artefact of ontology structure, not a finding: MONDO
 # carries "lung cancer" (MONDO:0008903), "lung carcinoma" (MONDO:0005138) and
@@ -512,7 +557,7 @@ def node_of(e, flags):
     if ic:          # "BRAFi" is a BRAF INHIBITOR, a drug class -- not the BRAF gene
         return ("chemical", INHIB_LABEL.setdefault(ic.lower(), ic))
     if t == "GENETIC":
-        s = single(e.get("hgnc_symbol"))
+        s = gene_symbol(e, txt)
         if not s or s == "MKI67" or e.get("control") == "yes":
             return None
         return ("gene", s)
@@ -562,7 +607,7 @@ def node_drop_report(triples, flags, top=8):
                 kept[n[0]] += 1
                 continue
             if typ == "GENETIC":
-                drops["gene: no HGNC symbol" if not single(e.get("hgnc_symbol"))
+                drops["gene: no HGNC symbol" if not gene_symbol(e, key)
                       else "gene: control / MKI67"] += 1
             elif typ == "DISEASE":
                 lbl = DISEASE_SURFACE.get(key) or single(e.get("mondo_label"))
@@ -731,6 +776,9 @@ def graph_payload_multi(triples, flags):
     pair_sent = collections.defaultdict(dict)          # pair -> {sentence: [score, pmid, cat, spec, src]}
     pair_src = collections.defaultdict(set)            # pair -> model roles behind ANY of its triples
     node_sent = collections.defaultdict(dict)          # node -> {sentence: maxscore}
+    # gene node -> {surface as written: sentences}: what the text actually said for the symbol
+    # ("p21" for CDKN1A, "androgen receptor" for AR), shown on the node and marked in sentences
+    node_surf = collections.defaultdict(lambda: collections.defaultdict(set))
     kind_of = {}
     for t in triples:
         a, b = node_of(t["subject"], flags), node_of(t["object"], flags)
@@ -743,6 +791,9 @@ def graph_payload_multi(triples, flags):
         pm = (t.get("pmid") or "?").replace(".grobid.tei", "")
         ka, kb = a[1], b[1]
         kind_of[ka], kind_of[kb] = a[0], b[0]
+        for nd, side in ((a, "subject"), (b, "object")):
+            if nd[0] == "gene":
+                node_surf[nd[1]][(t[side].get("text") or "").strip()].add(sent)
         dir_sent[(ka, kb, cat)].add(sent)
         pair_src[frozenset((ka, kb))] |= roles
         cur = pair_sent[frozenset((ka, kb))].get(sent)
@@ -781,7 +832,11 @@ def graph_payload_multi(triples, flags):
                       "chems": chems_by_gene.get(nd, []) if k == "gene" else [],
                       "tsource": tsrc.get(nd, "") if k == "gene" else "",
                       "tcat": tcat.get(nd, "other"),
-                      **({"role": gene_role[nd]} if k == "gene" and nd in gene_role else {})})
+                      **({"role": gene_role[nd]} if k == "gene" and nd in gene_role else {}),
+                      # surfaces by sentence count, most frequent first (at most 12)
+                      **({"surf": [[w, len(ss)] for w, ss in sorted(node_surf[nd].items(),
+                                    key=lambda z: (-len(z[1]), z[0]))[:12] if w]}
+                         if k == "gene" and nd in node_surf else {})})
     nr = collections.Counter(n.get("role") for n in nodes if n.get("role"))
     print(f"  OncoKB cancer-gene roles on graph genes: oncogene {nr['onc']}, tumor suppressor "
           f"{nr['tsg']}, both {nr['both']}")
@@ -879,6 +934,7 @@ __LIBTAG__
  select,#search,#genefilter,#drugsearch,#textfilter{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
  #search,#genefilter,#drugsearch,#textfilter{width:200px}
  mark{background:#ffe680;color:inherit;border-radius:2px;padding:0 1px}
+ .gm{font-weight:700;color:#1d4e89;border-bottom:1px solid #8fb3df}
  #catfilters label{display:block;cursor:pointer;white-space:nowrap;font-size:12px;margin:1px 0}
  /* no inner scroller: the relation list is a dozen rows at most, and a box that scrolls inside
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
@@ -887,7 +943,8 @@ __LIBTAG__
  #zoom button,#srcbtns button,#labelbtns button,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn,#resbtn,#acqbtn,#slbtn,#bmkbtn,#prgbtn,#clnbtn,#vivbtn,#oncbtn,#tsgbtn,#immbtn,#mtsbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
  #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#catall:hover,#drvbtn:hover,#fusbtn:hover,#itdbtn:hover,#oexbtn:hover,#ampbtn:hover,#delbtn:hover,#trubtn:hover,#exobtn:hover,#cnbtn:hover,#metbtn:hover,#resbtn:hover,#acqbtn:hover,#slbtn:hover,#bmkbtn:hover,#prgbtn:hover,#clnbtn:hover,#vivbtn:hover,#oncbtn:hover,#tsgbtn:hover,#immbtn:hover,#mtsbtn:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button{margin-bottom:4px}
- #disfilters{display:block;max-height:148px;overflow-y:auto;margin-top:4px}
+ #disfilters{display:block;max-height:148px;overflow-y:auto;margin-top:0}
+ .dbox{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px;margin:2px 0 8px}   /* the Enrich boxes' frame (.egrid) */
  #disfilters label{display:block;margin:1px 0}
  #disfilters .dist{font-weight:600;margin-top:3px}
  #disfilters .dism{padding-left:18px}
@@ -935,17 +992,17 @@ __LIBTAG__
   <div class="mut help">Blows the crowded core outward and carries the rest along, thinning the hairball without moving anything past its neighbours. Both reshape the drawn layout only &mdash; radially, from the stabilized positions, so nothing changes order and returning a slider to 0% restores the layout exactly.</div></div>
  <div class="row" id="tissuerow"><label><input type=checkbox id="tissuestack" checked> Stack same-tissue diseases</label> <button class="ihelp" aria-label="About tissue stacking" aria-expanded="false">i</button>
   <div class="mut help">Drops the disease nodes naming one tissue onto a single spot, overlapping, so <em>lung cancer</em>, <em>lung adenocarcinoma</em> and <em>non-small cell lung carcinoma</em> read as one place on the canvas instead of three. They stay separate nodes with their own edges and tooltips &mdash; only their positions are pooled, after the layout settles. Tissue is read from the name (<span id="tissuen"></span>).</div></div>
- <div class="row" id="disrow">Keep diseases: <button class="ihelp" aria-label="About the disease keep-list" aria-expanded="false">i</button>
-  <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
-  <div class="legend" id="disfilters"></div>
-  <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> <b style="color:#1c2330">Only their direct neighbours</b></label>
-  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. Diseases of the same tissue (read from the name, as for <em>Stack same-tissue diseases</em>) are listed together under a bold tissue heading whose box ticks or unticks them all &mdash; half-ticked when only some are kept; the number beside it is how many diseases it holds and their edges in all. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> switches on by itself when you tick the first disease (untick it to see the whole graph with only those diseases), and goes further: it keeps just the ticked diseases, the genes and drugs with a <em>drawn</em> edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Every other setting counts: a gene whose own link to the disease is hidden (its relation unticked, an Enrich button, min sentences, min connections, cluster size) is not a neighbour, however it connects to the ones that are. The <b>Match text</b> box is the exception: it searches the neighbourhood without redrawing it &mdash; the neighbours are chosen as if the box were empty, and the text then keeps the edges among them that match. Genes are linked to diseases almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood shrinks to a few drugs, or to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
+ <div class="row" id="disrow"><b style="color:#1c2330">Keep diseases:</b> <button class="ihelp" aria-label="About the disease keep-list" aria-expanded="false">i</button>
+  <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span>
+  <div class="dbox"><div class="legend" id="disfilters"></div>
+  <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> <b style="color:#1c2330">Only their direct neighbours</b></label></div>
+  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Edges between genes and drugs keep only the sentences from <b>papers about a kept disease</b> (a paper&rsquo;s diseases are those its own sentences relate to anything), so a gene pair under <i>brain</i> shows glioma papers, not melanoma ones; an edge left with too few sentences for <i>Min unique sentences / publications</i> is dropped. Edges to a kept disease are untouched. Diseases of the same tissue (read from the name, as for <em>Stack same-tissue diseases</em>) are listed together under a bold tissue heading whose box ticks or unticks them all &mdash; half-ticked when only some are kept; the number beside it is how many diseases it holds and their edges in all. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> switches on by itself when you tick the first disease (untick it to see the whole graph with only those diseases), and goes further: it keeps just the ticked diseases, the genes and drugs with a <em>drawn</em> edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Every other setting counts: a gene whose own link to the disease is hidden (its relation unticked, an Enrich button, min sentences, min connections, cluster size) is not a neighbour, however it connects to the ones that are. The <b>Match text</b> box is the exception: it searches the neighbourhood without redrawing it &mdash; the neighbours are chosen as if the box were empty, and the text then keeps the edges among them that match. Genes are linked to diseases almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood shrinks to a few drugs, or to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
  <div class="row" id="enrichhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for alteration:</b></div>
  <div id="enrichgrid" class="egrid">
- <div class="row"><button id="drvbtn" aria-pressed="false">Drivers</button> <button class="ihelp" aria-label="About enrich for drivers" aria-expanded="false">i</button>
+ <div class="row"><button id="drvbtn" aria-pressed="false">Candidate driver</button> <button class="ihelp" aria-label="About enrich for candidate drivers" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, one-letter or three-letter, case-sensitive (<i>V600E</i>, <i>p.Gly12Cys</i>), with any punctuation around it (<i>G12C,</i> <i>V600E-mutant</i> <i>KRAS-G12V</i> <i>L858R/T790M</i> <i>p.L747P</i>) or glued to a gene symbol (<i>KRASG12C</i>, <i>p110&alpha;H1047R</i>), and excluding the figure, table, gene-name and cell-line look-alikes.</div></div>
  <div class="row"><button id="fusbtn" aria-pressed="false">Fusions</button> <button class="ihelp" aria-label="About enrich for fusions" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence about a <b>gene fusion</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. A sentence counts if it says <i>fusion</i> (<i>EML4-ALK fusion</i>, <i>RET fusion-positive</i>; not <i>infusion</i>), or uses <i>translocation</i> in the chromosomal sense: after a fusion pair or a gene that drives fusions (<i>EML4-ALK translocation</i>, <i>ROS1 translocation</i>, <i>ALK-translocated</i>), with a karyotype (<i>t(11;22) translocation</i>), after <i>chromosomal</i>, <i>balanced</i>, <i>reciprocal</i> or <i>gene</i>, or as <i>translocation involving MLL</i>. Karyotype notation counts on its own, with no other word: <i>t(4;14)</i>, <i>t(11;14)</i>, <i>t(9;22)(q34;q11)</i>, <i>inv(16)</i>, <i>der(22)</i> &mdash; how myeloma and leukemia papers write their translocations. A protein moving inside the cell &mdash; <i>nuclear translocation of p65</i>, <i>translocation of YAP to the nucleus</i> &mdash; does not count.</div></div>
+  <div class="mut help">Keeps only edges with a sentence about a <b>gene fusion</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. A sentence counts if it says <i>fusion</i> (<i>EML4-ALK fusion</i>, <i>RET fusion-positive</i>; not <i>infusion</i>), or uses <i>translocation</i> in the chromosomal sense: after a fusion pair or a gene that drives fusions (<i>EML4-ALK translocation</i>, <i>ROS1 translocation</i>, <i>ALK-translocated</i>), with a karyotype (<i>t(11;22) translocation</i>), after <i>chromosomal</i>, <i>balanced</i>, <i>reciprocal</i> or <i>gene</i>, or as <i>translocation involving MLL</i>. Karyotype notation counts on its own, with no other word: <i>t(4;14)</i>, <i>t(11;14)</i>, <i>t(9;22)(q34;q11)</i>, <i>inv(16)</i>, <i>der(22)</i> &mdash; how myeloma and leukemia papers write their translocations. So does a fusion named by its genes in HGNC notation, <i>NUP98::NSD1</i>, <i>AGK::BRAF</i> (both sides genes of this graph); the older single colon, <i>TMPRSS2:ERG</i>, only with a fusion word in the sentence, since <i>EGFR:GRB2</i> or <i>MAPK8:JUN</i> are not fusions. A protein moving inside the cell &mdash; <i>nuclear translocation of p65</i>, <i>translocation of YAP to the nucleus</i> &mdash; does not count.</div></div>
  <div class="row"><button id="oexbtn" aria-pressed="false">Overexpression</button> <button class="ihelp" aria-label="About enrich for overexpression" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence about <b>overexpression</b> &mdash; any word starting <i>overexpres</i> or <i>over-expres</i>, in any case (<i>overexpression</i>, <i>overexpressed</i>, <i>over-expressing</i>) &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. Note it catches both senses: a gene found overexpressed in tumours, and a gene overexpressed in an experiment.</div></div>
  <div class="row"><button id="ampbtn" aria-pressed="false">Amplification</button> <button class="ihelp" aria-label="About enrich for amplification" aria-expanded="false">i</button>
@@ -964,7 +1021,7 @@ __LIBTAG__
   <div class="mut help">Keeps only edges with a sentence about an <b>internal tandem duplication</b> &mdash; <i>ITD</i> in capitals as a word of its own (<i>FLT3-ITD</i>, <i>FLT3/ITD</i>, <i>ITD-positive</i>) or <i>internal tandem duplication</i> spelled out &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted.</div></div>
  </div>
  <div class="row" id="therapyhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for therapy:</b> <button class="ihelp" aria-label="About enrich for therapy" aria-expanded="false">i</button>
-  <div class="mut help">These buttons combine with each other in <b>OR</b>, and in <b>AND</b> with the other Enrich boxes: with <i>Drivers</i> and <i>Resistance</i> both on, a sentence must name a point mutation <em>and</em> speak of resistance (<i>T790M confers resistance to gefitinib</i>).</div></div>
+  <div class="mut help">These buttons combine with each other in <b>OR</b>, and in <b>AND</b> with the other Enrich boxes: with <i>Candidate driver</i> and <i>Resistance</i> both on, a sentence must name a point mutation <em>and</em> speak of resistance (<i>T790M confers resistance to gefitinib</i>).</div></div>
  <div id="therapygrid" class="egrid">
  <div class="row"><button id="acqbtn" aria-pressed="false">Acquired resistance</button> <button class="ihelp" aria-label="About enrich for acquired resistance" aria-expanded="false">i</button>
   <div class="mut help">A narrower view than <i>Resistance</i>: keeps only edges with a sentence about <b>how resistance arises</b>. It counts <i>acquired</i>, <i>secondary</i>, <i>intrinsic</i>, <i>primary</i>, <i>adaptive</i>, <i>innate</i>, <i>de novo</i> and <i>emerging</i> resistance (<i>acquired erlotinib resistance</i>, <i>secondary resistant mutation</i>), <i>acquisition</i> or <i>development of resistance</i>, <i>mechanisms of resistance</i>, <i>resistance mechanisms / mutations</i>, <i>gatekeeper mutations</i>, and <i>bypass</i> signalling in a sentence that speaks of resistance or an inhibitor (<i>MET amplification bypasses EGFR inhibition</i>). With <i>Resistance</i> also on, this adds nothing.</div></div>
@@ -976,7 +1033,7 @@ __LIBTAG__
   <div class="mut help">Keeps only edges with a sentence about a <b>biomarker</b>: <i>biomarker</i>, <i>predictive marker</i>, <i>companion diagnostic</i>, and a feature said to predict response, sensitivity, benefit, resistance or efficacy (<i>PBRM1 inactivation may predict benefit from anti-PD-1</i>, <i>predictive of everolimus response</i>). Prognostic biomarkers count too.</div></div>
  </div>
  <div class="row" id="clinhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for clinical relevance:</b> <button class="ihelp" aria-label="About enrich for clinical relevance" aria-expanded="false">i</button>
-  <div class="mut help">These buttons combine with each other in <b>OR</b>, and in <b>AND</b> with the other Enrich boxes: with <i>Drivers</i> and <i>Clinical evidence</i> both on, a sentence must name a point mutation <em>and</em> report patients or a trial.</div></div>
+  <div class="mut help">These buttons combine with each other in <b>OR</b>, and in <b>AND</b> with the other Enrich boxes: with <i>Candidate driver</i> and <i>Clinical evidence</i> both on, a sentence must name a point mutation <em>and</em> report patients or a trial.</div></div>
  <div id="clingrid" class="egrid">
  <div class="row"><button id="clnbtn" aria-pressed="false">Clinical evidence</button> <button class="ihelp" aria-label="About enrich for clinical evidence" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence reporting <b>patients in a study or on a treatment</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>clinical trial / study / response / benefit</i>, a trial phase (<i>phase II trial</i>, <i>phase I/II study</i>, <i>Phase 3</i>; only beside trial or study wording, so <i>G2/M phase</i> does not count), <i>randomised</i>, <i>open-label</i>, <i>multicentre</i>, <i>prospective</i> / <i>retrospective</i> studies, NCT numbers, response rates (<i>ORR</i>, <i>objective response rate</i>, <i>complete / partial response</i>), and <i>patients treated with / receiving</i> a drug. Plain <i>patients</i> is not enough: most such sentences are database cohorts.</div></div>
@@ -986,7 +1043,7 @@ __LIBTAG__
   <div class="mut help">Keeps only edges with a sentence about <b>animal experiments</b>, the level of evidence above cell culture, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>in vivo</i>, xenografts and allografts (<i>PDX</i>, <i>patient-derived xenograft</i>, <i>CDX</i>), <i>GEMM</i>, orthotopic / syngeneic / subcutaneous models, <i>tumour-bearing</i>, <i>mice</i> and <i>rats</i>, <i>mouse / murine / animal / zebrafish models</i>, and <i>knock-in</i> / <i>transgenic</i> mice. Not counted: <i>mouse</i> as a source of cells or reagents (<i>mouse embryonic fibroblasts</i>, <i>mouse anti-</i>), and patient-derived organoids or cells, which are in vitro.</div></div>
  </div>
  <div class="row" id="biohead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for gene role and biology:</b> <button class="ihelp" aria-label="About enrich for gene role and biology" aria-expanded="false">i</button>
-  <div class="mut help">These buttons combine with each other in <b>OR</b>, and in <b>AND</b> with the other Enrich boxes: with <i>Drivers</i> and <i>Oncogene</i> both on, a sentence must name a point mutation <em>and</em> speak of an oncogene.</div></div>
+  <div class="mut help">These buttons combine with each other in <b>OR</b>, and in <b>AND</b> with the other Enrich boxes: with <i>Candidate driver</i> and <i>Oncogene</i> both on, a sentence must name a point mutation <em>and</em> speak of an oncogene.</div></div>
  <div id="biogrid" class="egrid">
  <div class="row"><button id="tsgbtn" aria-pressed="false">Tumor suppressor</button> <button class="ihelp" aria-label="About enrich for tumor suppressor" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with at least one end that the <b>OncoKB Cancer Gene List</b> classes as a <b>tumor suppressor</b> (<i>TSG</i>, or both oncogene and TSG, such as <i>NOTCH1</i> or <i>TP63</i>), and the nodes those edges connect. The gene decides, not the wording: every sentence of such an edge counts, and nothing is highlighted. OncoKB list of 2026-11-24, 408 tumor suppressors.</div></div>
@@ -1007,7 +1064,7 @@ __LIBTAG__
  <div class="row">Min unique sentences/edge: <b id="thv">1</b><br><input id="thr" type="range" min="1" max="10" value="1"></div>
  <div class="row">Min unique publications: <b id="mpv">1</b> <button class="ihelp" aria-label="About min unique publications" aria-expanded="false">i</button><br><input id="minpub" type="range" min="1" max="10" value="1">
   <div class="mut help">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
- <div class="row">Font size: <b id="fsv">50%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="50" aria-label="Label font size"></div>
+ <div class="row">Font size: <b id="fsv">100%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="100" aria-label="Label font size"></div>
  <div class="row">Min cluster size: <select id="mincluster"><option value="2" selected>2 (off)</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select> <button class="ihelp" aria-label="About min cluster size" aria-expanded="false">i</button><div class="mut help">Drops connected components smaller than this. <b>2 is off, not a floor</b>: the components are built from the edges that survive every other filter, so the smallest one possible already has two nodes and a pair joined by a single edge always passes. Raise it to 3 or more to peel the small islands a loose score leaves behind &mdash; and note it runs AFTER min-connections, so a node that drops below that bar can take its whole component with it.</div></div>
  <div class="row">Min connections: <select id="mindeg"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. Applied until it holds: removing a node can push its neighbours below the bar, so they go too, and every node left has at least this many links <em>on screen</em>. <b>1</b> turns it off and keeps that fringe &mdash; the only way to see a node whose whole evidence is one edge. Expect a denser canvas: it is the setting that admits every hapax in the corpus.</div></div>
  <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
@@ -1110,25 +1167,26 @@ let LABEL_N=0, LABEL_A=-1;
 // ...no longer: a label is never faded out. Zoomed out on a dense view the fade took labels to
 // opacity 0 and left bare dots, so every label is now drawn opaque at every zoom.
 function labelOpacity(sc){ return 1; }
-// Labels are never smaller than LABEL_MIN_PX on SCREEN. Font sizes live in canvas units and the
-// zoom scales them, so an 8px label at 10% zoom was under 1px -- and vis-network stops drawing a
-// label below 5px. The floor is therefore re-applied for the current zoom: a label's canvas size
-// is max(its own size, LABEL_MIN_PX / zoom). ZSCALE is the zoom the fonts were last sized for.
+// Labels are sized in SCREEN pixels, not canvas units: a node's canvas font is its on-screen
+// size divided by the zoom, re-applied whenever the zoom changes. They used to live in canvas
+// units, so what you saw was size x zoom -- a large view zoomed to 0.05 drew everything at the
+// floor, a small one at zoom 1 drew busy genes at 96px, and the same 50% slider looked nothing
+// alike from one filter to the next. ZSCALE is the zoom the fonts were last sized for.
 const LABEL_MIN_PX=8;
 let ZSCALE=1, zoomTimer=null;
-// The floor moves with the Font size slider: 8px at its 10% minimum, 12px at the default 50%,
-// 17px at 100%. A fixed 8px floor swallowed the slider wherever labels were already near it
-// (a small "proteasome" view: 13 -> 12 canvas px from 50% down to 10%, so it looked dead);
-// now every step of the slider changes every label, and none is ever under 8px.
-function labelFloorPx(){return LABEL_MIN_PX+5*Math.max(0,FSCALE-0.2);}
-function zoomFloor(){return Math.ceil(labelFloorPx()/Math.max(ZSCALE,1e-3));}
+// on-screen px for a base size (fontSize(), 11-20 for genes): the slider stretches the part
+// above the 8px floor, so 50% shows the base sizes, 10% runs ~8.6-10.4px and 100% 14-32px --
+// every step changes every label and none is ever under 8px
+function screenPx(base){return LABEL_MIN_PX+FSCALE*Math.max(0,base-LABEL_MIN_PX);}
 function refloorLabels(){ if(!network||!NODEDS)return; const sc=network.getScale(); if(!(sc>0))return;
- const before=zoomFloor(); ZSCALE=sc; if(zoomFloor()===before)return;
- NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:nodeFont(KIND[n.id]||'gene',n._fs||13)})));}
+ if(Math.abs(sc/ZSCALE-1)<0.01)return; ZSCALE=sc;
+ NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:nodeFont(KIND[n.id]||'gene',n._fs||11)})));}
 function updateLabels(){ if(!network)return;
  if(LABEL_A!==1){LABEL_A=1;network.setOptions({nodes:{font:{color:'rgba(26,26,26,1)'}}});}
- // re-size after the wheel settles: one DataSet update per gesture, not one per wheel tick
- clearTimeout(zoomTimer);zoomTimer=setTimeout(refloorLabels,120);}
+ // re-size on every wheel tick for a small view (labels stay put on screen), after the wheel
+ // settles for a big one (one DataSet update per gesture, not one per tick)
+ clearTimeout(zoomTimer);
+ if(NODEDS&&NODEDS.length<=1500)refloorLabels();else zoomTimer=setTimeout(refloorLabels,120);}
 const labelById={};DATA.nodes.forEach(n=>{labelById[n.id]=n.label;});
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function pmA(p){return '<a class=pm target=_blank rel=noopener href="https://www.ncbi.nlm.nih.gov/pmc/articles/'+p+'/">'+p+'</a>';}
@@ -1157,7 +1215,7 @@ function reHits(g,t){const iv=[];g.lastIndex=0;let m;
   iv.push([m.index,m.index+m[0].length]);
  }
  return iv;}
-// "Enrich for drivers": a fixed, case-SENSITIVE point-mutation lens (V600E, G12C as a word of
+// "Candidate driver" (Enrich for alteration): a fixed, case-SENSITIVE point-mutation lens (V600E, G12C as a word of
 // their own, or in parentheses: "KRAS (G12C)"), ANDed with the text box -- textMatcher would
 // add the i flag and let "a12b" match.
 // The change itself is the token -- one-letter (G12C) or three-letter (p.Gly12Cys) -- and what
@@ -1250,8 +1308,24 @@ const TL_POS_POST=new RegExp(String.raw`^\s*(?:\(?t\(\d+;\d+\)|(?:of|involving|b
 // t(4;14)" -- and none of those sentences said "fusion". A semicolon is required for t / ins,
 // so a t-statistic "t(28) = 3.1" never matches; "non-t(4;14)" still does (it names the event).
 const KARYO_RE=/\b(?:t|ins)\(\s*[0-9XY]{1,2}\s*;\s*[0-9XY]{1,2}\s*\)(?:\s*\(\s*[pq][\d.]*\s*;\s*[pq][\d.]*\s*\))?|\b(?:inv|der)\(\s*[0-9XY]{1,2}\s*\)(?:\s*\(\s*[pq][\d.;pq\s]*\))?/g;
+// A fusion named by its two genes. HGNC's double colon (NUP98::NSD1, AGK::BRAF, EWSR1::WT1) means
+// nothing else, so two gene symbols of this graph around "::" count on their own -- 62 sentences
+// wrote one without ever saying "fusion" ("AGK::BRAF induces robust ... activation"). The older
+// single colon (TMPRSS2:ERG, KIAA1549:BRAF) is also proximity-assay pairs (EGFR:GRB2 PLA),
+// kinase:substrate (MAPK8:JUN), statistical interactions (KRAS:CDKN2A) and transgenes (rag2:Myc),
+// so it counts only with no space around it AND a fusion cue somewhere in the sentence.
+const FUS_PAIR2=/\b([A-Za-z][A-Za-z0-9-]{1,14})\s?::\s?([A-Za-z][A-Za-z0-9-]{1,14})\b/g;
+const FUS_PAIR1=/\b([A-Za-z][A-Za-z0-9-]{1,14})(?<!:):(?!:)([A-Za-z][A-Za-z0-9-]{1,14})\b/g;
+const FUS_CUE=/\b(?:fusions?|fused|transloca\w*|rearrang\w*|chimer\w*)\b/i;
+function fusPairHits(t){
+ if(!GENESYM)GENESYM=new Set(DATA.nodes.filter(n=>n.kind==='gene').map(n=>String(n.id).toUpperCase()));
+ const both=(a,b)=>GENESYM.has(a.toUpperCase())&&GENESYM.has(b.toUpperCase());
+ const iv=[];let m;
+ FUS_PAIR2.lastIndex=0;while((m=FUS_PAIR2.exec(t))!==null)if(both(m[1],m[2]))iv.push([m.index,m.index+m[0].length]);
+ if(FUS_CUE.test(t)){FUS_PAIR1.lastIndex=0;while((m=FUS_PAIR1.exec(t))!==null)if(both(m[1],m[2]))iv.push([m.index,m.index+m[0].length]);}
+ return iv;}
 function fusionHits(t){t=t||'';
- const iv=reHits(FUSION_WORD,t).concat(reHits(KARYO_RE,t));
+ const iv=reHits(FUSION_WORD,t).concat(reHits(KARYO_RE,t),fusPairHits(t));
  reHits(TRANSLOC_WORD,t).forEach(([a,b])=>{
    const pre=t.slice(Math.max(0,a-40),a),post=t.slice(b,b+40);
    if(TL_NEG_PRE.test(pre))return;
@@ -1588,7 +1662,7 @@ let MTSS=false;
 function mtsHits(t){t=t||'';return reHits(MTS_RE,t).concat(reHits(EMT_RE,t));}
 function mtsMatcher(){return {test:t=>mtsHits(t).length>0,hits:mtsHits};}
 // the stats line: each box's switched-on buttons joined by 'or', the boxes by 'and'
-function enrichLabel(){const alt=[DRIVERS&&'drivers',FUSIONS&&'fusions',ITDS&&'ITD',OEXS&&'overexpression',AMPS&&'amplification',DELS&&'deletion / loss',TRUS&&'truncation',EXOS&&'exon variants',CNS&&'copy number',METS&&'methylation'].filter(Boolean).join(' or '),
+function enrichLabel(){const alt=[DRIVERS&&'candidate drivers',FUSIONS&&'fusions',ITDS&&'ITD',OEXS&&'overexpression',AMPS&&'amplification',DELS&&'deletion / loss',TRUS&&'truncation',EXOS&&'exon variants',CNS&&'copy number',METS&&'methylation'].filter(Boolean).join(' or '),
   ther=[RESS&&'resistance',ACQS&&'acquired resistance',SLS&&'synthetic lethality',BMKS&&'biomarker'].filter(Boolean).join(' or '),
   clin=[PRGS&&'prognosis',CLNS&&'clinical evidence',VIVS&&'in vivo'].filter(Boolean).join(' or '),
   bio=[ONCS&&'oncogene',TSGS&&'tumor suppressor',IMMS&&'immune',MTSS&&'metastasis / EMT'].filter(Boolean).join(' or ');
@@ -1599,15 +1673,32 @@ function andMatchers(a,b){if(!a||!b)return a||b;return {test:(t,e)=>a.test(t,e)&
 function orMatchers(a,b){if(!a||!b)return a||b;return {test:(t,e)=>a.test(t,e)||b.test(t,e),hits:t=>[...a.hits(t),...b.hits(t)]};}
 let TM=null;   // matcher in force for the current view; used to highlight hits in sentence text
 // mark hits on the RAW text (so a query containing <, > or & still highlights), escaping each piece as we go
-function hl(t){
+// The words the text used for a gene node (payload "surf": [[surface, sentences], ...]), e.g.
+// CDKN1A <- "p21", "CDKN1A", "p21Cip1"; AR <- "AR", "androgen receptor", "ARQ62L".
+const SURF={};DATA.nodes.forEach(n=>{if(n.surf)SURF[n.id]=n.surf;});
+function surfLine(id){const v=SURF[id];if(!v||!v.length)return '';
+ return 'found in the text as: '+v.map(([w,c])=>w+' ('+c+')').join(', ');}
+// spans in t where an endpoint gene is written, by its own surfaces (case-sensitive, not inside
+// a longer word -- but a glued surface such as "ARQ62L" is itself one of the surfaces)
+function geneIv(t,e){const iv=[];if(!e)return iv;
+ [e.from,e.to].forEach(id=>{(SURF[id]||[]).forEach(([w])=>{if(!w||w.length<2)return;let i=t.indexOf(w);
+   while(i>=0){const p=t[i-1],q=t[i+w.length];
+     if(!(p&&/[A-Za-z0-9]/.test(p))&&!(q&&/[A-Za-z0-9]/.test(q)))iv.push([i,i+w.length]);
+     i=t.indexOf(w,i+1);}});});
+ return iv;}
+// mark hits on the RAW text (so a query containing <, > or & still highlights), escaping each piece
+// as we go: <mark> for the text box / Enrich hits, .gm for the gene as the text wrote it (both
+// may apply to one stretch)
+function hl(t,e){
  t=t||'';
- if(!TM)return esc(t);
- // the hits of every pattern in force (text box and/or driver lens), overlaps merged
- const iv=TM.hits(t);
- iv.sort((x,y)=>x[0]-y[0]);
- let out='',last=0;
- iv.forEach(([a,b])=>{if(b<=last)return;a=Math.max(a,last);out+=esc(t.slice(last,a))+'<mark>'+esc(t.slice(a,b))+'</mark>';last=b;});
- return out+esc(t.slice(last));
+ const iv=TM?TM.hits(t):[], gv=geneIv(t,e);
+ if(!iv.length&&!gv.length)return esc(t);
+ const cut=new Set([0,t.length]);iv.concat(gv).forEach(([a,b])=>{cut.add(a);cut.add(b);});
+ const pts=[...cut].sort((x,y)=>x-y);let out='';
+ for(let k=0;k<pts.length-1;k++){const a=pts[k],b=pts[k+1];if(a>=b)continue;
+   const m=iv.some(([x,y])=>x<=a&&b<=y), g=gv.some(([x,y])=>x<=a&&b<=y);let piece=esc(t.slice(a,b));
+   if(g)piece='<span class=gm>'+piece+'</span>';if(m)piece='<mark>'+piece+'</mark>';out+=piece;}
+ return out;
 }
 // The relation-type boxes filter SENTENCES, not whole edges. An edge's payload "cat" is the
 // label that won over the whole file, so once a score/year/text filter narrows the support the
@@ -1663,13 +1754,21 @@ function edgeHead(e,vis,cat){const np=new Set(vis.map(s=>s.pmid)).size;return '<
 function relTag(s){if(!s.rc)return '';const c=sentCat({},s);
  const src=s.sr==='both'?('BioRED: '+esc(s.rc)+' · PPI: '+esc(ppiCat(s))):(s.sr?esc(SRCLAB[s.sr]||s.sr):'');
  return ' <span class=mut style="color:'+(CCOLOR[c]||'#888')+'">['+esc(c)+(s.sp?' ?':'')+']</span>'+(src?' <span class=mut>'+src+'</span>':'');}
-function edgeTip(e,vis,cat){const d=document.createElement('div');let h=edgeHead(e,vis,cat);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span>'+relTag(s)+' '+hl(s.text)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
+function edgeTip(e,vis,cat){const d=document.createElement('div');let h=edgeHead(e,vis,cat);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span>'+relTag(s)+' '+hl(s.text,e)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
 // --- the disease keep-list ------------------------------------------------------------------
 // A WHITELIST over disease nodes: empty means no constraint (the default), and any tick means
 // "these diseases only". It touches nothing else -- a gene-gene edge has no disease endpoint and
 // cannot be cut by it -- so this narrows which diseases the picture is allowed to contain,
 // rather than narrowing the picture.
 const DIS_KEEP=new Set();
+// pmid -> Set of the disease nodes that paper's sentences relate to (any score, built once)
+let PAPER_DIS=null;
+function paperDiseases(){
+ if(PAPER_DIS)return PAPER_DIS;
+ PAPER_DIS={};
+ DATA.edges.forEach(e=>{const dz=[e.from,e.to].filter(x=>KIND[x]==='disease');if(!dz.length)return;
+   e.sents.forEach(s=>{const z=PAPER_DIS[s.pmid]||(PAPER_DIS[s.pmid]=new Set());dz.forEach(d=>z.add(d));});});
+ return PAPER_DIS;}
 function disPass(id){return !DIS_KEEP.size||KIND[id]!=='disease'||DIS_KEEP.has(id);}
 // Rebuilt on every redraw from the edges the rest of the controls left, so the menu is always
 // the diseases actually in front of you. Two things it must not do: it must not be built from
@@ -1797,7 +1896,10 @@ function arrowScale(np){return Math.min(0.5+0.18*Math.sqrt(Math.max(0,np-1)),1.6
 // hover tooltip, which is transient and already framed by the edge you are pointing at
 const INFO_HEAD='<div class="ihead">Sentences of interest</div>';
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
-function fontSize(c){return c<5?13:2*Math.max(13,Math.min(Math.round(c*2.2),48));}
+// on-screen px at the 50% slider, by unique sentences in view: log scale, 11px for 1 sentence to
+// 20px from 64 on (2 -> 12.5, 8 -> 15.5, 16 -> 17). It once jumped 13 -> 26 between 4 and 5
+// sentences and ran to 96, so one ticked box could double half the labels.
+function fontSize(c){return 11+9*Math.min(1,Math.log2(Math.max(1,c))/6);}
 // Label size is a per-node property (a busy gene is drawn larger), so the slider is a single
 // multiplier on top of fontSize(): every label shrinks by the same factor and the size ranking
 // survives. The base size rides along on each node as _fs, which is what lets the slider relabel
@@ -1808,7 +1910,6 @@ let FSCALE=1;
 // runs to twice that. The divisor -- not the range -- is what fixes where 1.0x lands.
 const FS_BASE=50;
 function activeFontScale(){const el=document.getElementById('fscale');const v=el?parseInt(el.value):FS_BASE;return (isNaN(v)?FS_BASE:v)/FS_BASE;}
-function scaledFont(b){return Math.max(8,Math.round(b*FSCALE));}   // 8px floor: no label drawn smaller
 // Which node kinds have their NAME DRAWN on the canvas. Disease and chemical names are long,
 // repeat across many edges and out-shout the gene symbols simply by being wordy, so those
 // nodes start unlabelled -- shape and colour say what they are, and the name is one hover
@@ -1833,7 +1934,7 @@ function labelFor(id,kind,text){
  return (kind==='chemical')?'<i>'+esc(t)+'</i>':t;
 }
 function nodeFont(kind,base){
- const f={size:Math.max(scaledFont(base),zoomFloor())};   // never under 8px on screen (see refloorLabels)
+ const f={size:screenPx(base)/Math.max(ZSCALE,1e-3)};   // screen px -> canvas units at this zoom
  if(kind==='disease')f.face=NARROW_FACE;
  if(kind==='chemical'){f.face=NARROW_FACE;f.multi='html';f.ital={face:NARROW_FACE,mod:'italic'};}
  return f;
@@ -1972,6 +2073,23 @@ function build(thr){
    (base||edges).forEach(o=>{if(DIS_KEEP.has(o.e.from))near.add(o.e.to);if(DIS_KEEP.has(o.e.to))near.add(o.e.from);});
    edges=edges.filter(o=>near.has(o.e.from)&&near.has(o.e.to));
  } else edges=shape(edges,tm,true);
+ // Disease context for the edges that do NOT touch a kept disease (gene-gene, gene-drug): only
+ // the sentences from papers about a kept disease. The endpoints being neighbours of glioma says
+ // nothing about where each of their sentences comes from, and CTNNB1-SNAI1 under "brain" showed
+ // melanoma papers. A paper's diseases are the ones its own sentences relate to anything
+ // (paperDiseases); a paper with none -- about a third -- is placed nowhere and drops out of
+ // these edges. Edges to a kept disease stay as they are. The edge is then re-judged on what is
+ // left, against min sentences / publications like the Enrich buttons.
+ if(DIS_KEEP.size){
+   const pd=paperDiseases(), inScope=s=>{const z=pd[s.pmid];if(!z)return false;for(const d of z)if(DIS_KEEP.has(d))return true;return false;};
+   edges=edges.filter(o=>{
+     if(DIS_KEEP.has(o.e.from)||DIS_KEEP.has(o.e.to))return true;
+     const v=o.vis.filter(inScope);
+     if(!v.length||v.length<thr)return false;
+     const np=new Set(v.map(s=>s.pmid)).size; if(mp>1&&np<mp)return false;
+     if(v.length!==o.vis.length){o.vis=v;o.w=v.length;o.np=np;o.cat=viewCat(o.e,v);}
+     return true;});
+ }
  // A kept disease the other settings left without a single link -- typically because only
  // relation types it never carries are ticked (diseases are linked by "associated", almost never
  // by "binds") -- used to vanish, and under "Only their direct neighbours" it took the whole
@@ -1988,7 +2106,7 @@ function build(thr){
  const nsz=id=>(nss[id]?nss[id].size:0);
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
   const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
-  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
+  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+(SURF[n.id]?String.fromCharCode(10)+surfLine(n.id):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
    borderWidth:1,borderWidthSelected:2};});
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  // arrowheads only on directed (signed) relations; interacts/associated/binds are symmetric,
@@ -2034,7 +2152,7 @@ function build(thr){
    if(view){network.moveTo({position:view.position,scale:view.scale,animation:false});
      if(!allInView())safeFit(false);}
    else safeFit(false);
-   LABEL_A=-1;updateLabels();network.redraw();};
+   LABEL_A=-1;updateLabels();refloorLabels();network.redraw();};   // fonts for the final camera, at once
  // nothing new to place: no physics runs, so no stabilization event will come
  if(nNew>0)network.on('stabilizationIterationsDone',settled);else settled();
  network.on('zoom',updateLabels);
@@ -2042,8 +2160,8 @@ function build(thr){
  fitLeftPanel();    // self-correcting: a panel narrowed by anything recovers on the next redraw
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
-   if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)';}
-   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=INFO_HEAD+edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text)+'</div>').join('');}});
+   if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)'+(SURF[n.id]?'<div class=mut style="margin-top:3px">'+esc(surfLine(n.id))+'</div>':'');}
+   else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=INFO_HEAD+edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text,o.e)+'</div>').join('');}});
 }
 const thr=document.getElementById('thr');
 let CATTOT={};
@@ -2072,7 +2190,7 @@ const fsc=document.getElementById('fscale');
 fsc.addEventListener('input',()=>{FSCALE=activeFontScale();document.getElementById('fsv').textContent=fsc.value+'%';
  // rebuild the WHOLE font object per node, not just its size: passing {size} alone would drop
  // the condensed face and the italic slot the disease and drug labels carry
- if(NODEDS)NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:nodeFont(KIND[n.id]||'gene',n._fs||13)})));});
+ if(NODEDS)NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:nodeFont(KIND[n.id]||'gene',n._fs||11)})));});
 // Each "i" reveals its own section's prose. Most sections keep their help inside the row, but
 // a few explain a control from BELOW it -- the relation counts, the training-set hint -- and
 // those are tagged data-help="<group>" so one button can open every part of its section at once.
@@ -2197,7 +2315,8 @@ function fitLeftPanel(){
  if(df){const p=document.createElement('label');p.className='dism';
    p.style.cssText='position:absolute;visibility:hidden;white-space:nowrap;display:inline-block;box-sizing:content-box';
    p.innerHTML='<input type=checkbox> non-small cell lung carcinoma <span class=cnt>(9999)</span>';
-   df.appendChild(p);dw=Math.ceil(p.getBoundingClientRect().width)+18;df.removeChild(p);}
+   df.appendChild(p);dw=Math.ceil(p.getBoundingClientRect().width)+18;df.removeChild(p);
+   const bx=df.closest('.dbox');if(bx){const c=getComputedStyle(bx);dw+=Math.ceil(parseFloat(c.paddingLeft)+parseFloat(c.paddingRight)+parseFloat(c.borderLeftWidth)+parseFloat(c.borderRightWidth));}}
  const gw=[...document.querySelectorAll('.egrid')].reduce((m,g)=>Math.max(m,Math.ceil(g.offsetWidth)),0);   // every Enrich box
  const w=Math.max(Math.ceil(last.right-first.left),gw,dw);   // offsetWidth: the box's padding and border included
  if(Math.abs(last.top-first.top)<2&&w>=FIT_MIN&&w<=FIT_MAX){lp.style.width=w+'px';

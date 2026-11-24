@@ -19,7 +19,11 @@ fill also encodes drug-target status: deeper colour means more corpus chemicals 
 green for DGIdb approved anti-neoplastic, amber for approved (other), pink for no approved
 drug at all -- DGIdb investigational and/or a ChEBI target role only, which is a statement about
 approval status, not about which database the gene came from.
-Hover gives the name, kind, sentence count and target count.
+Hover gives the name, kind, sentence count and target count. For a gene it also gives how the
+text wrote it -- every surface normalized to that HGNC symbol, with its sentence count (*CDKN1A*:
+*p21* 223, *CDKN1A* 41, *Cdkn1a* 15, ...; *AR*: *AR* 124, *AR-V7* 9, *androgen receptor* 3, ...),
+also shown when the node is clicked -- and in every sentence listed for an edge, the words that
+stand for its gene ends are set in bold blue, so you can see what was read as the gene.
 
 **Edges** — colour is the relation carried by most of its sentences *in view*: `activates`
 green, `inhibits` red, `binds` blue, `interacts` purple, `associated` grey, negations amber and
@@ -44,7 +48,7 @@ whether disease and drug names are drawn (gene symbols always are); *Shrink peri
 *Expand center*, two radial reshapers that pull in outlying clusters or thin the crowded core
 without reordering anything; tissue stacking, which pools same-tissue disease nodes onto one
 overlapping spot; the *Keep diseases* list, with same-tissue diseases grouped under a tissue
-heading that ticks them all at once; the co-mention picker; two sentence lenses -- an **Enrich for drivers**
+heading that ticks them all at once; the co-mention picker; two sentence lenses -- a **Candidate driver**
 toggle that keeps only edges with a sentence naming an amino-acid change, case-sensitive, one-letter
 (*V600E*, *G12C*) or three-letter (*p.Gly12Cys*). Any punctuation may stand around it -- *KRAS
 G12C,*, *V600E-mutant*, *KRAS-G12V*, *L858R/T790M*, *(G12C)*, HGVS *p.L747P* -- and it may be glued
@@ -62,7 +66,11 @@ chromosomal sense -- after a fusion pair or fusion gene (*EML4-ALK translocation
 *reciprocal* / *truncating*, or as *translocation involving MLL*; or karyotype notation on its own, with no other word
 (*t(4;14)*, *t(11;14)*, *t(9;22)(q34;q11)*, *ins(3;3)*, *inv(16)*, *der(22)*: myeloma and leukemia
 papers write their translocations this way; a *t(28) = 3.1* t-statistic has no semicolon and never
-matches) -- never a protein moving
+matches); or a fusion named by its two genes in HGNC notation, *NUP98::NSD1*, *AGK::BRAF*,
+*EWSR1::WT1* (both sides genes of the graph; 49 sentences say it without the word *fusion*), the
+older single colon (*TMPRSS2:ERG*, *KIAA1549:BRAF*) only with no space around it and a fusion cue in
+the sentence -- it also writes proximity pairs (*EGFR:GRB2* PLA), kinase:substrate (*MAPK8:JUN*),
+interactions (*KRAS:CDKN2A*) and transgenes (*rag2:Myc*) -- never a protein moving
 (*nuclear translocation of p65*, *translocation of YAP into the nucleus*); an **Enrich for ITD** toggle for internal tandem duplications (*ITD* in capitals as a word,
 as in *FLT3-ITD*, or *internal tandem duplication* spelled out); an **Enrich for
 overexpression** toggle (*overexpres* / *over-expres*, any case); an **Enrich for
@@ -105,15 +113,15 @@ each; all its sentences pass and nothing is highlighted. The list (1,247 genes; 
 408 tumor suppressors, 68 of them both) is read from `databases/oncokb_cancerGeneList.tsv`, fetched
 2026-11-24 from `https://www.oncokb.org/api/v1/utils/cancerGeneList.txt`; 403 oncogenes and 296
 tumor suppressors are genes of this graph. (Until then the two matched the words *oncogene* /
-*tumor suppressor*, which few sentences use -- *Drivers* + *Oncogene* drew 8 nodes; it now draws
+*tumor suppressor*, which few sentences use -- *Candidate driver* + *Oncogene* drew 8 nodes; it now draws
 334.) The box's other two buttons still read the sentence: **Metastasis / EMT** (*metasta\**,
 *EMT*, epithelial-mesenchymal transition and EMT markers; not the mesenchymal GBM subtype) and
 **Immune** (*immune*, *immunity*, *immunotherapy*, checkpoint inhibitors, PD-1 / PD-L1 / CTLA-4 and
 the other checkpoints, T / NK cells, CD8+, TILs, macrophages / TAMs, MDSCs, Tregs; not the lab
 methods named *immuno-* such as immunoblot or immunohistochemistry, cell-cycle checkpoints, T-cell
 lymphomas or a singular *TAM*, which is also tamoxifen). Within a box the toggles are ORed (a sentence matching any of those on counts); the boxes
-are ANDed with each other (*Drivers* + *Resistance* keeps sentences such as *T790M confers resistance
-to gefitinib*; *Drivers* + *Oncogene* only sentences that name a point mutation and speak of an
+are ANDed with each other (*Candidate driver* + *Resistance* keeps sentences such as *T790M confers resistance
+to gefitinib*; *Candidate driver* + *Oncogene* only sentences that name a point mutation and speak of an
 oncogene, so the view is small by design), and with the text match; zoom/fit (filters keep each node where it was and keep the camera unless something new
 falls outside it, and Fit never zooms closer than 100%, so a small view is not blown up); *Significance in view*; and the details box,
 headed *Sentences of interest*, which lists an edge's sentences with linked PMIDs when you click
@@ -340,6 +348,14 @@ The order is deliberate, and it is what keeps the panel honest:
   but CTNNB1's and SNAI1's own links to melanoma do not. The cost: with
   `associated` unticked, gene-disease links are mostly gone, so the view shrinks to a few drugs
   (linked by `inhibits`) or to the kept diseases drawn on their own.
+- **Kept diseases also scope the other edges' sentences.** An edge that does not touch a kept
+  disease (gene–gene, gene–drug) keeps only sentences from papers about a kept disease — a
+  paper's diseases being those its own sentences relate to anything — and is re-judged against
+  `Min unique sentences / publications` on what is left. Under *brain*, PIK3CA–alpelisib goes
+  from 49 sentences (breast cancer trials) to the one glioma paper, and the edges not touching a
+  brain disease from 1,994 to 569, mentioning melanoma 5 times instead of 58 (those 5 are papers
+  on melanoma brain metastases). A paper whose sentences relate no disease at all — about a third
+  of them — is placed nowhere and does not appear on these edges in any disease view.
 
 ## Limits worth carrying
 
@@ -367,6 +383,15 @@ The order is deliberate, and it is what keeps the panel honest:
   one thing in a cancer corpus (*PDAC*, *CRC*, *LUAD*, *pancreatic cancer*, *colon cancer*,
   *bladder cancer*, *RCC*, *HNSC*, ...; 7,802 mentions). Still dropped, as ambiguous: *ALL*,
   *BC*, *GC*, *PCa*, *PD*, *EC*, *OC*, *UC*, *PDA*.
+- **A gene is a node only when its surface resolves to one HGNC symbol** -- and the normalizer
+  often gives several: plain *AR* resolves to AR + FDXR + AKR1B1 + AREG (the approved symbol is an
+  old alias of three other genes), and was dropped, so the AR node once had 7 sentences and no
+  prostate cancer. `gene_symbol()` now takes the symbol the surface spells exactly (*AR*, *HGF*,
+  *RAC1*, *BAP1*, *ATR*, *CDH1*; minus words such as *TF*, *cAMP*, *mOS*, *SAG*, *Pgp*), and
+  `GENE_SURFACE` maps one-gene short names: *p21* → CDKN1A, *p16* → CDKN2A, *p27* → CDKN1B,
+  *NRF2* → NFE2L2, *p38* → MAPK14, *p62* → SQSTM1, *ER* → ESR1, *TAZ* → WWTR1, *S6 / pS6* → RPS6,
+  *TTF-1* → NKX2-1, *AR-V7* → AR. Families stay dropped (*ERK*, *NF-κB*, *FGFR*), and *AIS*
+  (an AR alias, here adenocarcinoma in situ) is ignored. AR now has 79 edges and 184 sentences.
 - **A few chemicals are blocked from being nodes at all** (`CHEMICAL_IGNORE`: tyrosine, glucose).
   ChEBI resolves them correctly, but their mentions are residue names and culture conditions, not
   compounds under study. The match is exact, so `2-deoxy-D-glucose` and
@@ -375,11 +400,14 @@ The order is deliberate, and it is what keeps the panel honest:
   not say its tissue is not grouped.
 - **Counts sum past the edge total** for relation types and training sets, since an edge with
   mixed evidence counts under each.
-- **Labels are never smaller than 8 px on screen and never faded.** The size floor follows the
-  zoom: zoomed out, labels are drawn larger in graph units so they still read at 8 px (dense views
-  get busy, but no node is left as a bare dot). The floor rises with the *Font size* slider — 8 px at
-  10%, 12 px at the default 50%, 17 px at 100% — so the slider changes every label in every view,
-  including small or zoomed-out ones where all labels sit on the floor.
+- **Labels are sized in screen pixels, whatever the zoom or the view.** A label's size depends on
+  its node's unique sentences in view only, on a log scale: at the default 50% a gene reads 11 px
+  with one sentence, 12.5 with 2, 15.5 with 8, 17 with 16 and 20 px from 64 on (diseases and drugs
+  at 80% of that). Zooming re-sizes the fonts so they stay that size on screen. The *Font size*
+  slider stretches everything above an 8 px floor: about 8.6–10.4 px at 10%, 14–32 px at 100%.
+  Labels are never faded out. (Sizes used to be in graph units, so on screen they were size × zoom:
+  a big view zoomed out drew everything at the floor, a small one drew busy genes at 96 px, and
+  4 → 5 sentences doubled a label from 13 to 26 — the same 50% looked different with every filter.)
 
 ## Regenerating
 
