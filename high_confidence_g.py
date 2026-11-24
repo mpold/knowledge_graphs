@@ -782,7 +782,7 @@ __LIBTAG__
     what is IN it (thresholds, filters, provenance), so the two columns split by question */
  #lpanel{left:12px;scrollbar-gutter:stable}
  /* an 'on' Enrich button turns bold: reserve the bold width up front so the grid never widens */
- #enrichgrid button::after{content:attr(data-t);display:block;height:0;overflow:hidden;visibility:hidden;font-weight:600}
+ .egrid button::after{content:attr(data-t);display:block;height:0;overflow:hidden;visibility:hidden;font-weight:600}
  /* each column can be shut to free the canvas: the x sits in the panel's top corner, and a
     closed panel leaves a small tab at the same corner that brings it back */
  .pclose{float:right;margin:-8px -10px 4px 8px;width:22px;height:22px;padding:0;border:1px solid #cdd5e0;border-radius:50%;background:#eef2f7;color:#1c2330;font:600 15px/1 Segoe UI,Arial,sans-serif;cursor:pointer}
@@ -804,11 +804,11 @@ __LIBTAG__
  /* the Enrich buttons, two per row: each .row dissolves into the grid (display:contents) so its
     button and "i" are two cells, and its help note spans the full width under the pair when
     opened ("dense" lets the next button back-fill the row the note would otherwise break) */
- #enrichgrid{display:grid;grid-template-columns:max-content max-content max-content max-content;column-gap:0;row-gap:4px;align-items:center;grid-auto-flow:row dense;margin:2px 0 8px;border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}   /* boxed like #catfilters */
- #enrichgrid>.row{display:contents}
- #enrichgrid>.row>button:first-child{margin:0}
- #enrichgrid .ihelp{margin:0 10px 0 3px}
- #enrichgrid .help{grid-column:1/-1;margin:0 0 4px;width:0;min-width:100%}   /* adds no width of its own: wraps to the grid */
+ .egrid{display:grid;grid-template-columns:max-content max-content max-content max-content;column-gap:0;row-gap:4px;align-items:center;grid-auto-flow:row dense;margin:2px 0 8px;border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}   /* boxed like #catfilters */
+ .egrid>.row{display:contents}
+ .egrid>.row>button:first-child{margin:0}
+ .egrid .ihelp{margin:0 10px 0 3px}
+ .egrid .help{grid-column:1/-1;margin:0 0 4px;width:0;min-width:100%}   /* adds no width of its own: wraps to the grid */
  .help{display:none;margin-top:4px} .help.open{display:block}
  #conf{width:190px;cursor:pointer}
  select,#search,#genefilter,#drugsearch,#textfilter{max-width:100%;background:#fff;border:1px solid #cdd5e0;color:#1c2330;border-radius:5px;padding:3px 6px;font-size:13px}
@@ -819,8 +819,8 @@ __LIBTAG__
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
  #catfilters .cnt{color:#5b6677;font-size:11px}
- #zoom button,#srcbtns button,#labelbtns button,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
- #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#catall:hover,#drvbtn:hover,#fusbtn:hover,#itdbtn:hover,#oexbtn:hover,#ampbtn:hover,#delbtn:hover,#trubtn:hover,#exobtn:hover,#cnbtn:hover,#metbtn:hover{background:#dde4ee}
+ #zoom button,#srcbtns button,#labelbtns button,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn,#resbtn,#acqbtn,#slbtn,#bmkbtn,#prgbtn,#clnbtn,#vivbtn,#oncbtn,#tsgbtn,#immbtn,#mtsbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
+ #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#catall:hover,#drvbtn:hover,#fusbtn:hover,#itdbtn:hover,#oexbtn:hover,#ampbtn:hover,#delbtn:hover,#trubtn:hover,#exobtn:hover,#cnbtn:hover,#metbtn:hover,#resbtn:hover,#acqbtn:hover,#slbtn:hover,#bmkbtn:hover,#prgbtn:hover,#clnbtn:hover,#vivbtn:hover,#oncbtn:hover,#tsgbtn:hover,#immbtn:hover,#mtsbtn:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button{margin-bottom:4px}
  #disfilters{display:block;max-height:148px;overflow-y:auto;margin-top:4px}
  #disfilters label{display:block;margin:1px 0}
@@ -830,7 +830,7 @@ __LIBTAG__
  /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
     carry a trailing margin -- 6px of it would push Fit onto a second line */
  #zoom button:last-child{margin-right:0}
- #srcbtns button.on,#labelbtns button.on,#drvbtn.on,#fusbtn.on,#itdbtn.on,#oexbtn.on,#ampbtn.on,#delbtn.on,#trubtn.on,#exobtn.on,#cnbtn.on,#metbtn.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
+ #srcbtns button.on,#labelbtns button.on,#drvbtn.on,#fusbtn.on,#itdbtn.on,#oexbtn.on,#ampbtn.on,#delbtn.on,#trubtn.on,#exobtn.on,#cnbtn.on,#metbtn.on,#resbtn.on,#acqbtn.on,#slbtn.on,#bmkbtn.on,#prgbtn.on,#clnbtn.on,#vivbtn.on,#oncbtn.on,#tsgbtn.on,#immbtn.on,#mtsbtn.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  /* the name buttons must not move when one is toggled: bold text is wider, so each button reserves
     its bold width up front (a hidden bold copy of its own label) and switching weight changes nothing */
  /* ...and 3px less side padding (no trailing margin) pays for that reserve, so the pair still
@@ -874,9 +874,9 @@ __LIBTAG__
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
   <div class="legend" id="disfilters"></div>
   <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> Only their direct neighbours</label>
-  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. Diseases of the same tissue (read from the name, as for <em>Stack same-tissue diseases</em>) are listed together under a bold tissue heading whose box ticks or unticks them all &mdash; half-ticked when only some are kept; the number beside it is how many diseases it holds and their edges in all. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> switches on by itself when you tick the first disease (untick it to see the whole graph with only those diseases), and goes further: it keeps just the ticked diseases, the genes and drugs with a <em>drawn</em> edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Every other setting counts: a gene whose own link to the disease is hidden (its relation unticked, the text or driver lens, min sentences, min connections, cluster size) is not a neighbour, however it connects to the ones that are. Genes are linked to diseases almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood shrinks to a few drugs, or to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
+  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. Diseases of the same tissue (read from the name, as for <em>Stack same-tissue diseases</em>) are listed together under a bold tissue heading whose box ticks or unticks them all &mdash; half-ticked when only some are kept; the number beside it is how many diseases it holds and their edges in all. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> switches on by itself when you tick the first disease (untick it to see the whole graph with only those diseases), and goes further: it keeps just the ticked diseases, the genes and drugs with a <em>drawn</em> edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Every other setting counts: a gene whose own link to the disease is hidden (its relation unticked, an Enrich button, min sentences, min connections, cluster size) is not a neighbour, however it connects to the ones that are. The <b>Match text</b> box is the exception: it searches the neighbourhood without redrawing it &mdash; the neighbours are chosen as if the box were empty, and the text then keeps the edges among them that match. Genes are linked to diseases almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood shrinks to a few drugs, or to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
  <div class="row" id="enrichhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for alteration:</b></div>
- <div id="enrichgrid">
+ <div id="enrichgrid" class="egrid">
  <div class="row"><button id="drvbtn" aria-pressed="false">Drivers</button> <button class="ihelp" aria-label="About enrich for drivers" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, matched by <code>/\s+[A-Z]\d+[A-Z]\s+/</code> or <code>/\([A-Z]\d+[A-Z]\)/</code> (case-sensitive), and excluding the figure, table and cell-line look-alikes.</div></div>
  <div class="row"><button id="fusbtn" aria-pressed="false">Fusions</button> <button class="ihelp" aria-label="About enrich for fusions" aria-expanded="false">i</button>
@@ -898,6 +898,40 @@ __LIBTAG__
  <div class="row"><button id="itdbtn" aria-pressed="false">ITD</button> <button class="ihelp" aria-label="About enrich for ITD" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence about an <b>internal tandem duplication</b> &mdash; <i>ITD</i> in capitals as a word of its own (<i>FLT3-ITD</i>, <i>FLT3/ITD</i>, <i>ITD-positive</i>) or <i>internal tandem duplication</i> spelled out &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted.</div></div>
  </div>
+ <div class="row" id="therapyhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for therapy:</b> <button class="ihelp" aria-label="About enrich for therapy" aria-expanded="false">i</button>
+  <div class="mut help">These buttons work like the alteration ones and combine with each other in OR. The two boxes combine in <b>AND</b>: with <i>Drivers</i> and <i>Resistance</i> both on, a sentence must name a point mutation <em>and</em> speak of resistance (<i>T790M confers resistance to gefitinib</i>).</div></div>
+ <div id="therapygrid" class="egrid">
+ <div class="row"><button id="acqbtn" aria-pressed="false">Acquired resistance</button> <button class="ihelp" aria-label="About enrich for acquired resistance" aria-expanded="false">i</button>
+  <div class="mut help">A narrower view than <i>Resistance</i>: keeps only edges with a sentence about <b>how resistance arises</b>. It counts <i>acquired</i>, <i>secondary</i>, <i>intrinsic</i>, <i>primary</i>, <i>adaptive</i>, <i>innate</i>, <i>de novo</i> and <i>emerging</i> resistance (<i>acquired erlotinib resistance</i>, <i>secondary resistant mutation</i>), <i>acquisition</i> or <i>development of resistance</i>, <i>mechanisms of resistance</i>, <i>resistance mechanisms / mutations</i>, <i>gatekeeper mutations</i>, and <i>bypass</i> signalling in a sentence that speaks of resistance or an inhibitor (<i>MET amplification bypasses EGFR inhibition</i>). With <i>Resistance</i> also on, this adds nothing.</div></div>
+ <div class="row"><button id="resbtn" aria-pressed="false">Resistance</button> <button class="ihelp" aria-label="About enrich for resistance" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>resistance to a treatment</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>resistance</i> / <i>resistant</i> in any form (<i>gefitinib-resistant</i>, <i>acquired resistance</i>, <i>multidrug-resistant</i>), <i>chemoresistance</i>, <i>radioresistance</i> and <i>refractory</i>. Not counted: a cell surviving something that is not a treatment &mdash; <i>apoptosis</i>, <i>anoikis</i>, <i>ferroptosis</i> or <i>cell-death resistance</i>, <i>resistance to oxidative stress</i>, <i>insulin resistance</i>, antibiotic selection (<i>puromycin-resistant</i>) &mdash; unless the sentence also names a treatment (<i>resistance to apoptosis induced by EGFR-TKIs</i> counts).</div></div>
+ <div class="row"><button id="slbtn" aria-pressed="false">Synthetic lethality</button> <button class="ihelp" aria-label="About enrich for synthetic lethality" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>synthetic lethality</b>: <i>synthetic lethal</i>, <i>synthetically lethal</i>, <i>synthetic lethality</i>, <i>synthetic sickness</i>, <i>collateral lethality</i>, and <i>SL</i> as a pairing (<i>SL interaction</i>, <i>SL gene pairs</i>, <i>MYC-SL</i>; case-sensitive, so the compound <i>SL-176</i> does not count).</div></div>
+ <div class="row"><button id="bmkbtn" aria-pressed="false">Biomarker</button> <button class="ihelp" aria-label="About enrich for biomarker" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about a <b>biomarker</b>: <i>biomarker</i>, <i>predictive marker</i>, <i>companion diagnostic</i>, and a feature said to predict response, sensitivity, benefit, resistance or efficacy (<i>PBRM1 inactivation may predict benefit from anti-PD-1</i>, <i>predictive of everolimus response</i>). Prognostic biomarkers count too.</div></div>
+ </div>
+ <div class="row" id="clinhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for clinical relevance:</b> <button class="ihelp" aria-label="About enrich for clinical relevance" aria-expanded="false">i</button>
+  <div class="mut help">These buttons combine with each other in OR, and in <b>AND</b> with the two boxes above: with <i>Drivers</i> and <i>Clinical evidence</i> both on, a sentence must name a point mutation <em>and</em> report patients or a trial.</div></div>
+ <div id="clingrid" class="egrid">
+ <div class="row"><button id="clnbtn" aria-pressed="false">Clinical evidence</button> <button class="ihelp" aria-label="About enrich for clinical evidence" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence reporting <b>patients in a study or on a treatment</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>clinical trial / study / response / benefit</i>, a trial phase (<i>phase II trial</i>, <i>phase I/II study</i>, <i>Phase 3</i>; only beside trial or study wording, so <i>G2/M phase</i> does not count), <i>randomised</i>, <i>open-label</i>, <i>multicentre</i>, <i>prospective</i> / <i>retrospective</i> studies, NCT numbers, response rates (<i>ORR</i>, <i>objective response rate</i>, <i>complete / partial response</i>), and <i>patients treated with / receiving</i> a drug. Plain <i>patients</i> is not enough: most such sentences are database cohorts.</div></div>
+ <div class="row"><button id="prgbtn" aria-pressed="false">Prognosis</button> <button class="ihelp" aria-label="About enrich for prognosis" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>patient prognosis or survival</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>prognosis</i> / <i>prognostic</i>, named endpoints (<i>overall</i>, <i>progression-free</i>, <i>disease-free</i>, <i>relapse-free</i>, <i>event-free survival</i>; <i>PFS</i>, <i>DFS</i>, <i>RFS</i>, <i>EFS</i>), survival or outcome as a patient result (<i>poor survival</i>, <i>shorter overall survival</i>, <i>median survival</i>, <i>adverse outcome</i>, <i>survival rate</i>), hazard ratios and Kaplan-Meier curves. <i>OS</i> counts only beside a survival cue, since it is also osteosarcoma, and <i>HR</i> only as a number (<i>HR = 0.64</i>), since it is also homologous recombination or hormone receptor. Not counted: survival of cells (<i>promotes cell survival</i>, <i>increased survival of tumour cells</i>).</div></div>
+ <div class="row"><button id="vivbtn" aria-pressed="false">In vivo</button> <button class="ihelp" aria-label="About enrich for in vivo" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>animal experiments</b>, the level of evidence above cell culture, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>in vivo</i>, xenografts and allografts (<i>PDX</i>, <i>patient-derived xenograft</i>, <i>CDX</i>), <i>GEMM</i>, orthotopic / syngeneic / subcutaneous models, <i>tumour-bearing</i>, <i>mice</i> and <i>rats</i>, <i>mouse / murine / animal / zebrafish models</i>, and <i>knock-in</i> / <i>transgenic</i> mice. Not counted: <i>mouse</i> as a source of cells or reagents (<i>mouse embryonic fibroblasts</i>, <i>mouse anti-</i>), and patient-derived organoids or cells, which are in vitro.</div></div>
+ </div>
+ <div class="row" id="biohead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for gene role and biology:</b> <button class="ihelp" aria-label="About enrich for gene role and biology" aria-expanded="false">i</button>
+  <div class="mut help">These buttons combine with each other in OR, and in <b>AND</b> with the boxes above: with <i>Drivers</i> and <i>Oncogene</i> both on, a sentence must name a point mutation <em>and</em> speak of an oncogene.</div></div>
+ <div id="biogrid" class="egrid">
+ <div class="row"><button id="tsgbtn" aria-pressed="false">Tumor suppressor</button> <button class="ihelp" aria-label="About enrich for tumor suppressor" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about a gene's role as a <b>tumor suppressor</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>tumor</i> / <i>tumour suppressor(s)</i>, <i>tumor-suppressive</i> (<i>tumor suppressive role</i>, <i>tumor-suppressive effects</i>), <i>tumor suppressor gene</i>, <i>tumor suppression activity / function</i>, <i>TSG(s)</i> and <i>anti-oncogene</i>. Not counted: plain <i>tumor suppression</i>, which is usually a treatment's result (<i>led to tumor suppression in vivo</i>) rather than a gene's role.</div></div>
+ <div class="row"><button id="oncbtn" aria-pressed="false">Oncogene</button> <button class="ihelp" aria-label="About enrich for oncogene" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about a gene's role as an <b>oncogene</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>oncogene(s)</i>, <i>proto-oncogene</i>, <i>oncogenicity</i>, and <i>oncogenic</i> naming a role or a gene (<i>oncogenic role</i>, <i>function</i>, <i>driver</i>, <i>activity</i>, <i>effects</i>, <i>potential</i>; <i>oncogenic KRAS</i>, <i>oncogenic K-Ras</i>). Not counted: <i>oncogenic</i> for a process rather than a gene's role (<i>oncogenic signalling</i>, <i>pathways</i>, <i>stress</i>, <i>mutations</i>, <i>signatures</i>).</div></div>
+ <div class="row"><button id="mtsbtn" aria-pressed="false">Metastasis / EMT</button> <button class="ihelp" aria-label="About enrich for metastasis / EMT" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>metastasis or the epithelial-mesenchymal transition</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>metastasis</i>, <i>metastases</i>, <i>metastatic</i>, <i>metastasize</i>, <i>EMT</i> (capitals) and <i>epithelial(-to)-mesenchymal transition</i>. Note <i>metastatic</i> also marks a disease stage (<i>metastatic NSCLC patients</i>); those sentences count too.</div></div>
+ <div class="row"><button id="immbtn" aria-pressed="false">Immune</button> <button class="ihelp" aria-label="About enrich for immune" aria-expanded="false">i</button>
+  <div class="mut help">Keeps only edges with a sentence about <b>tumor immunology</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>immune</i>, <i>immunity</i>, <i>immunotherapy</i>, <i>immunosuppressive</i>, <i>immunogenic(ity)</i>, <i>immunomodulatory</i>, <i>immunosurveillance</i>; checkpoint inhibitors or blockade; <i>PD-1</i>, <i>PD-L1</i>, <i>CTLA-4</i>, <i>LAG-3</i>, <i>TIM-3</i>, <i>TIGIT</i>, <i>ICI</i> / <i>ICB</i>, <i>CAR-T</i>; T and NK cells, <i>CD8+</i> / <i>CD4+</i>, TILs, macrophages and TAMs, dendritic cells, MDSCs, Tregs, neoantigens and interferon gamma. Not counted: the lab methods named <i>immuno-</i> (<i>immunoblot</i>, <i>immunohistochemistry</i>, <i>immunofluorescence</i>, <i>immunoprecipitation</i>, <i>immunostaining</i>), cell-cycle and DNA-damage checkpoints (<i>G2/M checkpoint</i>), T- and NK-cell lymphomas, and a singular <i>TAM</i>, which is also tamoxifen.</div></div>
+ </div>
  <div class="row" id="zoom"><button id="zin">+ Zoom in</button><button id="zout">&minus; Zoom out</button><button id="zfit">Fit</button></div>
  <div class="row mut" id="info">Click a node or edge for details.</div>
 </div>
@@ -916,7 +950,7 @@ __LIBTAG__
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
  <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
-  <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. Regular expressions are the way to find edges that describe <b>variants</b>: for example, <code>/\s+[A-Z]\d+[A-Z]\s+/</code> finds edges that describe missense and nonsense variants. <b>Min unique sentences</b> and <b>Min unique publications</b> count the <em>matching</em> sentences only, so every edge drawn shows at least that many; <b>Min connections</b> and <b>Min cluster size</b> are then applied to what the query leaves. A narrow query at a high floor can therefore leave little or nothing.</div></div>
+  <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. Regular expressions are the way to find edges that describe <b>variants</b>: for example, <code>/\s+[A-Z]\d+[A-Z]\s+/</code> finds edges that describe missense and nonsense variants. It is a search: an edge that passes <b>Min unique sentences</b> and <b>Min unique publications</b> on all its sentences is kept if any one of them matches (the Enrich buttons, by contrast, count only their own matching sentences against those minimums). <b>Min connections</b> and <b>Min cluster size</b> are then applied to what the query leaves.</div></div>
 __KINDROW__
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div><div class="row" style="margin-top:4px"><button id="catall" type="button">Check all</button></div>
@@ -1285,6 +1319,163 @@ function metHits(t){t=t||'';const iv=[];
    if(dna||MET_QUAL_POST.test(post)||MET_GENE_PRE.test(pre)||MET_GENE_POST.test(post))iv.push([a,b]);});
  return iv;}
 function metMatcher(){return {test:t=>metHits(t).length>0,hits:metHits};}
+// ---- "Enrich for therapy": a second box. Its buttons combine in OR among themselves, and the
+// box combines in AND with the alteration box: Drivers + Resistance keeps a sentence that names
+// a point mutation AND speaks of resistance (T790M confers resistance to gefitinib).
+// Resistance: resist* (resistance, resistant, TKI-resistant, multidrug-resistant), chemo- /
+// radio-resist*, refractory. Not counted: a cell surviving something that is not a treatment
+// (apoptosis / anoikis / ferroptosis / cell-death / oxidative-stress resistance, insulin
+// resistance, antibiotic selection markers) -- unless the sentence also names a treatment
+// ("resistance to apoptosis induced by EGFR-TKIs" stays).
+// no word boundary demanded where PDF text glues words (erlotinibresistant, radioresistance48)
+const RES_RE=/(?:\bchemo-?|\bradio-?)?resist(?:ance|ances|ant|ants|ed|ing|s)?(?![a-z])|(?:\bchemo-?)?refractor(?:y|iness)(?![a-z])/gi;
+const RES_NOT_PRE=/(?:apopto\w*|anoikis|ferropto\w*|pyropto\w*|cell[- ]death|death|oxidative[- ]stress|stress|insulin|leptin|antibiotic|puromycin|neomycin|G418|hygromycin|blasticidin|zeocin|ampicillin|kanamycin|colonization|vascular|electrical)[- ]?$/i;
+const RES_NOT_POST=/^\s+(?:to\s+)?(?:the\s+)?(?:apopto\w*|anoikis|ferropto\w*|pyropto\w*|cell[- ]death|death|oxidative|stress|insulin|leptin|puromycin|neomycin|G418|hygromycin|blasticidin|zeocin|ampicillin|kanamycin|antibiotics?|training|exercise)\b/i;
+const THER_CUE=/\b(?:inhibit(?:or|ors|ion)|TKIs?|therap\w*|chemo\w*|drugs?|treat\w*|blockade|agents?|radiation|radiotherapy|irradiation|\w+(?:tinib|rafenib|metinib|mab|platin|taxel|rubicin|ciclib|lisib|parib|zomib|mustine|fen|rolimus|tecan|citabine|uracil))\b/i;
+function resNotTherapy(t,a,b){return !THER_CUE.test(t)&&(RES_NOT_PRE.test(t.slice(Math.max(0,a-25),a))||RES_NOT_POST.test(t.slice(b,b+40)));}
+let RESS=false;
+function resHits(t){t=t||'';return reHits(RES_RE,t).filter(([a,b])=>!resNotTherapy(t,a,b));}
+function resMatcher(){return {test:t=>resHits(t).length>0,hits:resHits};}
+// Acquired resistance: how resistance arises, a narrower view than Resistance --
+// acquired / secondary / intrinsic / primary / adaptive / innate / de novo / emerging resistance
+// (one word may sit between: "acquired gefitinib-resistant cells"), acquisition or development of
+// resistance, mechanisms of resistance, resistance mechanisms / mutations, gatekeeper mutations,
+// and bypass signalling in a sentence that speaks of resistance or an inhibitor.
+const ACQ_RE=new RegExp([
+ String.raw`\b(?:acquired|secondary|intrinsic|primary|adaptive|innate|de[- ]novo|emerg\w*|on-target|off-target)\s+(?:[\w/-]+[- ])?(?:chemo-?|radio-?)?resist\w*`,
+ String.raw`\bacquisition\s+of\s+(?:[\w/-]+[- ]){0,2}resist\w*`,
+ String.raw`\bdevelop\w*\s+(?:[\w/-]+[- ]){0,3}resist\w*`,
+ String.raw`\bmechanisms?\s+(?:of|underlying|for|driving|behind|conferring)\s+(?:[\w/-]+[- ]){0,3}resist\w*`,
+ String.raw`\bresist(?:ance|ant)[- ](?:mechanisms?|mutations?|alleles?|variants?|clones?)\b`,
+ String.raw`\bgatekeeper\s+(?:mutations?|residues?|variants?)\b`].join('|'),'gi');
+const BYPASS_RE=/\bbypass(?:es|ed|ing)?\b/gi, BYPASS_CTX=/resist|\bTKIs?\b|inhibit/i;
+let ACQS=false;
+function acqHits(t){t=t||'';
+ const h=reHits(ACQ_RE,t).filter(([a,b])=>!resNotTherapy(t,a,b));
+ return BYPASS_CTX.test(t)?h.concat(reHits(BYPASS_RE,t)):h;}
+function acqMatcher(){return {test:t=>acqHits(t).length>0,hits:acqHits};}
+// Synthetic lethality: synthetic(ally) lethal*, synthetic sick*, collateral lethality, and the
+// abbreviation SL as a pairing (SL interaction / pair / partner / gene / effect, MYC-SL) --
+// case-sensitive, so the compound SL-176 does not count.
+const SL_RE=/\bsynthetic(?:al(?:ly)?)?[- ]?(?:lethal\w*|sick\w*)|\bcollateral[- ]lethal\w*|\bselective(?:ly)?[- ]lethal\w*/gi;
+const SL_ABBR=/\bSL(?=[- ](?:interactions?|pairs?|partners?|genes?|effects?|vulnerabilit\w*|relationships?|screens?|targets?)\b)|\b[A-Z][A-Za-z0-9]*-SL\b(?!-)/g;
+let SLS=false;
+function slHits(t){t=t||'';return reHits(SL_RE,t).concat(reHits(SL_ABBR,t));}
+function slMatcher(){return {test:t=>slHits(t).length>0,hits:slHits};}
+// Biomarker: biomarker(s), predictive marker, companion diagnostic, and a feature said to predict
+// response / sensitivity / benefit / resistance / efficacy ("PBRM1 inactivation may predict
+// benefit from anti-PD-1", "predictive of everolimus response"). Prognostic biomarkers count too.
+const BMK_RE=/\bbio-?markers?\b|\bpredictive\s+(?:bio-?)?markers?\b|\bcompanion\s+diagnostics?\b/gi;
+const BMK_PRED=/\bpredict(?:s|ed|ive|ing|ors?)?\s+(?:of\s+)?(?:[\w/-]+\s+){0,2}(?:response|responsiveness|sensitivity|benefit|resistance|efficacy)\b/gi;
+let BMKS=false;
+function bmkHits(t){t=t||'';return reHits(BMK_RE,t).concat(reHits(BMK_PRED,t));}
+function bmkMatcher(){return {test:t=>bmkHits(t).length>0,hits:bmkHits};}
+// ---- "Enrich for clinical relevance": a third box, OR inside, AND with the other two boxes.
+// Prognosis: prognos* (prognosis, prognostic), named survival endpoints (overall / progression-
+// free / disease-free / relapse-free / event-free / metastasis-free survival), survival or outcome
+// qualified as a patient result (poor / shorter / median ... survival, adverse outcome, survival
+// rate / time / benefit), hazard ratios and Kaplan-Meier; the abbreviations PFS / DFS / RFS / EFS /
+// MFS case-sensitive, and OS only beside a survival cue (OS is also osteosarcoma). Cell survival
+// ("promotes cell survival", "survival of tumour cells") is biology, not prognosis, and does not count.
+const PRG_RE=new RegExp([
+ String.raw`\bprognos\w*`,
+ String.raw`\b(?:overall|progression[- ]free|disease[- ]free|relapse[- ]free|recurrence[- ]free|event[- ]free|metastasis[- ]free|distant[- ]metastasis[- ]free|cancer[- ]specific|disease[- ]specific|failure[- ]free|leukemia[- ]free|leukaemia[- ]free)\s+survival\b`,
+ String.raw`\b(?:poor(?:er|est)?|worse|shorter|longer|reduced|improved|better|inferior|superior|prolonged|median|decreased|increased|lower|higher|unfavou?rable|favou?rable|patients?'?|5-year|five-year|3-year|10-year)\s+(?:(?:overall|clinical|patient|disease)\s+)?(?:survival|outcomes?)\b`,
+ String.raw`\b(?:adverse|dismal|clinical|patient|treatment)\s+outcomes?\b`,
+ String.raw`\bsurvival\s+(?:rates?|times?|benefit|outcomes?|analys[ie]s|curves?|probability|advantage)\b`,
+ String.raw`\bhazard\s+ratios?\b|\bKaplan[- ]Meier\b`].join('|'),'gi');
+const PRG_ABBR=/\b(?:PFS|DFS|RFS|EFS|MFS|DMFS|CSS)\b|\bHR\s*[=:,(]?\s*\d+\.\d/g;
+const PRG_OS=/\bOS\b/g, PRG_OS_PRE=/\b(?:poor(?:er|est)?|worse|shorter|longer|inferior|superior|improved|better|prolonged|median|reduced|decreased|increased|favou?rable|unfavou?rable)\s+$/i, PRG_OS_CUE=/surviv|\bPFS\b|\bDFS\b|hazard|\bHR\s*[=:,(]?\s*\d|months|Kaplan|prognos|median/i;
+const CELL_SURV=/\b(?:cell|cellular|clonogenic|tumou?r[- ]cell|neuronal)\s+$/i;
+let PRGS=false;
+function prgHits(t){t=t||'';
+ const h=reHits(PRG_RE,t).filter(([a,b])=>{const w=t.slice(a,b);
+   // "increased survival" / "reduced survival rate" of cells: drop when "cell(s)" sits right before
+   return !(/surviv/i.test(w)&&!/free|overall|specific|patient|median|year/i.test(w)&&(CELL_SURV.test(t.slice(Math.max(0,a-20),a))||/^\s+of\s+(?:\w+\s+){0,2}cells?\b/i.test(t.slice(b,b+40))));});
+ const cue=PRG_OS_CUE.test(t);
+ return h.concat(reHits(PRG_ABBR,t),reHits(PRG_OS,t).filter(([a])=>cue||PRG_OS_PRE.test(t.slice(Math.max(0,a-15),a))));}
+function prgMatcher(){return {test:t=>prgHits(t).length>0,hits:prgHits};}
+// Clinical evidence: patients in a study or on a treatment -- clinical trial(s), a trial phase
+// (phase I / II / III, 1-3, Ib, I/II; only beside trial / study / clinical / randomised wording,
+// so a cell-cycle "G2/M phase" or "S phase" does not count), randomised / prospective /
+// retrospective studies, NCT numbers, response rates (ORR, objective / overall response rate,
+// complete / partial response), and patients treated with / receiving / given a drug.
+const CLN_RE=new RegExp([
+ String.raw`\bclinical\s+(?:trials?|studies|study|testing|evaluation|responses?|benefit|efficacy|activity|data|setting|practice|use)\b`,
+ String.raw`\b(?:randomi[sz]ed|open[- ]label|pivotal|multicent(?:er|re)|single[- ]arm|first[- ]in[- ]human|dose[- ]escalation)\b`,
+ String.raw`\b(?:prospective|retrospective)\s+(?:\w+\s+)?(?:study|studies|analys[ie]s|cohorts?|trials?|series|review)\b`,
+ String.raw`\bphase\s*(?:I{1,3}|[1-3])(?:[ab]|\s*\/\s*(?:I{1,3}|[1-3])[ab]?)?\s+(?:(?:\w+[- ])?\w+\s+)?(?:trials?|stud(?:y|ies)|clinical|testing|cohorts?|portion|part|expansion|dose)`,
+ String.raw`\b(?:objective|overall)\s+response\s+rates?\b|\b(?:complete|partial)\s+(?:responses?|remissions?)\b|\bORR\b|\bNCT\d{6,}`,
+ String.raw`\bpatients?\s+(?:\w+\s+){0,2}(?:treated|receiving|received|given|enrolled|randomi[sz]ed)\b`].join('|'),'gi');
+let CLNS=false;
+function clnHits(t){return reHits(CLN_RE,t||'');}
+function clnMatcher(){return {test:t=>clnHits(t).length>0,hits:clnHits};}
+// In vivo: in vivo, xenografts (PDX, patient-derived / cell-line-derived xenografts), allografts,
+// orthotopic / syngeneic / transgenic / knock-in / nude / tumour-bearing models, mice and rats
+// (plural: the animals in an experiment), mouse / murine / animal models, zebrafish models.
+// Not counted: "mouse" as a source of cells or reagents (mouse embryonic fibroblasts, mouse
+// anti-), and patient-derived organoids or cells, which are in vitro.
+const VIV_RE=new RegExp([
+ String.raw`\bin[- ]vivo(?![a-z])`,   // also "in vivo32", a citation glued on
+ String.raw`\b(?:mouse|murine)\s+survival\b`,
+ String.raw`\b(?:xeno|allo)[- ]?grafts?\w*|\bPDXs?\d*\b|\bCDXs?\d*\b|\bGEMMs?\b`,
+ String.raw`\b(?:orthotopic|syngeneic|subcutaneous|intracranial)\s+(?:\w+\s+)?(?:models?|tumou?rs?|implantation|injection|xenografts?|mice)\b`,
+ String.raw`\b(?:mice|rats|animals)\b`,
+ String.raw`\b(?:mouse|murine|animal|rat|zebrafish|rodent)\s+(?:[\w-]+\s+){0,2}(?:models?|xenografts?|experiments?|studies)\b`,
+ // tissue or tumours taken from the animal -- not "mouse cells" / "mouse cell lines", which are in vitro
+ String.raw`\b(?:mouse|murine)\s+(?:[\w-]+\s+)?(?:tumou?rs?|lungs?|livers?|pancreas|tissues?|lymphomas|melanomas|carcinomas|HCCs?|PCa)\b(?!\s+cells?)`,
+ String.raw`\btumou?r[- ]bearing\b|\bknock[- ]?in\s+mice\b|\btransgenic\s+(?:mice|mouse|animals?|models?)\b`].join('|'),'gi');
+let VIVS=false;
+function vivHits(t){return reHits(VIV_RE,t||'');}
+function vivMatcher(){return {test:t=>vivHits(t).length>0,hits:vivHits};}
+// ---- "Enrich for gene role and biology": a fourth box, OR inside, AND with the other boxes.
+// Oncogene: the gene's role as an oncogene -- oncogene(s), proto-oncogene, oncogenicity, and
+// "oncogenic" naming a role or a gene (oncogenic role / function / driver / activity / effects /
+// potential / properties, oncogenic KRAS, oncogenic K-Ras). Not counted: "oncogenic" for a process
+// rather than a gene's role -- oncogenic signalling / pathways / stress / mutations / signatures.
+const ONC_WORD=/\b(?:proto-?)?oncogen(?:e|es|icity)(?![a-z])|\boncogenic\s+(?:roles?|functions?|drivers?|activit(?:y|ies)|effects?|potential|propert(?:y|ies)|capacity|capabilit\w*|dependenc\w*|genes?|proteins?|kinases?|fusions?|isoforms?|variants?|forms?|characteristics|phenotypes?)\b/gi;
+const ONC_GENE=/\boncogenic\s+(?:[A-Z][A-Za-z0-9]*[A-Z0-9]|[A-Z]-?Ras|Ras|p110\S?)(?![A-Za-z])/g;   // case-sensitive: a gene name
+let ONCS=false;
+function oncHits(t){t=t||'';return reHits(ONC_WORD,t).concat(reHits(ONC_GENE,t));}
+function oncMatcher(){return {test:t=>oncHits(t).length>0,hits:oncHits};}
+// Tumour suppressor: tumour / tumor suppressor(s), tumour-suppressive role / function / effects,
+// tumour suppressor gene, TSG(s), anti-oncogene. "Tumour suppression" by a treatment ("led to
+// tumour suppression in vivo") is an outcome, not a gene's role, and does not count.
+const TSG_RE=/\btumou?r[- ]suppress(?:or|ors|ive|ing)(?![a-z])|\btumou?r[- ]suppression\s+(?:activit\w*|functions?|roles?)\b|\b(?:roles?|functions?)\s+(?:of\s+[\w-]+\s+)?in\s+tumou?r[- ]suppression\b|\banti-?oncogenes?\b/gi;
+const TSG_ABBR=/\bTSGs?\b/g;
+let TSGS=false;
+function tsgHits(t){t=t||'';return reHits(TSG_RE,t).concat(reHits(TSG_ABBR,t));}
+function tsgMatcher(){return {test:t=>tsgHits(t).length>0,hits:tsgHits};}
+// Immune: immune (immune checkpoint, immune evasion, immune cells), immunity, immunotherapy,
+// immunosuppressive, immunogenic(ity), immunomodulatory, immunocompetent, immunosurveillance;
+// checkpoint inhibitors / blockade; macrophages, dendritic cells, MDSCs, neoantigens, interferon
+// gamma; and, case-sensitive, PD-1 / PD-L1 / PD-L2 / CTLA-4 / LAG-3 / TIM-3 / TIGIT, ICI / ICB,
+// CAR-T, TILs, TAMs, Tregs, T / NK cells, CD8+ / CD4+, IFN-g. Not counted: the lab methods named
+// immuno- (immunoblot, immunohistochemistry, immunofluorescence, immunoprecipitation,
+// immunostaining, immunoreactivity, immunoglobulin) -- the word list simply leaves them out --
+// cell-cycle and DNA-damage checkpoints (G2/M checkpoint, checkpoint kinase), T- / NK-cell
+// lymphomas and leukaemias (diseases), and a singular "TAM" (also tamoxifen).
+const IMM_WORD=/\bimmun(?:e|ity|ities|otherap\w*|osuppress\w*|ogenic\w*|omodulat\w*|ocompetent|odeficient|ological|oinhibitory|oediting|oevasion|o-?oncology|ochemotherapy|osurveillance)(?![a-z])|\bcheckpoint\s+(?:inhibit\w*|blockade|therap\w*|immunotherap\w*)|\bmacrophages?\b|\bneoantigens?\b|\bdendritic[- ]cells?\b|\bmyeloid[- ]derived\s+suppressor\s+cells?\b|\binterferon[- ]gamma\b/gi;
+const IMM_ABBR=/\bPD-?L?[12](?![0-9])|\bCTLA-?4\b|\bLAG-?3\b|\bTIM-?3\b|\bTIGIT\b|\bIC[IB]s?\b|\bCAR[- ]?T\b|\bTILs?\b|\bTAMs\b|\bTregs?\b|\b(?:T|NK)[- ]cells?\b(?![- ](?:lymphoma|leuka?emia|neoplasm))|\bCD[48]\+|\bIFN-?(?:γ|g\b|gamma\b)/g;
+let IMMS=false;
+function immHits(t){t=t||'';return reHits(IMM_WORD,t).concat(reHits(IMM_ABBR,t));}
+function immMatcher(){return {test:t=>immHits(t).length>0,hits:immHits};}
+// Metastasis / EMT: metasta* (metastasis, metastases, metastatic, metastasize), EMT and
+// epithelial(-to)-mesenchymal transition. Note "metastatic" also marks a disease stage
+// (metastatic NSCLC patients); those sentences count too.
+// EMT markers count too (mesenchymal markers / phenotype / properties, epithelial markers); the
+// mesenchymal GBM subtype does not
+const MTS_RE=/\bmetasta\w*|\bepithelial[- ](?:to[- ])?mesenchymal\w*|\bmesenchymal[- ]transition\b|\b(?:mesenchymal|epithelial)\s+(?:markers?|phenotypes?|propert(?:y|ies)|profiles?|features|states?|traits?|characteristics)\b/gi, EMT_RE=/\bEMT\b/g;
+let MTSS=false;
+function mtsHits(t){t=t||'';return reHits(MTS_RE,t).concat(reHits(EMT_RE,t));}
+function mtsMatcher(){return {test:t=>mtsHits(t).length>0,hits:mtsHits};}
+// the stats line: each box's switched-on buttons joined by 'or', the boxes by 'and'
+function enrichLabel(){const alt=[DRIVERS&&'drivers',FUSIONS&&'fusions',ITDS&&'ITD',OEXS&&'overexpression',AMPS&&'amplification',DELS&&'deletion / loss',TRUS&&'truncation',EXOS&&'exon variants',CNS&&'copy number',METS&&'methylation'].filter(Boolean).join(' or '),
+  ther=[RESS&&'resistance',ACQS&&'acquired resistance',SLS&&'synthetic lethality',BMKS&&'biomarker'].filter(Boolean).join(' or '),
+  clin=[PRGS&&'prognosis',CLNS&&'clinical evidence',VIVS&&'in vivo'].filter(Boolean).join(' or '),
+  bio=[ONCS&&'oncogene',TSGS&&'tumor suppressor',IMMS&&'immune',MTSS&&'metastasis / EMT'].filter(Boolean).join(' or ');
+ const g=[alt,ther,clin,bio].filter(Boolean);
+ return g.length>1?g.map(x=>'('+x+')').join(' and '):g.join('');}
 function andMatchers(a,b){if(!a||!b)return a||b;return {test:t=>a.test(t)&&b.test(t),hits:t=>[...a.hits(t),...b.hits(t)]};}
 // the two Enrich buttons widen each other: a sentence naming a mutation OR a fusion counts
 function orMatchers(a,b){if(!a||!b)return a||b;return {test:t=>a.test(t)||b.test(t),hits:t=>[...a.hits(t),...b.hits(t)]};}
@@ -1546,17 +1737,19 @@ function focusKeep(edges,seeds,hops){
 }
 function build(thr){
  const conf=activeConf(), cats=activeCats(); VIEW_CATS=cats; const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
- const txt=activeText(), tm=andMatchers(textMatcher(txt),orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(DRIVERS?driverMatcher():null,FUSIONS?fusionMatcher():null),ITDS?itdMatcher():null),OEXS?oexMatcher():null),AMPS?ampMatcher():null),DELS?delMatcher():null),TRUS?truMatcher():null),EXOS?exoMatcher():null),CNS?cnMatcher():null),METS?metMatcher():null)); TM=tm;
+ const txt=activeText(), tx=textMatcher(txt), lens=andMatchers(andMatchers(andMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(orMatchers(DRIVERS?driverMatcher():null,FUSIONS?fusionMatcher():null),ITDS?itdMatcher():null),OEXS?oexMatcher():null),AMPS?ampMatcher():null),DELS?delMatcher():null),TRUS?truMatcher():null),EXOS?exoMatcher():null),CNS?cnMatcher():null),METS?metMatcher():null),
+   orMatchers(orMatchers(orMatchers(RESS?resMatcher():null,ACQS?acqMatcher():null),SLS?slMatcher():null),BMKS?bmkMatcher():null)),
+   orMatchers(orMatchers(PRGS?prgMatcher():null,CLNS?clnMatcher():null),VIVS?vivMatcher():null)),
+   orMatchers(orMatchers(orMatchers(ONCS?oncMatcher():null,TSGS?tsgMatcher():null),IMMS?immMatcher():null),MTSS?mtsMatcher():null)), tm=andMatchers(tx,lens); TM=tm;
  const kinds=activeKinds();
  let edges=[];
  // An edge's support is what survives the score, year, relation and source settings, and the
- // thresholds below judge that first. The text box / driver lens comes further down and the
- // support thresholds are judged AGAIN on the sentences it leaves, so "min 2 sentences" holds
- // for what is drawn: with the lens text-blind, an edge with 4 sentences of which 1 named a
- // mutation was drawn showing that one sentence under a floor of 2. The price is deliberate:
- // a query asks for matching evidence, so an edge with too little of it goes, and a narrow query
- // at a high floor can leave little or nothing (the min-connections / min-cluster pruning after
- // it then judges what is left).
+ // thresholds below judge that first. The Enrich lenses come further down and the support
+ // thresholds are judged AGAIN on the sentences they leave, so "min 2 sentences" holds for the
+ // lens evidence drawn: with the lens threshold-blind, an edge with 4 sentences of which 1 named
+ // a mutation was drawn showing that one sentence under a floor of 2. The text box is exempt --
+ // it is a search for edges that mention something, judged on the edge's own support (see the
+ // lens step below); the min-connections / min-cluster pruning after it judges what is left.
  // Some node types have no relations OF THEIR OWN: the RE routing pairs a disease with a gene
  // or a chemical, never with another disease, so ticking disease alone can never draw an edge.
  // Such a view is left empty and the stats line says why. (It once fell back to drawing those
@@ -1585,56 +1778,76 @@ function build(thr){
    edges=focusKeep(edges,focusSeeds,focusHops);
    focusLabel=labs.join(', ');
  }
- // the lens: keep the edges that still say the word in at least `thr` sentences from at least
- // `mp` publications, and show those sentences only
- if(tm)edges=edges.filter(o=>{const v=o.sup.filter(s=>tm.test(s.text));if(!v.length||v.length<thr)return false;if(mp>1&&new Set(v.map(s=>s.pmid)).size<mp)return false;o.vis=v;o.w=v.length;o.np=new Set(v.map(s=>s.pmid)).size;o.cat=viewCat(o.e,v);return true;});
- // and re-cut the neighbourhood on what the lens left, so a focus view never shows the seed's
- // neighbours to each other with the seed itself missing
- if(tm&&focusActive)edges=focusKeep(edges,focusSeeds,focusHops);
- // Structure comes LAST, on the edges that are actually drawn: min-connections peels the
- // single-link fringe, then min-cluster drops the small components -- so "min cluster size 6"
- // is a statement about the picture, not about some graph behind it. (It once ran before the
- // lens, and typing a word then shattered a 6-node floor into pairs and triples.)
- // Skipped under gene/chem focus, where you asked for a neighborhood and want all of it.
- if(!focusActive){
-   // degree floor, peeled until it holds (the md-core): drop the edges of every node with fewer
-   // than md links, re-count, repeat. A single pass let a removed node still vote -- a gene with
-   // one gene partner and one chemical whose only link it was counted 2, kept its gene edge, and
-   // ticking "chemical" changed the gene count with not one chemical drawn.
-   if(md>1){
-     for(;;){
-       const deg={};edges.forEach(o=>{deg[o.e.from]=(deg[o.e.from]||0)+1;deg[o.e.to]=(deg[o.e.to]||0)+1;});
-       const next=edges.filter(o=>deg[o.e.from]>=md&&deg[o.e.to]>=md);
-       if(next.length===edges.length)break;
-       edges=next;
-     }
-   }
-   const adj={};
-   edges.forEach(o=>{(adj[o.e.from]=adj[o.e.from]||[]).push(o.e.to);(adj[o.e.to]=adj[o.e.to]||[]).push(o.e.from);});
-   const comp={};let cid=0;
-   for(const n in adj){if(comp[n]!==undefined)continue;const sk=[n];comp[n]=cid;while(sk.length){const x=sk.pop();(adj[x]||[]).forEach(y=>{if(comp[y]===undefined){comp[y]=cid;sk.push(y);}});}cid++;}
-   const csz={};for(const n in comp)csz[comp[n]]=(csz[comp[n]]||0)+1;
-   edges=edges.filter(o=>csz[comp[o.e.from]]>=mc);
+ // the lens: keep the edges with at least one sentence matching the text box and the Enrich
+ // buttons, and show those sentences only. The support thresholds are judged again only for the
+ // Enrich buttons -- at least `thr` lens sentences from at least `mp` publications. The text box
+ // is a search, not a lens on the evidence: an edge that passes the thresholds on its own support
+ // and has one sentence with the word is found (CTNNB1-SNAI1, five sentences, one naming OXCT1,
+ // vanished under "OXCT1" at min 2 sentences when the text match was counted against the floor).
+ // The late steps -- lens / text, focus re-cut, structure, disease keep-list -- as one function,
+ // so they can run twice: "Only their direct neighbours" needs the picture WITHOUT the text box
+ // to decide who the neighbours are (see below). `m` is the matcher in force; `menu` rebuilds the
+ // Keep diseases list (only the real pass does).
+ function shape(es,m,menu){
+  if(m)es=es.filter(o=>{const v=o.sup.filter(s=>m.test(s.text));if(!v.length)return false;
+    if(lens){const L=o.sup.filter(s=>lens.test(s.text));if(L.length<thr)return false;if(mp>1&&new Set(L.map(s=>s.pmid)).size<mp)return false;}
+    o.vis=v;o.w=v.length;o.np=new Set(v.map(s=>s.pmid)).size;o.cat=viewCat(o.e,v);return true;});
+  // and re-cut the neighbourhood on what the lens left, so a focus view never shows the seed's
+  // neighbours to each other with the seed itself missing
+  if(m&&focusActive)es=focusKeep(es,focusSeeds,focusHops);
+  // Structure comes LAST, on the edges that are actually drawn: min-connections peels the
+  // single-link fringe, then min-cluster drops the small components -- so "min cluster size 6"
+  // is a statement about the picture, not about some graph behind it. (It once ran before the
+  // lens, and typing a word then shattered a 6-node floor into pairs and triples.)
+  // Skipped under gene/chem focus, where you asked for a neighborhood and want all of it.
+  if(!focusActive){
+    // degree floor, peeled until it holds (the md-core): drop the edges of every node with fewer
+    // than md links, re-count, repeat. A single pass let a removed node still vote -- a gene with
+    // one gene partner and one chemical whose only link it was counted 2, kept its gene edge, and
+    // ticking "chemical" changed the gene count with not one chemical drawn.
+    if(md>1){
+      for(;;){
+        const deg={};es.forEach(o=>{deg[o.e.from]=(deg[o.e.from]||0)+1;deg[o.e.to]=(deg[o.e.to]||0)+1;});
+        const next=es.filter(o=>deg[o.e.from]>=md&&deg[o.e.to]>=md);
+        if(next.length===es.length)break;
+        es=next;
+      }
+    }
+    const adj={};
+    es.forEach(o=>{(adj[o.e.from]=adj[o.e.from]||[]).push(o.e.to);(adj[o.e.to]=adj[o.e.to]||[]).push(o.e.from);});
+    const comp={};let cid=0;
+    for(const n in adj){if(comp[n]!==undefined)continue;const sk=[n];comp[n]=cid;while(sk.length){const x=sk.pop();(adj[x]||[]).forEach(y=>{if(comp[y]===undefined){comp[y]=cid;sk.push(y);}});}cid++;}
+    const csz={};for(const n in comp)csz[comp[n]]=(csz[comp[n]]||0)+1;
+    es=es.filter(o=>csz[comp[o.e.from]]>=mc);
+  }
+  // the disease keep-list, built from what the controls above left and applied after it, so the
+  // menu never filters itself out of existence (see buildDiseaseFilter)
+  if(menu)buildDiseaseFilter(es);
+  if(DIS_KEEP.size)es=es.filter(o=>disPass(o.e.from)&&disPass(o.e.to));
+  return es;
  }
- // the disease keep-list, built from what the controls above left and applied after it, so the
- // menu never filters itself out of existence (see buildDiseaseFilter)
- buildDiseaseFilter(edges);
- if(DIS_KEEP.size)edges=edges.filter(o=>disPass(o.e.from)&&disPass(o.e.to));
  // Direct neighbours, strictly: the ticked diseases, every node with a DRAWN edge to one of
- // them, and the drawn edges among that set. Judged on the final edges, so every gene or drug on
- // screen is one visible step from a kept disease under all settings -- relation boxes, text box,
- // driver lens, min sentences / publications / connections / cluster size. (It was once chosen
+ // them, and the drawn edges among that set -- under all settings: relation boxes, Enrich
+ // buttons, min sentences / publications / connections / cluster size. (It was once chosen
  // relation- and lens-blind, so a gene whose own disease link was hidden stayed on through its
  // links to other neighbours, two steps out; with "associated" unticked that was most of them.)
  // One step, not "connected to": the gene graph is one giant component through hubs like TP53,
  // so walking further reaches nearly everything whatever is ticked. The price: a disease whose
  // links are all hidden (say, only relations it never carries are ticked) stands alone.
+ // The text box is the one exception: it SEARCHES the neighbourhood, it does not redraw it. The
+ // neighbours are picked from the picture without the text, and the text then keeps the edges
+ // among them that match. (Judged after the text, typing OXCT1 under "skin" emptied the canvas:
+ // CTNNB1-SNAI1 says OXCT1, but CTNNB1's and SNAI1's own links to melanoma do not, so neither
+ // was a neighbour any more and their matching edge went with them.)
  const disConn=disConnOn;
+ let near=null;
  if(disConn){
-   const near=new Set(DIS_KEEP);
-   edges.forEach(o=>{if(DIS_KEEP.has(o.e.from))near.add(o.e.to);if(DIS_KEEP.has(o.e.to))near.add(o.e.from);});
+   const base=(tx?shape(edges.map(o=>Object.assign({},o)),lens,false):null);
+   edges=shape(edges,tm,true);
+   near=new Set(DIS_KEEP);
+   (base||edges).forEach(o=>{if(DIS_KEEP.has(o.e.from))near.add(o.e.to);if(DIS_KEEP.has(o.e.to))near.add(o.e.from);});
    edges=edges.filter(o=>near.has(o.e.from)&&near.has(o.e.to));
- }
+ } else edges=shape(edges,tm,true);
  // A kept disease the other settings left without a single link -- typically because only
  // relation types it never carries are ticked (diseases are linked by "associated", almost never
  // by "binds") -- used to vanish, and under "Only their direct neighbours" it took the whole
@@ -1661,7 +1874,7 @@ function build(thr){
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
  // name what is actually on screen: "378 diseases" beats "378 genes" in a disease-only view
  const KLAB={gene:'genes',disease:'diseases',chemical:'chemicals'};
- document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes').replace(/s$/,nodes.length===1?'':'s')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(DRIVERS||FUSIONS||ITDS||OEXS||AMPS||DELS||TRUS||EXOS||CNS||METS?' &middot; <b>enriched for '+[DRIVERS&&'drivers',FUSIONS&&'fusions',ITDS&&'ITD',OEXS&&'overexpression',AMPS&&'amplification',DELS&&'deletion / loss',TRUS&&'truncation',EXOS&&'exon variants',CNS&&'copy number',METS&&'methylation'].filter(Boolean).join(' or ')+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(kinds&&!kindOK?' &middot; <b>nothing relates '+(kinds.size===1?'a '+[...kinds][0]+' to another '+[...kinds][0]:'these node types to each other')+'</b> &mdash; '+(kinds.has('disease')&&kinds.size===1?'diseases link only to genes and chemicals, so tick one of them':'tick another node type'):'')
+ document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes').replace(/s$/,nodes.length===1?'':'s')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(enrichLabel()?' &middot; <b>enriched for '+enrichLabel()+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(kinds&&!kindOK?' &middot; <b>nothing relates '+(kinds.size===1?'a '+[...kinds][0]+' to another '+[...kinds][0]:'these node types to each other')+'</b> &mdash; '+(kinds.has('disease')&&kinds.size===1?'diseases link only to genes and chemicals, so tick one of them':'tick another node type'):'')
    +(cats.size?'':' &middot; <b>no relation type is ticked</b>')
    +(loneDis.length?' &middot; <b>'+loneDis.length+'</b> kept disease'+(loneDis.length>1?'s have':' has')+' no link under these settings, drawn on '+(loneDis.length>1?'their':'its')+' own'
      +(cats.has('associated')?'':' &mdash; diseases are linked by <b>associated</b>, so tick it to see '+(loneDis.length>1?'their':'its')+' genes and drugs'):'');
@@ -1771,6 +1984,17 @@ document.getElementById('genefilter').addEventListener('change',()=>build(+thr.v
 document.getElementById('genefilter').addEventListener('keydown',ev=>{if(ev.key==='Enter')build(+thr.value);});
 document.getElementById('hops').addEventListener('change',()=>build(+thr.value));
 document.getElementById('metbtn').addEventListener('click',ev=>{METS=!METS;ev.currentTarget.classList.toggle('on',METS);ev.currentTarget.setAttribute('aria-pressed',METS);build(+thr.value);});
+document.getElementById('resbtn').addEventListener('click',ev=>{RESS=!RESS;ev.currentTarget.classList.toggle('on',RESS);ev.currentTarget.setAttribute('aria-pressed',RESS);build(+thr.value);});
+document.getElementById('acqbtn').addEventListener('click',ev=>{ACQS=!ACQS;ev.currentTarget.classList.toggle('on',ACQS);ev.currentTarget.setAttribute('aria-pressed',ACQS);build(+thr.value);});
+document.getElementById('slbtn').addEventListener('click',ev=>{SLS=!SLS;ev.currentTarget.classList.toggle('on',SLS);ev.currentTarget.setAttribute('aria-pressed',SLS);build(+thr.value);});
+document.getElementById('bmkbtn').addEventListener('click',ev=>{BMKS=!BMKS;ev.currentTarget.classList.toggle('on',BMKS);ev.currentTarget.setAttribute('aria-pressed',BMKS);build(+thr.value);});
+document.getElementById('prgbtn').addEventListener('click',ev=>{PRGS=!PRGS;ev.currentTarget.classList.toggle('on',PRGS);ev.currentTarget.setAttribute('aria-pressed',PRGS);build(+thr.value);});
+document.getElementById('clnbtn').addEventListener('click',ev=>{CLNS=!CLNS;ev.currentTarget.classList.toggle('on',CLNS);ev.currentTarget.setAttribute('aria-pressed',CLNS);build(+thr.value);});
+document.getElementById('vivbtn').addEventListener('click',ev=>{VIVS=!VIVS;ev.currentTarget.classList.toggle('on',VIVS);ev.currentTarget.setAttribute('aria-pressed',VIVS);build(+thr.value);});
+document.getElementById('oncbtn').addEventListener('click',ev=>{ONCS=!ONCS;ev.currentTarget.classList.toggle('on',ONCS);ev.currentTarget.setAttribute('aria-pressed',ONCS);build(+thr.value);});
+document.getElementById('tsgbtn').addEventListener('click',ev=>{TSGS=!TSGS;ev.currentTarget.classList.toggle('on',TSGS);ev.currentTarget.setAttribute('aria-pressed',TSGS);build(+thr.value);});
+document.getElementById('immbtn').addEventListener('click',ev=>{IMMS=!IMMS;ev.currentTarget.classList.toggle('on',IMMS);ev.currentTarget.setAttribute('aria-pressed',IMMS);build(+thr.value);});
+document.getElementById('mtsbtn').addEventListener('click',ev=>{MTSS=!MTSS;ev.currentTarget.classList.toggle('on',MTSS);ev.currentTarget.setAttribute('aria-pressed',MTSS);build(+thr.value);});
 document.getElementById('cnbtn').addEventListener('click',ev=>{CNS=!CNS;ev.currentTarget.classList.toggle('on',CNS);ev.currentTarget.setAttribute('aria-pressed',CNS);build(+thr.value);});
 document.getElementById('exobtn').addEventListener('click',ev=>{EXOS=!EXOS;ev.currentTarget.classList.toggle('on',EXOS);ev.currentTarget.setAttribute('aria-pressed',EXOS);build(+thr.value);});
 document.getElementById('trubtn').addEventListener('click',ev=>{TRUS=!TRUS;ev.currentTarget.classList.toggle('on',TRUS);ev.currentTarget.setAttribute('aria-pressed',TRUS);build(+thr.value);});
@@ -1848,11 +2072,16 @@ function fitLeftPanel(){
    p.style.cssText='position:absolute;visibility:hidden;white-space:nowrap;display:inline-block;box-sizing:content-box';
    p.innerHTML='<input type=checkbox> non-small cell lung carcinoma <span class=cnt>(9999)</span>';
    df.appendChild(p);dw=Math.ceil(p.getBoundingClientRect().width)+18;df.removeChild(p);}
- const w=Math.max(Math.ceil(last.right-first.left),eg?Math.ceil(eg.offsetWidth):0,dw);   // offsetWidth: the box's padding and border included
- if(Math.abs(last.top-first.top)<2&&w>=FIT_MIN&&w<=FIT_MAX){LP_W=w+3;lp.style.width=LP_W+'px';}   // +3px of breathing room
+ const gw=[...document.querySelectorAll('.egrid')].reduce((m,g)=>Math.max(m,Math.ceil(g.offsetWidth)),0);   // every Enrich box
+ const w=Math.max(Math.ceil(last.right-first.left),gw,dw);   // offsetWidth: the box's padding and border included
+ if(Math.abs(last.top-first.top)<2&&w>=FIT_MIN&&w<=FIT_MAX){lp.style.width=w+'px';
+   // the reserved scrollbar gutter comes out of the width set here, so add it back: without it
+   // the content area is narrower than measured and the Enrich grids' notes spill out of their box
+   const cs=getComputedStyle(lp), inner=lp.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
+   LP_W=w+3+Math.max(0,Math.ceil(w-inner));lp.style.width=LP_W+'px';}   // +3px of breathing room
  else {lp.style.width=prevW;lp.style.maxWidth=prevM;}
 }
-document.querySelectorAll('#enrichgrid button').forEach(b=>{b.dataset.t=b.textContent;});
+document.querySelectorAll('.egrid button').forEach(b=>{b.dataset.t=b.textContent;});
 fitLeftPanel();
 window.addEventListener('resize',()=>{fitLeftPanel();if(network)network.redraw();});
 document.querySelectorAll('.kindf').forEach(c=>c.addEventListener('change',()=>build(+thr.value)));

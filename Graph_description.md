@@ -64,8 +64,35 @@ named without a variant, fusion breakpoints such as *Ex14-16*, the drug *EX527* 
 *SCNA* / *CN gain*, chromosome-arm and whole-chromosome gains and losses such as *1q gain* or
 *loss of chromosome 10*, and *copy-neutral* LOH; not mtDNA, plasmid or viral copy number); an **Enrich for methylation** toggle (promoter / DNA / CpG
 (hyper/hypo)methylation, methylomes, CpG islands, epigenetic silencing, and a bare *methylation*
-only in a sentence that speaks of DNA; never RNA (*m6A*), histone or protein methylation); the Enrich toggles are ORed
-(a sentence matching any of those on counts) and ANDed with the text match; zoom/fit (filters keep each node where it was and keep the camera unless something new
+only in a sentence that speaks of DNA; never RNA (*m6A*), histone or protein methylation) -- these
+sit boxed under **Enrich for alteration:**; a second box, **Enrich for therapy:**, holds
+**Resistance** (*resist\**, *chemo-* / *radioresistance*, *refractory*; not apoptosis, anoikis,
+ferroptosis, oxidative-stress or insulin resistance, nor antibiotic selection, unless the sentence
+also names a treatment), **Acquired resistance** (acquired / secondary / intrinsic / primary /
+adaptive / de novo resistance, development or mechanisms of resistance, resistance mutations,
+gatekeeper mutations, bypass signalling beside an inhibitor), **Synthetic lethality** (*synthetic(ally)
+lethal*, *synthetic sick*, *collateral* / *selectively lethal*, *SL interaction / pair*, *MYC-SL*) and
+**Biomarker** (*biomarker*, *predictive marker*, *companion diagnostic*, a feature that *predicts
+response / sensitivity / benefit*; prognostic biomarkers included); a third box, **Enrich for
+clinical relevance:**, holds **Clinical evidence** (clinical trials, a trial phase beside trial or
+study wording, randomised / open-label / prospective / retrospective studies, NCT numbers, response
+rates, *patients treated with / receiving*; plain *patients* is not enough), **Prognosis**
+(*prognos\**, named survival endpoints and PFS / DFS / RFS / EFS, poor / shorter / median survival or
+outcome, hazard ratios, Kaplan-Meier; *OS* only beside a survival cue and *HR* only as a number; cell
+survival excluded) and **In vivo** (*in vivo*, xenografts / PDX / allografts, orthotopic or syngeneic
+models, mice, rats, animals, mouse / murine models and tumours; not mouse cells, fibroblasts or
+reagents); a fourth box, **Enrich for gene role and biology:**, holds **Tumor suppressor**
+(*tumor / tumour suppressor(s)*, *tumor-suppressive*, *TSG*, *anti-oncogene*; not plain *tumor
+suppression*, usually a treatment's result), **Oncogene** (*oncogene(s)*, *proto-oncogene*,
+*oncogenicity*, and *oncogenic* naming a role or a gene -- *oncogenic role / driver*, *oncogenic
+KRAS* -- but not *oncogenic signalling / pathways / mutations*), **Metastasis / EMT** (*metasta\**,
+*EMT*, epithelial-mesenchymal transition and EMT markers; not the mesenchymal GBM subtype) and
+**Immune** (*immune*, *immunity*, *immunotherapy*, checkpoint inhibitors, PD-1 / PD-L1 / CTLA-4 and
+the other checkpoints, T / NK cells, CD8+, TILs, macrophages / TAMs, MDSCs, Tregs; not the lab
+methods named *immuno-* such as immunoblot or immunohistochemistry, cell-cycle checkpoints, T-cell
+lymphomas or a singular *TAM*, which is also tamoxifen). Within a box the toggles are ORed (a sentence matching any of those on counts); the boxes
+are ANDed with each other (*Drivers* + *Resistance* keeps sentences such as *T790M confers resistance
+to gefitinib*), and with the text match; zoom/fit (filters keep each node where it was and keep the camera unless something new
 falls outside it, and Fit never zooms closer than 100%, so a small view is not blown up); *Significance in view*; and the details box,
 headed *Sentences of interest*, which lists an edge's sentences with linked PMIDs when you click
 it. Each section's explanation is behind a small round **i** beside its heading.
@@ -248,11 +275,13 @@ The order is deliberate, and it is what keeps the panel honest:
 
 - **Support** — an edge's evidence is what survives score, year, relation type and training set.
   `Min unique sentences` and `Min unique publications` judge *that*.
-- **The text query and the driver lens are applied late, and the thresholds hold for them.**
-  They keep the edges with a matching sentence and show only those sentences, and `Min unique
-  sentences` / `Min unique publications` are judged again on the matching sentences alone, so
-  every edge drawn shows at least the minimum. Typing can only remove edges from the view you
-  had, and a narrow query at a high floor can remove most of them.
+- **The text query and the Enrich buttons are applied late.** They keep the edges with a
+  matching sentence and show only those sentences. For the **Enrich buttons** `Min unique
+  sentences` / `Min unique publications` are judged again on the lens-matching sentences alone,
+  so every edge drawn shows at least the minimum of that kind of evidence. The **text query** is
+  a search, not a lens: an edge that passes the thresholds on its own support is found if any one
+  of its sentences contains the text (CTNNB1–SNAI1, five sentences with one naming OXCT1, is found
+  by *OXCT1* at min 2 sentences). Typing can only remove edges from the view you had.
 - **Structure comes last** — `Min connections` and `Min cluster size` describe the picture, so
   they run on what is actually drawn. `Min connections` is peeled until it holds, so every node
   left has at least that many links on screen, and a node that is not drawn (say, a chemical
@@ -280,9 +309,13 @@ The order is deliberate, and it is what keeps the panel honest:
   disease under *Keep diseases* switches *Only their direct neighbours* on; unticking it is then
   respected until the keep-list is emptied. The option keeps
   the kept diseases, every node with a *drawn* edge to one of them, and the drawn edges among
-  those. It is judged after every other setting (relation boxes, text box, driver lens, min
+  those. It is judged after every other setting (relation boxes, Enrich buttons, min
   sentences / publications / connections / cluster size), so a gene whose own disease link is
-  hidden is not shown, however it connects to the neighbours that are. The cost: with
+  hidden is not shown, however it connects to the neighbours that are. The **text box** is the
+  exception: it *searches* the neighbourhood rather than redrawing it. The neighbours are chosen
+  from the view without the text, and the text then keeps the edges among them that match —
+  otherwise typing *OXCT1* under *skin* emptied the canvas, because CTNNB1–SNAI1 names OXCT1
+  but CTNNB1's and SNAI1's own links to melanoma do not. The cost: with
   `associated` unticked, gene-disease links are mostly gone, so the view shrinks to a few drugs
   (linked by `inhibits`) or to the kept diseases drawn on their own.
 
