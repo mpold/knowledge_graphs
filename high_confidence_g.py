@@ -873,7 +873,7 @@ __LIBTAG__
  <div class="row" id="disrow">Keep diseases: <button class="ihelp" aria-label="About the disease keep-list" aria-expanded="false">i</button>
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span><br>
   <div class="legend" id="disfilters"></div>
-  <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> Only their direct neighbours</label>
+  <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> <b style="color:#1c2330">Only their direct neighbours</b></label>
   <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Genes and drugs are untouched &mdash; this filters one node type, not the picture. Diseases of the same tissue (read from the name, as for <em>Stack same-tissue diseases</em>) are listed together under a bold tissue heading whose box ticks or unticks them all &mdash; half-ticked when only some are kept; the number beside it is how many diseases it holds and their edges in all. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> switches on by itself when you tick the first disease (untick it to see the whole graph with only those diseases), and goes further: it keeps just the ticked diseases, the genes and drugs with a <em>drawn</em> edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Every other setting counts: a gene whose own link to the disease is hidden (its relation unticked, an Enrich button, min sentences, min connections, cluster size) is not a neighbour, however it connects to the ones that are. The <b>Match text</b> box is the exception: it searches the neighbourhood without redrawing it &mdash; the neighbours are chosen as if the box were empty, and the text then keeps the edges among them that match. Genes are linked to diseases almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood shrinks to a few drugs, or to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
  <div class="row" id="enrichhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for alteration:</b></div>
  <div id="enrichgrid" class="egrid">
@@ -1037,13 +1037,33 @@ function applyLayoutShape(){
  if(activeTissueStack()&&TGROUPS.length)stackTissues(network,TGROUPS);
  network.redraw();
 }
-// Labels fade in as you zoom: small graphs always show every symbol; dense views reveal labels as the
+// Labels once faded in as you zoom: small graphs always showed every symbol; dense views revealed labels as the
 // zoom scale climbs from LABEL_LO to LABEL_HI. Opacity is driven through the shared node-font colour, so
 // one setOptions call recolours all labels (per-node font carries only size, inheriting this colour).
 const LABEL_SMALL=60, LABEL_LO=0.05, LABEL_HI=0.25;
 let LABEL_N=0, LABEL_A=-1;
-function labelOpacity(sc){ if(LABEL_N<=LABEL_SMALL)return 1; return Math.max(0,Math.min(1,(sc-LABEL_LO)/(LABEL_HI-LABEL_LO))); }
-function updateLabels(){ if(!network)return; const a=Math.round(labelOpacity(network.getScale())*20)/20; if(a===LABEL_A)return; LABEL_A=a; network.setOptions({nodes:{font:{color:'rgba(26,26,26,'+a+')'}}}); }
+// ...no longer: a label is never faded out. Zoomed out on a dense view the fade took labels to
+// opacity 0 and left bare dots, so every label is now drawn opaque at every zoom.
+function labelOpacity(sc){ return 1; }
+// Labels are never smaller than LABEL_MIN_PX on SCREEN. Font sizes live in canvas units and the
+// zoom scales them, so an 8px label at 10% zoom was under 1px -- and vis-network stops drawing a
+// label below 5px. The floor is therefore re-applied for the current zoom: a label's canvas size
+// is max(its own size, LABEL_MIN_PX / zoom). ZSCALE is the zoom the fonts were last sized for.
+const LABEL_MIN_PX=8;
+let ZSCALE=1, zoomTimer=null;
+// The floor moves with the Font size slider: 8px at its 10% minimum, 12px at the default 50%,
+// 17px at 100%. A fixed 8px floor swallowed the slider wherever labels were already near it
+// (a small "proteasome" view: 13 -> 12 canvas px from 50% down to 10%, so it looked dead);
+// now every step of the slider changes every label, and none is ever under 8px.
+function labelFloorPx(){return LABEL_MIN_PX+5*Math.max(0,FSCALE-0.2);}
+function zoomFloor(){return Math.ceil(labelFloorPx()/Math.max(ZSCALE,1e-3));}
+function refloorLabels(){ if(!network||!NODEDS)return; const sc=network.getScale(); if(!(sc>0))return;
+ const before=zoomFloor(); ZSCALE=sc; if(zoomFloor()===before)return;
+ NODEDS.update(NODEDS.get().map(n=>({id:n.id,font:nodeFont(KIND[n.id]||'gene',n._fs||13)})));}
+function updateLabels(){ if(!network)return;
+ if(LABEL_A!==1){LABEL_A=1;network.setOptions({nodes:{font:{color:'rgba(26,26,26,1)'}}});}
+ // re-size after the wheel settles: one DataSet update per gesture, not one per wheel tick
+ clearTimeout(zoomTimer);zoomTimer=setTimeout(refloorLabels,120);}
 const labelById={};DATA.nodes.forEach(n=>{labelById[n.id]=n.label;});
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function pmA(p){return '<a class=pm target=_blank rel=noopener href="https://www.ncbi.nlm.nih.gov/pmc/articles/'+p+'/">'+p+'</a>';}
@@ -1711,7 +1731,7 @@ function labelFor(id,kind,text){
  return (kind==='chemical')?'<i>'+esc(t)+'</i>':t;
 }
 function nodeFont(kind,base){
- const f={size:scaledFont(base)};
+ const f={size:Math.max(scaledFont(base),zoomFloor())};   // never under 8px on screen (see refloorLabels)
  if(kind==='disease')f.face=NARROW_FACE;
  if(kind==='chemical'){f.face=NARROW_FACE;f.multi='html';f.ital={face:NARROW_FACE,mod:'italic'};}
  return f;
@@ -1890,7 +1910,7 @@ function build(thr){
  const view=network?{position:network.getViewPosition(),scale:network.getScale()}:null;
  const data={nodes:new vis.DataSet(nodes),edges:new vis.DataSet(eds)};
  NODEDS=data.nodes;
- const options={layout:{improvedLayout:false},physics:{enabled:nNew>0,stabilization:{iterations:known.length?120:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
+ const options={layout:{improvedLayout:false},physics:{enabled:nNew>0,stabilization:{iterations:known.length?120:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.02,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60,label:{enabled:false,drawThreshold:1}},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
  network=new vis.Network(net,data,options);
  LABEL_N=nodes.length; LABEL_A=-1;

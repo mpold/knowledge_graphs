@@ -346,7 +346,11 @@ The order is deliberate, and it is what keeps the panel honest:
   not say its tissue is not grouped.
 - **Counts sum past the edge total** for relation types and training sets, since an edge with
   mixed evidence counts under each.
-- On dense graphs **labels fade in as you zoom** (above 60 nodes), so names appear as you move in.
+- **Labels are never smaller than 8 px on screen and never faded.** The size floor follows the
+  zoom: zoomed out, labels are drawn larger in graph units so they still read at 8 px (dense views
+  get busy, but no node is left as a bare dot). The floor rises with the *Font size* slider — 8 px at
+  10%, 12 px at the default 50%, 17 px at 100% — so the slider changes every label in every view,
+  including small or zoomed-out ones where all labels sit on the floor.
 
 ## Regenerating
 
