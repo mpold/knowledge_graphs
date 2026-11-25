@@ -55,11 +55,11 @@ and a comparison step produces the evidence for deciding whether that upgrade is
 The chain grows from <strong>16 to 18 steps</strong>; everything the old pipeline did, it still does,
 byte-for-byte, when BioRED is skipped.</p>
 
-<div class='key'><strong>Step numbers on this page follow the current 20-step chain.</strong> Two steps
-were added to <code>gpu.py</code> after the BioRED change described here: <code>drug_lexicon.py
+<div class='key'><strong>Step numbers on this page follow the current 20-step chain.</strong> Three changes
+were made to <code>gpu.py</code> after the BioRED change described here: <code>drug_lexicon.py
 --build</code> as step&nbsp;3 (NCIt drug names &rarr; <code>databases/ncit_drugs.json</code>) and
-<code>triples_per_year.py</code> as step&nbsp;19 (triple scores by publication year). Everything that
-was step&nbsp;3&ndash;17 when this page was written is now step&nbsp;4&ndash;18, and <code>zip_work.py</code>
+<code>triples_per_year.py</code> as step&nbsp;19 (triple scores by publication year), and
+<code>pub_years.py</code> moved up to step&nbsp;4, where it reads the years offline. <code>zip_work.py</code>
 is step&nbsp;20. Statements about the change itself (&ldquo;16 to 18 steps&rdquo;) are kept as
 history.</div>
 
@@ -176,27 +176,27 @@ reused PPI model with a freshly trained BioRED one &mdash; see &sect;1A of
   <div class='grp'>B. NER: corpus &rarr; result-sentence entities <span class='dim'>(unchanged, apart from the drug lexicon added later)</span></div>
   <div class='node'><span class='s'>3. drug_lexicon.py --build</span> <span class='pill opt'>optional</span> <span class='pill net'>internet</span>
     <div class='io'>in: NCI Thesaurus &nbsp;&rarr;&nbsp; out: <code>databases/ncit_drugs.json</code>
-      <span class='dim'>&mdash; the drug names (biologics) the BioBERT chemical model misses and ChEBI cannot represent; read by step&nbsp;4's lexicon pass and step&nbsp;11's NCIt fallback</span></div></div>
-  <div class='node'><span class='s'>4. sentences.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span>
+      <span class='dim'>&mdash; the drug names (biologics) the BioBERT chemical model misses and ChEBI cannot represent; read by step&nbsp;5's lexicon pass and step&nbsp;12's NCIt fallback</span></div></div>
+  <div class='node'><span class='s'>4. pub_years.py</span> <span class='pill opt'>optional</span>
+    <div class='io'>in: the <code>&lt;?pub-year?&gt;</code> stamps in <code>experimental_ner/</code> &nbsp;&rarr;&nbsp; out: <code>databases/pmc_years.json</code> <span class='dim'>(offline)</span></div></div>
+  <div class='node'><span class='s'>5. sentences.py</span> <span class='pill gpu'>GPU</span> <span class='pill net'>models</span>
     <div class='io'>in: <code>experimental_ner/PMC*.xml</code> &nbsp;&rarr;&nbsp; out: <code>sentences/PMC*.json</code> + <code>summaries/sentences.html</code></div></div>
   <div class='arrow'>&darr;&nbsp; sentences/*.json  (every later step reads this)</div>
 
   <div class='grp'>C. Build the GENETIC / DISEASE / CHEMICAL normalization libraries <span class='dim'>(unchanged)</span></div>
-  <div class='node'><span class='s'>5. roman.py</span> &nbsp;<span class='s'>6. greek.py</span> &nbsp;<span class='s'>7. keys_values.py</span> &nbsp;<span class='s'>8. controls.py</span>
+  <div class='node'><span class='s'>6. roman.py</span> &nbsp;<span class='s'>7. greek.py</span> &nbsp;<span class='s'>8. keys_values.py</span> &nbsp;<span class='s'>9. controls.py</span>
     <div class='io'>GENETIC surfaces &rarr; HGNC &nbsp;(<code>GENETIC/</code>)</div></div>
-  <div class='node'><span class='s'>9. disease.py</span> &nbsp;<span class='s'>10. phenotypes.py</span>
+  <div class='node'><span class='s'>10. disease.py</span> &nbsp;<span class='s'>11. phenotypes.py</span>
     <div class='io'>DISEASE surfaces &rarr; MONDO + phenotype flag &nbsp;(<code>DISEASE/</code>)</div></div>
-  <div class='node'><span class='s'>11. chemical.py</span> &nbsp;<span class='s'>12. nonchemical.py</span> &nbsp;<span class='s'>13. target_pharm.py</span>
+  <div class='node'><span class='s'>12. chemical.py</span> &nbsp;<span class='s'>13. nonchemical.py</span> &nbsp;<span class='s'>14. target_pharm.py</span>
     <div class='io'>CHEMICAL surfaces &rarr; ChEBI + non-chemical flag + chemical&harr;gene cross-links &nbsp;(<code>CHEMICAL/</code>)</div></div>
   <div class='arrow'>&darr;&nbsp; GENETIC/ + DISEASE/ + CHEMICAL/ lookup libraries</div>
 
   <div class='grp'>D. Triples: extract, normalize, score</div>
-  <div class='node'><span class='s'>14. triples.py</span>
+  <div class='node'><span class='s'>15. triples.py</span>
     <div class='io'>in: <code>sentences/*.json</code> + the libraries &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples.json</code> + normalized variants + <code>triples.html</code></div></div>
-  <div class='node'><span class='s'>15. relationships.py</span> <span class='pill opt'>optional</span>
+  <div class='node'><span class='s'>16. relationships.py</span> <span class='pill opt'>optional</span>
     <div class='io'>&rarr; <code>TRIPLES/genetic_genetic.json</code></div></div>
-  <div class='node'><span class='s'>16. pub_years.py</span> <span class='pill opt'>optional</span> <span class='pill net'>internet</span>
-    <div class='io'>PMC &rarr; year from <code>pmids/pmid_pmc_ids.tsv</code>, NCBI only for what it lacks; caches <code>databases/pmc_years.json</code> and adds <code>year</code> to each gene-gene triple</div></div>
   <div class='node new'><span class='s'>17. relation_extraction.py --normalize --route-mode additive</span> <span class='pill gpu'>GPU</span> <span class='pill new'>CHANGED</span>
     <div class='io'>in: <code>sentences/*.json</code> + <strong>both</strong> checkpoints &nbsp;&rarr;&nbsp; out: <code>TRIPLES/triples_re.json</code> (+ normalized)
       <span class='dim'>&mdash; each triple carries <code>predicate.model</code> and <code>pair_id</code>; a pair covered by both models yields two triples; since 2026-10-01 signed triples are oriented agent-first (<code>direction.py</code>)</span></div></div>
@@ -204,7 +204,7 @@ reused PPI model with a freshly trained BioRED one &mdash; see &sect;1A of
     <div class='io'>in: <code>TRIPLES/triples_re.json</code> &nbsp;&rarr;&nbsp; out: <code>summaries/compare_re.html</code>
       <span class='dim'>&mdash; PPI vs BioRED on identical pairs: coverage, label agreement, signed-edge count, samples</span></div></div>
   <div class='node'><span class='s'>19. triples_per_year.py</span> <span class='pill opt'>optional</span>
-    <div class='io'>in: <code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> + <code>databases/pmc_years.json</code> (topped up from <code>pmids/pmid_pmc_ids.tsv</code> when shipped) &nbsp;&rarr;&nbsp; out: <code>summaries/triples_per_year.html</code>
+    <div class='io'>in: <code>TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json</code> + <code>databases/pmc_years.json</code> &nbsp;&rarr;&nbsp; out: <code>summaries/triples_per_year.html</code>
       <span class='dim'>&mdash; composite score per publication year: box plot, triple counts, score histogram; offline</span></div></div>
 
   <div class='grp'>E. Bundle the run for download <span class='dim'>(unchanged)</span></div>
@@ -213,12 +213,12 @@ reused PPI model with a freshly trained BioRED one &mdash; see &sect;1A of
 </div>
 <p class='dim'>The dependency structure is unchanged apart from the two insertions: step&nbsp;2 is a sibling
 of step&nbsp;1 (both produce a checkpoint step&nbsp;17 loads, neither reads the other's output), and
-step&nbsp;18 reads only step&nbsp;17's <code>triples_re.json</code>. Steps 5&ndash;13 still all read
-<code>sentences/*.json</code>; <code>triples.py</code> (14) still reads the three finished libraries;
+step&nbsp;18 reads only step&nbsp;17's <code>triples_re.json</code>. The normalization steps (6&ndash;13) still all read
+<code>sentences/*.json</code>; <code>triples.py</code> (15) still reads the three finished libraries;
 the learned RE step (17) still depends only on the trained model(s) and <code>sentences/</code>, so it
-remains independent of the 15&ndash;16 branch. <span class='dim'>(The later additions sit at the edges:
+remains independent of the 15&ndash;16 branch (triples, relationships). <span class='dim'>(The later additions sit at the edges:
 <code>drug_lexicon.py</code> (3) feeds <code>sentences.py</code> and <code>chemical.py</code>, and
-<code>triples_per_year.py</code> (19) reads step&nbsp;17's normalized output plus step&nbsp;16's year
+<code>triples_per_year.py</code> (19) reads step&nbsp;17's normalized output plus step&nbsp;4's year
 cache.)</span></p>
 
 <h2>3. The changed &amp; new scripts</h2>
@@ -328,9 +328,8 @@ cache.)</span></p>
 </tr>
 </tbody>
 </table>
-<p class='dim'>Unchanged and not repeated here: <code>sentences.py</code> (4), the nine normalization
-scripts (5&ndash;13), <code>triples.py</code> (14), <code>relationships.py</code> (15),
-<code>pub_years.py</code> (16) and <code>zip_work.py</code> (20); nor the two steps added after this
+<p class='dim'>Unchanged and not repeated here: <code>pub_years.py</code> (4), <code>sentences.py</code> (5), the nine normalization
+scripts (6&ndash;14), <code>triples.py</code> (15), <code>relationships.py</code> (16) and <code>zip_work.py</code> (20); nor the two steps added after this
 change, <code>drug_lexicon.py</code> (3) and <code>triples_per_year.py</code> (19) &mdash; see
 <code>step_2_triples.html</code> for their inputs and outputs.</p>
 
@@ -509,8 +508,8 @@ python compare_re.py</pre></li>
 
 <h3>Kaggle: the full run, cell by cell</h3>
 <p>Notebook settings first: <strong>Accelerator &rarr; GPU</strong> and <strong>Internet &rarr; On</strong>
-(steps 1, 2, 4 and 17 use CUDA; steps 1&ndash;2 download the BigBIO corpora, step 3 the NCIt drug
-lexicon, step 4 the BioBERT NER models, step 16 the publication years the stage-1 table lacks). Then
+(steps 1, 2, 5 and 17 use CUDA; steps 1&ndash;2 download the BigBIO corpora, step 3 the NCIt drug
+lexicon, step 5 the BioBERT NER models). Then
 five cells.</p>
 
 <p><strong>Cell 1 &mdash; dependencies.</strong> <code>datasets&lt;4</code> because BigBIO ships as
@@ -650,7 +649,7 @@ gets wrong.</p>
 <tbody>
 <tr class='changed'><td><code>union</code> <span class='dim'>(default)</span></td>
     <td>every pair <strong>either</strong> model kept &mdash; BioRED-only edges included</td>
-    <td>the typed one wherever BioRED fired; score = the higher of the two</td></tr>
+    <td>the typed one wherever BioRED fired; score = the one ranking higher within its own model (<code>--merge-scale rank</code>)</td></tr>
 <tr><td><code>gate</code></td><td>only pairs the <strong>binary</strong> model also kept</td>
     <td>typed where BioRED also fired &mdash; the stricter option for when BioRED-only edges
         (the ones with no second opinion) prove noisy</td></tr>
@@ -702,7 +701,7 @@ CHEMICAL endpoints become nodes too, identified by their normalized id (<code>mo
 </tbody>
 </table>
 <p>Shape encodes type (gene &#9679; / disease &#9670; / chemical &#9632;), a <em>Node type</em> filter
-appears in the panel, and the score slider opens at &ge;0.8 rather than &ge;0.99 because most
+appears in the panel, and the score slider opens at &ge;0.5, its lowest stop, because most
 gene&ndash;disease edges sit between 0.5 and 0.8. Outputs take an <code>_M</code> suffix, so the two
 views coexist. The gene&ndash;gene count is identical in both, as it must be.</p>
 

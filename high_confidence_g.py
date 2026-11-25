@@ -28,7 +28,7 @@ TYPED, SIGNED EDGES + MULTI-MODEL MERGE (the two things high_confidence.py does 
     pair; the default `union` keeps every pair EITHER model kept -- so BioRED-only edges
     (relations BioInfer missed, plus everything BioRED types) are in the graph -- and
     prefers the TYPED label wherever BioRED fired, so a pair both models claim appears
-    once, signed, scored by the higher of the two. `--merge gate` is the stricter variant
+    once, signed, scored by the one ranking higher within its own model (--merge-scale). `--merge gate` is the stricter variant
     (keep only what the binary model also kept) for when BioRED-only edges prove noisy;
     see also typed / none, and `score_by_model` / `models` / `corroborated` on each
     merged triple.
@@ -72,8 +72,8 @@ two scripts can be run against the same data root without clobbering each other'
     node and CHEMICAL_IGNORE for chemicals that are not compounds under study. Outputs
     take an "_M" suffix so they never clobber high_confidence.py's, node shape encodes the
     type (gene dot / disease diamond / chemical square), a "Node type" filter appears in
-    the panel, and the score slider opens at >=0.8 (most gene-disease edges sit in 0.5-0.8,
-    so the old gene-only default of >=0.99 would show an almost empty canvas).
+    the panel, and the score slider opens at >=0.5, its lowest stop (most gene-disease edges sit
+    in 0.5-0.8, so a high default would show an almost empty canvas).
 
 Run::  python high_confidence_g.py [--data-root kaggle_working] [--score 0.8] [--thresholds 0.8,0.95,0.99] [--no-graph]
        python high_confidence_g.py --merge gate         # drop pairs only BioRED claimed
@@ -2976,7 +2976,7 @@ def main():
                     help="pipeline output tree to read inputs from (default: kaggle_working/ next to this script)")
     ap.add_argument("--score", type=float, default=0.8, help="threshold for the exported JSON (default 0.8)")
     ap.add_argument("--thresholds", default="0.8,0.95,0.99", help="thresholds summarized in the console stats")
-    ap.add_argument("--no-graph", action="store_true", help="skip the brain-cancer graph HTML")
+    ap.add_argument("--no-graph", action="store_true", help="skip the graph HTML")
     ap.add_argument("--no-list-edges", action="store_true",
                     help="do not extend a relation of one listed gene to the other genes of the list "
                          "(graph only; the exported JSON never contains list edges)")

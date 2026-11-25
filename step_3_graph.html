@@ -389,8 +389,8 @@ The run prints what every node filter dropped &mdash; including the top
 <code>chemical.py</code> upstream, not exclusions made here.
 Shape encodes type (gene &#9679; / disease &#9670; / chemical &#9632;), a <em>Node type</em> filter
 appears in the panel (an edge shows only when both endpoint types are ticked), and the score slider
-opens at <strong>&ge;0.8</strong> rather than &ge;0.99 because most gene&ndash;disease edges sit
-between 0.5 and 0.8. <strong>Only gene names are drawn on the canvas</strong> &mdash; a disease or
+opens at <strong>&ge;0.5</strong>, its lowest stop, because most gene&ndash;disease edges sit
+between 0.5 and 0.8. <strong>Only gene names are drawn on the canvas</strong> unless <em>Draw names for</em> is set to diseases or drugs &mdash; a disease or
 chemical name is long, repeats across many edges and would bury the gene symbols, so those nodes are
 drawn unlabelled and their names appear on <em>hover</em> (node tooltip, and in every edge tooltip)
 or on click. The set of labelled kinds is one constant, <code>LABEL_KINDS</code>. Outputs take an <code>_M</code> suffix
@@ -415,6 +415,15 @@ qualifying rule&nbsp;5</strong> &mdash; the requirement that the triple's senten
 CHEMICAL entity. A triple qualifies on the first four rules alone (score, control&nbsp;=&nbsp;no, not
 control&nbsp;=&nbsp;yes, no MKI67). This yields a <em>larger</em> universe: every high-confidence
 gene&ndash;gene relation, whether or not its sentence is in a disease/chemical context.</div>
+
+<div class='key'><strong>Corrections before the merge (2026-11-25).</strong> Every run corrects the triples
+from their own sentences, without a GPU; the stored triples and the scores stay as they were. In order:
+direction (<code>direction.py</code>), negation (<code>relation_extraction.py</code>), antibody / CAR-T /
+ADC treatments (<code>antibodies.py</code>), siRNA / shRNA constructs, gene loss and wrong names
+(<code>constructs.py</code>), and drugs as agents, drug response and drug combinations
+(<code>drug_direction.py</code>) &mdash; all in <code>gpu_bundle/</code>. After the merge, list edges extend
+a relation of one listed gene to the others (<code>--no-list-edges</code> turns this off). The rules are in
+<code>Graph_description.md</code>.</div>
 
 <h3>The &ldquo;G&rdquo; qualifying filter</h3>
 <p class='meta'>The &ldquo;G&rdquo; rule set is <strong>all four</strong> of the conditions below
@@ -494,6 +503,12 @@ rule. Only one file is required.</p>
       <code>sentences/</code> count is the fallback when the XML dir is an empty runtime symlink.</td>
 </tr>
 <tr>
+  <td><code>databases/oncokb_cancerGeneList.tsv</code>, <code>databases/cellosaurus.txt</code></td>
+  <td><span class='pill opt'>optional</span></td>
+  <td>The Oncogene / Tumor suppressor buttons; with HGNC, ChEBI and <code>ncit_drugs.json</code>, screening
+      look-alike names out of <em>Candidate driver</em>.</td>
+</tr>
+<tr>
   <td><code>summaries/pubmed_query.html</code></td>
   <td><span class='pill opt'>optional</span></td>
   <td>The step-1 PubMed query, shown as the graph's title/legend line. Looked up under the data root
@@ -532,13 +547,13 @@ at the ChEBI gate, and normalisation without recognition never sees the mention.
   <td><code>&lt;data-root&gt;/summaries/high_confidence_<strong>M</strong>.html</code></td>
   <td>The self-contained interactive graph (vis-network inlined when it can be fetched, else CDN).
       Edges are coloured by <strong>relation type</strong> with live per-type counts and dashed negation;
-      nodes are typed, a Node-type filter is offered, and the score slider opens at &ge;0.8.
+      nodes are typed, a Node-type filter is offered, and the score slider opens at &ge;0.5.
       <strong>Skipped with <code>--no-graph</code>.</strong></td>
 </tr>
 <tr>
   <td><code>&lt;root&gt;/&lt;current_dir&gt;_YYYY_MM_DD_<strong>M</strong>.html</code></td>
   <td>A copy of that graph in the script's own directory, named after the directory plus today's date
-      (e.g. <code>lung_large_2026_08_01_M.html</code>). Written whenever the graph is. The suffix keeps
+      (e.g. <code>KMT2A_leukemia_2026_11_25_M.html</code>). Written whenever the graph is. The suffix keeps
       it distinct from the deprecated script's unsuffixed
       <code>&lt;current_dir&gt;_YYYY_MM_DD.html</code>.</td>
 </tr>
@@ -564,6 +579,8 @@ at the ChEBI gate, and normalisation without recognition never sees the mention.
 <tr><td><code>--thresholds LIST</code></td><td><code>0.8,0.95,0.99</code></td><td>Thresholds summarized in the console stats.</td></tr>
 <tr><td><code>--no-graph</code></td><td>off</td><td>Export the JSON only; skip the HTML and its root copy.</td></tr>
 <tr><td><code>--merge {union,gate,typed,none}</code></td><td><code>union</code></td><td>How to combine several RE checkpoints scoring the same pair (table above). No-op with a single checkpoint in the file.</td></tr>
+<tr><td><code>--merge-scale {rank,calibrated}</code></td><td><code>rank</code></td><td>Which model's score a pair both kept takes: the one ranking higher within its own model, or the plain maximum.</td></tr>
+<tr><td><code>--no-list-edges</code></td><td>off</td><td>Do not extend a relation of one listed gene to the others (graph only).</td></tr>
 <tr><td><code>--typed-model NAME</code> / <code>--gate-model NAME</code></td><td>auto</td><td>Override which checkpoint supplies the typed labels and which acts as the existence gate. By default the typed one is recognized by &ldquo;biored&rdquo; in its name, matching <code>compare_re.py</code>.</td></tr>
 </tbody>
 </table>

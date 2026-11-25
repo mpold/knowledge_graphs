@@ -1,12 +1,12 @@
 # cancer_knowledge_graph
 
 A biomedical relation-extraction pipeline: from a single **PubMed query** to an interactive
-**gene–gene relationship graph** for a disease/chemical context, in three stages.
+**gene / disease / chemical relationship graph**, in three stages.
 
 | Stage | What | Where it runs | Entry point |
 |------:|------|---------------|-------------|
-| **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (10 stages over 9 root scripts) |
-| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (20-step chain) |
+| **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (11 steps over 10 root scripts) |
+| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (20 steps; 18 when the trained models are reused) |
 | **3** | Triples → high-confidence gene / disease / chemical **graph** | local | `high_confidence_g.py` |
 
 Each stage hands off to the next **by files**. Rendered walk-throughs of every stage ship with
@@ -40,9 +40,10 @@ python high_confidence_g.py --data-root kaggle_working
 
 **There is no single all-stage runner** — each stage has its own entry point and they hand off
 by files, because stage 2 almost always runs on different hardware than 1 and 3.
-`step_1_orchestrator.py` chains stage 1's ten steps and aborts on the first non-zero exit;
+`step_1_orchestrator.py` chains stage 1's eleven steps and aborts on the first non-zero exit;
 run a sub-range with `--start` / `--stop` / `--only`. Its last step (`clean_up.py`) **deletes** the
-intermediate XML/PDF directories once the corpus is built — `--stop 7` keeps them.
+intermediate XML/PDF directories once the corpus is built — `--stop 7` keeps them. `--list` prints
+the steps without running anything.
 
 > **Realistically, stage 2 runs on Kaggle**, not your laptop — it needs a CUDA GPU and the
 > large ontology databases. The typical flow is: **stage 1 locally → stage 2 on Kaggle →
@@ -55,10 +56,10 @@ intermediate XML/PDF directories once the corpus is built — `--stop 7` keeps t
 |          | Stage 1                                                                               | Stage 2                                                | Stage 3              |
 |----------|---------------------------------------------------------------------------------------|--------------------------------------------------------|----------------------|
 | Python   | 3.9+                                                                                  | 3.9+                                                   | 3.9+                 |
-| Packages | `requests`                                                                            | `torch`, `transformers`, `datasets<4`, `numpy`, `lxml` | *stdlib only*        |
+| Packages | `requests`                                                                            | `torch`, `transformers`, `datasets<4`, `bioc`, `numpy`, `lxml` | *stdlib only*        |
 | Hardware | any                                                                                   | **CUDA GPU** (CPU = very slow)                         | any                  |
-| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCIt                    | optional (graph CDN) |
-| Extra    | **Docker + GROBID** (for `grobid_xml.py`); *optional* local XML archive (steps 1b/6b) | ontology DB files (below)                              | —                    |
+| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCIt                    | optional (vis-network) |
+| Extra    | **Docker + GROBID** (for `grobid_xml.py`); *optional* local XML archive (steps 1b/6b) | ontology DB files (below)                              | *optional* OncoKB, Cellosaurus and ontology files (below) |
 
 Full details per script are in the `step_*.html` docs and `requirements.html`.
 
@@ -78,11 +79,23 @@ always had (`--start 4` still resumes at `ncbi_pdf.py`) while `from_archive.py` 
 and `pub_year_xml.py` as 6c.
 
 - Input: a PubMed query (read from **STDIN** by `pubmed_query.py`; the orchestrator's first
-  bare argument pipes it in). The EXAMPLE-QUERY used for this project is:
+  bare argument pipes it in). The query behind this project's corpus (2,220 XML documents) is:
   ```
-  "non-small cell lung cancer"[Title/Abstract] NOT "small cell lung carcinoma"[Title/Abstract]
+  (KMT2A*[tiab] OR MLL[tiab] OR MLL1[tiab] OR MLLr[tiab] OR "MLL-r"[tiab]
+   OR "mixed lineage leukemia"[tiab] OR "mixed lineage leukaemia"[tiab]
+   OR "myeloid/lymphoid leukemia"[tiab] OR "Myeloid-Lymphoid Leukemia Protein"[Mesh]
+   OR "lysine methyltransferase 2A"[tiab] OR "11q23"[tiab] OR "t(4;11)"[tiab] OR "t(9;11)"[tiab])
+  AND (leukemia[Mesh] OR leukemi*[tiab] OR leukaemi*[tiab] OR AML[tiab] OR "B-ALL"[tiab]
+   OR "T-ALL"[tiab])
+  NOT (review[pt] OR editorial[pt] OR comment[pt] OR "retracted publication"[pt])
+  NOT ((KMT2B[tiab] OR KMT2C[tiab] OR KMT2D[tiab] OR MLL2[tiab] OR MLL3[tiab] OR MLL4[tiab])
+   NOT (KMT2A*[tiab] OR MLL1[tiab] OR MLLr[tiab] OR "11q23"[tiab] OR "MLL-AF9"[tiab]
+   OR "MLL-AF4"[tiab] OR "MLL-rearranged"[tiab]))
   ```
-  > **Watch the hyphen.** Do *not* write the exclusion as `NOT "small cell lung cancer"`:
+  (one line when piped in). The query is kept in `pmids/_query.json` and in
+  `summaries/pubmed_query.html`, from which stage 3 prints it on the graph.
+  > **Watch the hyphen** (an example from a lung corpus). With `"non-small cell lung
+  > cancer"[Title/Abstract]`, do *not* write the exclusion as `NOT "small cell lung cancer"`:
   > PubMed splits `non-small` into `non` + `small`, so the phrase `"small cell lung cancer"`
   > is a token-substring of every `"non-small cell lung cancer"` record and the `NOT`
   > excludes all of them → **0 hits**. Excluding `"small cell lung carcinoma"` (carcinoma,
@@ -118,12 +131,12 @@ and `pub_year_xml.py` as 6c.
   each file they write, and 1b/6b (`from_archive.py`) stamp the `archive_xmls/` staging copy
   (the archive itself is never touched). So on a normal run 6c only **verifies**. It reads
   the first 64 KB of each file, where the stamp and year live, and reads a file whole and
-  rewrites it only when its stamp is missing or wrong. On the full corpus (121,630 files, 14 GB)
-  that check takes about a minute.
+  rewrites it only when its stamp is missing or wrong. On the largest corpus so far (121,630
+  files, 14 GB) that check takes about a minute.
   It **exits non-zero, listing the files, if any document stays undated**, aborting the pipeline —
-  so stage 2 gets a fully dated corpus and never needs the PubMed table or NCBI. On the current
-  corpus: 121,630 XML, all dated from the table (7,536 state a different year themselves; the
-  table is kept), range 1948–2026.
+  so stage 2 gets a fully dated corpus and never needs the PubMed table or NCBI. On that large
+  corpus every file was dated from the table (7,536 state a different year themselves; the table is
+  kept).
 - **Impact percentile prompt:** when `step_1_orchestrator.py` runs step 2 it prompts
   `Publication impact percentile (decimal: 0 <= impact <= 1):` on its own line right after
   the query, and hands the entered value to `high_impact_xml.py` on its **STDIN** and as the
@@ -184,9 +197,32 @@ BioBERT NER → GENETIC/DISEASE/CHEMICAL normalization → rule triples → lear
 4. Download the produced **`kaggle_working.zip`**.
 
 **Locally:** `cd gpu_bundle && python gpu.py`. Needs the GPU deps and the DB files present;
-preview with `python gpu_bundle/gpu.py --list`.
+preview with `python gpu_bundle/gpu.py --list`. The list is numbered over the steps that will
+run, so with the training steps skipped it shows 1–18; step numbers in this README are the full 1–20.
 
-Output: `TRIPLES/` (incl. the scored + normalized triples) and `kaggle_working.zip`.
+**Output.** `kaggle_working.zip`, the zipped run directory. What matters in it:
+
+| path | content | read by |
+|------|---------|---------|
+| `TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json` | scored, normalized triples (`RE_MIN_SCORE` 0.5 and up) | stage 3 |
+| `TRIPLES/re_rejected.jsonl.gz` | pairs scored but not kept, with the reason (`RE_LOG_REJECTED=0` turns it off) | `audit_lists.py` |
+| `TRIPLES/triples.json`, `triples_*_normalized.json`, `triples_re.json`, `genetic_genetic.json` | rule triples, the un-normalized scored ones, the gene–gene slice | — |
+| `GENETIC/`, `DISEASE/`, `CHEMICAL/` | normalization libraries with the control / phenotype / non-chemical flags and the drug–target links | stage 3 |
+| `sentences/` | one JSON per document | stage 3 |
+| `databases/pmc_years.json` | publication years | stage 3 |
+| `summaries/` | `sentences`, `compare_re`, `triples_per_year` (and, when trained, the two calibration reports) | — |
+
+**How a triple is scored.** `score = P × NER × cue × result × section × self`, at most 1: the
+model's calibrated probability for its best label, the lower of the two NER scores, 1 or 0.85 for a
+relation word, 1–1.1 for how much the sentence reads as a result, 0.90–1 by section, and 0.5 for a gene
+paired with itself unless the relation can be reflexive. The factors are kept in `score_components`.
+`RE_SCORE_MODE=any` scores "is there any relation" instead of the best label; it needs
+`biored-biobert-re/calibration_any.json`.
+
+> **Rebuild the Kaggle upload after changing `gpu_bundle/`.** A `gpu_bundle.zip` made earlier holds
+> the older scripts. Changes to `controls.py` or to negation in `relation_extraction.py` reach new
+> triples only that way; stage 3 also applies negation, direction and the corrections below to the
+> triples of a finished run.
 
 **Multi-GPU (Kaggle *GPU T4 x2*).** Every GPU step uses all visible GPUs; there is nothing
 to configure. With one GPU or none, each step behaves exactly as before.
@@ -206,7 +242,8 @@ line.
 
 **Train the two checkpoints once, reuse them for every corpus.** Steps 1 and 2 never read
 `experimental_ner/` or your PubMed query — they fine-tune BioBERT on fixed public BigBIO corpora
-(**bioinfer** → `ppi-biobert-re/`, **biored** → `biored-biobert-re/`). The checkpoint is a
+(**bioinfer** → `ppi-biobert-re/`, **biored** → `biored-biobert-re/`, the latter with extra binding
+examples from two BioNLP-ST 2013 event corpora). The checkpoint is a
 function of (dataset, seed, hyperparams) only, so a run on "<pubmed_query_1>" produces the same
 model as one on "<pubmed_query_2>"; retraining per corpus is wasted GPU time. The same
 holds for the normalization libraries (steps 6–14) — HGNC / ChEBI / MONDO are ontologies, not
@@ -244,9 +281,9 @@ python gpu_bundle/gpu.py --retrain     # train anyway (also: --steps re_pipeline
 | `model.safetensors`                        | 413 MB — fine-tuned encoder + classifier head                 | same                                                                                               |
 | `config.json`                              | `id2label` = `interacts`, `false` (binary)                    | `associated`, `binds`, `downregulator/inhibitor`, `upregulator/activator`, `false` (5-way, signed) |
 | `tokenizer.json` + `tokenizer_config.json` | BioBERT's WordPiece vocab, unchanged                          | same                                                                                               |
-| `calibration.json`                         | `{"method": "platt", "a": 0.821, "b": -0.340, "clip": 0.001}` | `{"method": "platt", "a": 0.388, "b": -1.220, "clip": 0.001}`                                      |
+| `calibration.json`                         | `{"method": "platt", "a": 0.539, "b": -0.388, "clip": 0.001}` | `{"method": "platt", "a": 0.343, "b": -0.859, "clip": 0.001}`                                      |
 | `training_args.bin`                        | HF `TrainingArguments` — provenance only                      | same                                                                                               |
-| `checkpoint-N/`                            | `checkpoint-878` (epoch 2)                                    | `checkpoint-6357` (epoch 3)                                                                        |
+| `checkpoint-N/`                            | `checkpoint-850` (epoch 2)                                    | `checkpoint-6651` (epoch 3)                                                                        |
 
 The **first five** are what the gate requires and what `relation_extraction.py` loads:
 weights + label map + tokenizer, and `calibration.json` mapping the raw softmax to the calibrated
@@ -257,8 +294,9 @@ runs with `load_best_model_at_end=True` and `save_total_limit=1`, then `trainer.
 so the best epoch's weights are already at the directory root and the one surviving trainer
 checkpoint is an audit/resume artifact. Deleting it takes each directory from **1.7 GB to ~414 MB**
 — worth doing before a Kaggle upload. Its `trainer_state.json` is the only thing worth keeping: it
-holds the per-epoch dev metrics that `EPOCH_DEFAULTS` in `train_re.py` was measured from (this
-bundle's run: PPI best at epoch 2, dev F1 0.843; BioRED at epoch 3, dev F1 0.624).
+holds the per-epoch dev metrics (this bundle's run: PPI best at epoch 2, dev F1 0.681; BioRED at
+epoch 3, dev F1 0.647; the PPI dev split is now carved by document, so earlier, higher figures are
+not comparable).
 
 **The two data dirs** are `bigbio_to_re.py`'s conversion output — the entity-blinded TSVs
 `train_re.py` trains on. Three columns (`index`, `sentence`, `label`), one **entity pair** per row,
@@ -269,16 +307,18 @@ that pair's two mentions replaced by type markers:
 0	Chloroacetaldehyde (CAA) is a metabolite of the alkylating agent @CHEMICAL$ (IFO) and putatively responsible for renal damage following anti-@DISEASE$ therapy with IFO.	Negative_Correlation
 ```
 
-|                          | `ppi_data/` (BioInfer)                                     | `biored_data/` (BioRED)                                                                                          |
+|                          | `ppi_data/` (BioInfer)                                     | `biored_data/` (BioRED + BioNLP-ST binding events)                                                                                          |
 |--------------------------|------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| rows: train / dev / test | 7,018 / 779 / 1,604                                        | 33,889 / 9,891 / 9,202                                                                                           |
+| rows: train / dev / test | 6,790 / 1,007 / 1,604                                      | 35,459 / 9,891 / 9,202                                                                                           |
 | markers                  | `@GENE$` only                                              | `@GENE$`, `@DISEASE$`, `@CHEMICAL$`, `@VARIANT$`                                                                 |
-| train labels             | `1` interacts 1,897 · `0` no relation 5,121                | `Association` 10,908 · `Positive_Correlation` 5,186 · `Negative_Correlation` 4,089 · `Bind` 458 · `false` 13,248 |
-| dev split                | carved from train (`--val-frac 0.1` — BioInfer ships none) | BioRED's own 400/100/100 abstracts (`--val-frac 0`)                                                              |
-| on disk                  | 2.3 MB                                                     | 11 MB                                                                                                            |
+| train labels             | `1` interacts 1,797 · `0` no relation 4,993                | `Association` 10,908 · `Positive_Correlation` 5,186 · `Negative_Correlation` 4,089 · `Bind` 1,243 · `false` 14,033 |
+| dev split                | carved from train by document (`--val-frac 0.1` — BioInfer ships none) | BioRED's own 400/100/100 abstracts (`--val-frac 0`)                                                              |
+| on disk                  | 2.3 MB                                                     | 12 MB                                                                                                            |
 
 BioRED's four rare chemical–chemical types (`Cotreatment`, `Comparison`, `Drug_Interaction`,
-`Conversion`) fold into `Association` by default — `--biored-all-types` keeps all eight. Its row
+`Conversion`) fold into `Association` by default — `--biored-all-types` keeps all eight. Step 2 also
+passes `--extra-bind`, which adds 785 `Bind` rows (and as many `false`) from BioNLP-ST 2013 GE and PC
+to `train.tsv` only: BioRED alone has too few for the model to predict `binds`. BioRED's row
 count dwarfs "600 abstracts" because its relations are annotated at the **document** level: one
 annotated pair emits a row for every sentence where both endpoints co-occur (`BioRED_task_mapping.md`
 §5), which is also why its positives are noisier than BioInfer's sentence-scoped ones.
@@ -294,7 +334,7 @@ All four dirs are git-ignored — they are inputs as often as they are outputs, 
 `kaggle_working/` run tree, which is regenerated each time.
 
 > **What *is* corpus-sensitive is transfer quality, not checkpoint validity.** Both training
-> corpora are abstracts, and `calibration.py` fits the calibrator on their own dev/test split — so
+> corpora are essentially abstracts, and `calibration.py` fits the calibrator on their own dev/test split — so
 > `p_rel` is calibrated to *those* sentence distributions, not to your GROBID full text. The knobs
 > worth re-tuning on a new corpus are therefore `RE_MIN_SCORE` and the stage-3 cutoffs, not the
 > models. A corpus that is clinical or epidemiological rather than molecular is further out of
@@ -308,9 +348,27 @@ interactive graph over gene, disease and chemical nodes. Edges are typed by the 
 the model predicted (activates / inhibits / binds / interacts / associated, dashed when
 negated), and `--merge` collapses the two verdicts an additive stage-2 run writes per pair
 (PPI + BioRED) into one — default `union`: every pair either model kept (BioRED-only edges
-included), with the typed label preferred wherever BioRED fired and the higher of the two
-scores. `--merge gate` is the stricter variant that keeps only pairs the binary PPI model
-also claimed.
+included), with the typed label preferred wherever BioRED fired. The score of a pair both models
+kept is the one that ranks higher within its own model (`--merge-scale rank`, the default;
+`calibrated` takes the plain maximum). `--merge gate` is the stricter variant that keeps only
+pairs the binary PPI model also claimed.
+
+**Corrections made to the triples.** The models say *which* relation, not who acts on whom, and they
+misread some wordings. Stage 3 corrects these on every run, from the sentence itself; the stored
+triples are not changed, the score stays, and no GPU is needed. In order:
+
+| step | module in `gpu_bundle/` | what it does |
+|------|-------------------------|--------------|
+| direction | `direction.py` | "reduced by X": X is the agent |
+| negation | `relation_extraction.py` | keeps *not* only where the cue denies this pair |
+| treatments | `antibodies.py` | *anti-PD-1*, *CD19 CAR-T*, *MSLN-targeted ADC* are treatments, not their target gene |
+| constructs, gene loss, names | `constructs.py` | signs of siRNA / shRNA and of knockdown, knockout or loss are read from the sentence; some wrong names are fixed (*NOXA* is PMAIP1) |
+| drugs | `drug_direction.py` | a drug acts on the gene or disease, not the reverse; drug response and drug combinations become `associated` |
+| merge | `high_confidence_g.py` | `--merge`, above |
+| list edges | `high_confidence_g.py` | a relation read for one listed gene extends to the others of the list (graph only; `--no-list-edges`) |
+
+Each step prints how many triples it changed. [`Graph_description.md`](Graph_description.md) gives the
+rules and their limits. They were written from this and earlier corpora, so check them on a new one.
 
 > **NB!** If stage 2 ran on Kaggle, **download `kaggle_working.zip` and unzip it here first** —
 > stage 3 reads its inputs from that unzipped run directory.
@@ -321,38 +379,62 @@ python high_confidence_g.py --data-root kaggle_working
 python high_confidence_g.py --data-root kaggle_working --merge gate    # or typed / none
 ```
 
+Other options: `--score` (cutoff of the exported JSON, default 0.8; the graph always starts at 0.5),
+`--thresholds`, `--no-graph`, `--typed-model`, `--gate-model`.
+
+**Inputs**, under `--data-root` unless noted:
+
+| file | needed | used for |
+|------|--------|----------|
+| `TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json` | **yes** | the triples |
+| `sentences/` | no | entity lists (list edges, negation check), corpus size |
+| `GENETIC/` libraries | no | gene symbols of listed genes (list edges) |
+| `CHEMICAL/chemical_to_target.json` | no | drug-target colours and the drug menu |
+| `DISEASE/disease.json`, `CHEMICAL/chemical.json` | no | phenotype and non-chemical flags |
+| `databases/pmc_years.json` | no | publication years |
+| `databases/oncokb_cancerGeneList.tsv` | no | Oncogene / Tumor suppressor buttons |
+| `databases/` HGNC, ChEBI, `ncit_drugs.json`, `cellosaurus.txt` (or in `gpu_bundle/databases/`) | no | screening look-alike names out of *Candidate driver* |
+| `summaries/pubmed_query.html` (or in the bundle root) | no | the query shown on the page |
+
+The vis-network library is fetched once per run and embedded; offline, the page loads it from the
+CDN when viewed.
+
 The drug-target colouring rests on a cross-link (corpus chemical → HGNC gene) built from
 ChEBI roles and DGIdb. Three ways a gene could pick up a colour it had not earned are fixed
 in the pipeline and guarded by a regression check — run it after any DGIdb or ChEBI update:
 
 ```bash
 python audit_drug_targets.py --data-root kaggle_working     # exit 0 = clean
+python audit_lists.py --data-root kaggle_working            # listed genes that miss an edge -> audit_lists.tsv
+```
+
+The correction rules have their own checks, each a few seconds and needing no data:
+
+```bash
+python test_negation.py
+python test_constructs.py
+python test_drug_direction.py
+python test_antibodies.py
 ```
 
 The graph spans gene, DISEASE and CHEMICAL nodes (diseases and chemicals identified by MONDO /
 ChEBI label — or NCIt label, for the biologics ChEBI has no term for — shaped ◆ and ■), so the
-gene–disease and chemical–gene edges BioRED contributes are drawn instead of discarded — on the
-reference run, 129 nodes / 151 edges against 62 / 55 for a gene-only view. That gene-only view
-and its `_G` outputs have been retired; the `_M` outputs below are the only ones written.
+gene–disease and chemical–gene edges BioRED contributes are drawn instead of discarded. On this
+corpus the graph holds 1,396 genes, 378 chemicals, 129 diseases and 5,941 edges, with sentences from
+1,294 of the 2,220 documents (2026-11-25). The gene-only view and its `_G` outputs have been
+retired; the `_M` outputs below are the only ones written.
 
 Output: `<data-root>/summaries/high_confidence_M.html`, `<data-root>/TRIPLES/high_confidence_M.json`,
 and a copy of the graph in the bundle root named after the current directory plus today's date
-(e.g. `lung_large_2026_07_19_M.html`).
+(e.g. `KMT2A_leukemia_2026_11_25_M.html`).
 
 **Reading the graph.** The page is self-contained — payload, library and all — and every edge
-traces back to the sentences behind it, with clickable PMIDs. Beyond filtering, it ranks the
-**nodes** carrying the current view (*Significance in view*: publications, partners or sentences,
-with a z-score, bootstrap confidence intervals on count and rank, and Fisher enrichment against
-the corpus with BH q-values), and a *Significance* slider hides what misses a q cutoff.
-[`Graph_description.md`](Graph_description.md) is the full guide: what each control does, the
-order the filters run in, and the limits worth carrying.
-
-**One corpus for every `lung_*` project.** The enrichment denominator is the union of
-publications across all sibling `lung_*` directories, so an odds ratio computed in one means the
-same thing as one computed in another. Each project caches its slice in
-`<data-root>/databases/corpus_contrib.json` and merges whatever the siblings have written; a
-project that has never been run is reported as absent rather than silently assumed. Run stage 3
-once per project to populate it.
+traces back to the sentences behind it, with clickable PMIDs. It opens on the `binds` relation
+only, with *Min connections* at 2, so most nodes are hidden at first: click *Check all* under
+*Relation type* for the rest. *Search gene*, *Search drug* and *Filter to drug/chemical* reach every
+node, and say which setting hides one that is not drawn.
+[`Graph_description.md`](Graph_description.md) is the guide to the controls, the order the filters
+run in, and the limits worth carrying.
 
 > **`high_confidence.py` has been removed.** The older "G_D_C" script (gene–gene *in a
 > disease/chemical context*, unsuffixed outputs) was deleted in `8f420f1`: it ignored
@@ -364,7 +446,7 @@ once per project to populate it.
 
 ## Data you must provide
 
-These are **git-ignored for size** (12 MB – 500 MB each) and are not in the bundle — place them
+These are **git-ignored** (up to 507 MB each) and are not in the bundle — place them
 under `gpu_bundle/databases/` before running stage 2 (see
 `gpu_bundle/databases/PLACE_DATABASES_HERE.md`):
 
@@ -381,6 +463,11 @@ under `gpu_bundle/databases/` before running stage 2 (see
   `chemical.py` normalizes the ones ChEBI cannot represent. Absent, both fall back to the
   INN-stem regex alone: antibody *names* are still recognised, but brand names, code names and
   synonyms are not, and none of them can be normalized
+- `cellosaurus.txt` — Cellosaurus cell lines. *Optional*, read only by stage 3
+- `oncokb_cancerGeneList.tsv` — OncoKB Cancer Gene List. *Optional*, read only by stage 3, from
+  `<data-root>/databases/`: `curl -o kaggle_working/databases/oncokb_cancerGeneList.tsv
+  https://www.oncokb.org/api/v1/utils/cancerGeneList.txt`. Absent, the Oncogene and Tumor
+  suppressor buttons stay empty, with a warning
 
 `gpu.py --list` preflights the three required ones and names any that are missing; the DGIdb
 table is not preflighted, precisely because it is optional.
@@ -411,12 +498,19 @@ it is modified. Without one, stage 1 simply downloads everything.
 ├── pub_year_xml.py                              # stage 1: step 6c — stamp <?pub-year YYYY?> into every corpus XML
 ├── clean_up.py                                  # stage 1: step 8 — deletes the intermediate XML/PDF dirs (last)
 ├── subtract.py                                  # stage 1: optional dir-subtract utility (-> gpu_bundle/removed)
-├── high_confidence_g.py                         # stage 3: the graph (typed edges + --merge)
+├── high_confidence_g.py                         # stage 3: the graph (corrections, --merge, rendering)
 ├── audit_drug_targets.py                        # stage 3: regression test for false drug targets
+├── audit_lists.py                               # stage 3: listed entities that miss an edge their list-mates got
+├── test_*.py                                    # stage 3: checks of the correction rules (negation, constructs,
+│                                                #   drug_direction, antibodies)
+├── kaggle_snippets.py                           # stage 2: the notebook cells to paste on Kaggle
 ├── gpu_bundle/                                  # stage 2: the GPU pipeline
 │   ├── gpu.py                                   #   orchestrator (20 steps)
 │   ├── drug_lexicon.py                          #   NCIt drug lexicon: builder + matcher (step 3)
-│   ├── requirements.txt                         #   GPU deps: torch/transformers/datasets<4/numpy/lxml
+│   ├── requirements.txt                         #   GPU deps: torch/transformers/datasets<4/bioc/numpy/lxml
+│   ├── direction.py                             #   who acts on whom (used by stage 2 and stage 3)
+│   ├── constructs.py, drug_direction.py,        #   corrections applied by stage 3 only
+│   │   antibodies.py
 │   ├── *.py                                     #   the step scripts
 │   ├── ppi-biobert-re/                          #   PPI checkpoint (BioInfer) — git-ignored, KEEP between runs
 │   │   ├── model.safetensors                    # ‡   413 MB: fine-tuned BioBERT encoder + classifier head
@@ -425,13 +519,13 @@ it is modified. Without one, stage 1 simply downloads everything.
 │   │   ├── tokenizer_config.json                # ‡
 │   │   ├── calibration.json                     # ‡   {method: platt, a, b, clip} — fit by calibration.py
 │   │   ├── training_args.bin                    #     HF TrainingArguments — provenance only
-│   │   └── checkpoint-878/                      #     best epoch (2); 1.3 GB, safe to delete before uploading
+│   │   └── checkpoint-850/                      #     best epoch (2); 1.3 GB, safe to delete before uploading
 │   │       ├── config.json, model.safetensors, tokenizer{,_config}.json, training_args.bin
 │   │       ├── optimizer.pt, scheduler.pt, rng_state.pth   #   resume state
 │   │       └── trainer_state.json                          #   per-epoch dev metrics
 │   ├── ppi_data/                                #   bigbio_to_re.py output: index / sentence / label TSVs
-│   │   ├── train.tsv                            # ‡   7,018 rows  (@GENE$-blinded pairs, labels 1 / 0)
-│   │   ├── dev.tsv                              # ‡     779 rows  — the calibrator is fit here
+│   │   ├── train.tsv                            # ‡   6,790 rows  (@GENE$-blinded pairs, labels 1 / 0)
+│   │   ├── dev.tsv                              # ‡   1,007 rows  — the calibrator is fit here
 │   │   └── test.tsv                             # ‡   1,604 rows  — test metrics + ECE
 │   ├── biored-biobert-re/                       #   BioRED checkpoint — same seven entries, 5-way signed head
 │   │   ├── model.safetensors                    # ‡   413 MB
@@ -441,9 +535,9 @@ it is modified. Without one, stage 1 simply downloads everything.
 │   │   ├── tokenizer_config.json                # ‡
 │   │   ├── calibration.json                     # ‡   its own Platt a/b (not interchangeable with the PPI one)
 │   │   ├── training_args.bin                    #
-│   │   └── checkpoint-6357/                     #     best epoch (3); same file set as checkpoint-878/
+│   │   └── checkpoint-6651/                     #     best epoch (3); same file set as checkpoint-850/
 │   ├── biored_data/                             #   bigbio_to_re.py output, document-level → sentence-level
-│   │   ├── train.tsv                            # ‡   33,889 rows (@GENE$/@DISEASE$/@CHEMICAL$/@VARIANT$)
+│   │   ├── train.tsv                            # ‡   35,459 rows (@GENE$/@DISEASE$/@CHEMICAL$/@VARIANT$)
 │   │   ├── dev.tsv                              # ‡    9,891 rows — BioRED's own dev split, not carved
 │   │   └── test.tsv                             # ‡    9,202 rows
 │   └── databases/                               #   ontology + reference data (provide these; git-ignored)
@@ -454,6 +548,9 @@ it is modified. Without one, stage 1 simply downloads everything.
 │       ├── chebi.json                           # 507 MB  ChEBI chemical ontology → chemical.py, target_pharm.py
 │       ├── interactions.tsv                     #  12 MB  DGIdb drug–gene interactions (open) → chemical.py
 │                                                #     OPTIONAL: absent = empty drug set, no error
+│       ├── cellosaurus.txt                      # 122 MB  Cellosaurus cell lines → high_confidence_g.py (OPTIONAL)
+│       ├── oncokb_cancerGeneList.tsv            # 0.1 MB  OncoKB cancer genes → high_confidence_g.py (OPTIONAL;
+│       │                                        #     read from <data-root>/databases/)
 │       ├── ncit_drugs.json                      # 5.8 MB  NCIt drug names → sentences.py (NER lexicon pass) and
 │                                                #     chemical.py (non-ChEBI fallback); generated by step 3
 │       └── pmc_years.json                       #   generated by pub_years.py (step 4) from the corpus's
@@ -465,6 +562,8 @@ it is modified. Without one, stage 1 simply downloads everything.
 ├── step_2_triples.html
 ├── Step_2_updated_triples.html                  #   stage 2 after the BioRED model was added
 ├── step_3_graph.html
+├── step_4_diff.html                             #   graph comparison (its script, diff_two.py, is not in the bundle)
+├── next_training_steps.html                     #   ideas for the next relation-model training round
 └── requirements.html
 ```
 
