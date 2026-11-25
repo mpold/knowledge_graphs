@@ -13,6 +13,14 @@ is a drug or chemical:
     natural metabolite, gene-loss or construct reading  -> left
     anything else                                       -> D is the agent, the sign stays
 
+Two drugs (fix_pair): the models read a combination as a sign ("VTP50469 IC50 fell when combined
+with MK-2206" became VTP-50469 inhibits MK-2206).
+
+    combination, synergy, sensitivity, IC50, "A+B"      -> associated
+    ... but "B hampered A-induced death" is antagonism  -> left
+    "A inhibitors B", "A-induced ... blocked by B", and
+    single sentences listed in PAIR_SWAP                -> B inhibits A
+
 Used by high_confidence_g.py and audit_lists.py at graph time, after constructs.apply().
 """
 import re
@@ -42,6 +50,40 @@ RESPONSE_AFTER = re.compile(r"(?:\s*(?:,|/|\b(?:and/or|and|or|plus)\b)\s*[\w-]+)
                             + r"\b", re.I)
 INDUCED_BY = re.compile(r"\binduced\s+by\s+(?:[\w-]+\s+){0,3}$", re.I)
 INDUCED = re.compile(r"\s?[-‐–]?\s?induced\b", re.I)
+
+COMBINED = re.compile(r"\b(?:synerg|combin|additiv|co-?treat|sensiti[sz]|sensitivity|potentiat|IC50)"
+                      r"|\b(?:abrogat|revers|overc[ao]m)\w* (?:[\w-]+ ){1,2}resistance", re.I)
+PLUS = re.compile(r"\s*[+＋]\s*")                        # "Verapamil+DOX group"
+ANTAGONIZE = re.compile(r"\b(?:ameliorat|attenuat|block|abolish|suppress|inhibit|reduc|disrupt|prevent|"
+                        r"hamper|diminish|impair)\w*", re.I)
+INHIBITORS = re.compile(r"\s+(?:inhibitors?|chelators?|antagonists?)\s+", re.I)
+RESCUED_BY = re.compile(r"[-‐–\s]induced\b.*\b(?:rescued|blocked|abolished|prevented|reversed)\s+"
+                        r"(?:\w+\s+)?(?:by|using|with)\s+(?:[\w-]+\s+){0,3}(?:[\w-]+,\s*)?", re.I)
+# (paper, first drug, second drug): the second one blocks the first one's effect
+PAIR_SWAP = {("PMC5226548", "cytarabine", "AC220"), ("PMC6726985", "Cycloheximide", "MG132")}
+
+
+def fix_pair(t):
+    """One signed drug-drug triple, in place. Returns None, "drug_agent" or "associated"."""
+    m = re.search(r":(\d+)-(\d+):(\d+)-(\d+)$", t.get("pair_id") or "")
+    if t["predicate"].get("text") not in (UP, DOWN) or t.get("polarity") == "negated" or not m \
+            or t.get("direction") == "drug_agent":
+        return None
+    n, text = [int(x) for x in m.groups()], t.get("sentence") or ""
+    a, b = sorted([(n[0], n[1]), (n[2], n[3])])
+    gap = text[a[1]:b[0]]
+    key = ((t.get("pmid") or "").split(".")[0], text[a[0]:a[1]], text[b[0]:b[1]])
+    if INHIBITORS.fullmatch(gap) or RESCUED_BY.fullmatch(gap) or key in PAIR_SWAP:
+        if t.get("direction") != "agent_cue":            # else the second drug is already first
+            t["subject"], t["object"] = t["object"], t["subject"]
+        t["predicate"]["text"], t["direction"] = DOWN, "drug_agent"
+        return "drug_agent"
+    if INDUCED.match(text, b[1]) and ANTAGONIZE.search(gap):
+        return None
+    if COMBINED.search(text) or PLUS.fullmatch(gap):
+        t["predicate"]["text"], t["direction"] = "associated", "drug_combination"
+        return "associated"
+    return None
 
 
 def fix(t, kind, drug):

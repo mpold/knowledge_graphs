@@ -473,6 +473,19 @@ comparisons, no clear verb) the relation is drawn as `associated`. A gene named 
 the verb is plain, also as *decreased in cells transfected with X siRNA* (but not when the siRNA
 targets a fusion); with a drug the relation is `associated`; otherwise the model's label stays.
 
+## Finding drugs and hidden nodes
+
+*Search drug* and *Filter to drug/chemical* list the drugs of the curated target table (choosing one shows
+its target genes) and, below them, every chemical node (choosing one shows its own edges). A name in
+both is found in the target table first. When a searched node is not on the canvas, the panel names
+the settings that hide it, such as *Relation type* or *Min connections*.
+
+## Antibody and CAR-T treatments
+
+*anti-PD-1*, *CD19 CAR T cells* and *MSLN-targeted ADCs* are drawn as the treatment (*anti-PD-1
+antibody*, *CD19 CAR-T*, *MSLN ADC*, chemical nodes) and not as the target gene
+(`gpu_bundle/antibodies.py`). Lab reagents, *anti-X siRNA* and *X blockade* keep their reading.
+
 ## Drugs as agents
 
 The models predict no direction, and the first-mentioned entity is taken as the agent unless the
@@ -480,7 +493,10 @@ text says otherwise. Between a gene or disease and a drug the drug is made the a
 (`gpu_bundle/drug_direction.py`): *the BCL-2 inhibitor venetoclax* is drawn as venetoclax `inhibits`
 BCL2. Sentences on drug response (*G expression and resistance to D*) labelled `activates` become
 `associated`; those of a gene labelled `inhibits` (*FTO inhibits ATRA-induced differentiation*),
-natural metabolites and negated relations keep their reading.
+natural metabolites and negated relations keep their reading. Between two drugs, synergy or
+combination wording (*the IC50 of A fell when combined with B*, *A+B group*) is `associated`;
+antagonism (*A attenuated B-induced apoptosis*) keeps its sign. *phospho-*, methylcellulose and
+*BetA* (read as *electron*) are not drawn, *IDA* is idarubicin, and *NOXA* is the gene PMAIP1.
 
 ## Stand-alone nodes
 

@@ -94,6 +94,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "gpu_bundle"))
+import antibodies as AB  # noqa: E402
 import constructs as K  # noqa: E402
 import drug_direction as DD  # noqa: E402
 import direction as D  # noqa: E402  (shared with relation_extraction.py)
@@ -190,7 +191,9 @@ DISEASE_IGNORE = {"neoplasm", "cancer", "os", "sd"}
 # The match is exact on the surface or the ChEBI label, so the compounds that merely contain
 # these names survive: "tyrosine kinase inhibitor", "O(4)-phosphotyrosine", "2-deoxy-D-glucose"
 # (a real glycolysis inhibitor) all stay nodes.
-CHEMICAL_IGNORE = {"tyrosine", "glucose"}
+#   phosphono group  the prefix of "phospho-ERK"; methyl cellulose: a colony-assay medium;
+#   electron         "BetA", a drug ChEBI's synonym list takes for the beta particle
+CHEMICAL_IGNORE = {"tyrosine", "glucose", "phosphono group", "methyl cellulose", "electron"}
 
 # Ambiguous disease surfaces whose normalization is wrong FOR THIS CORPUS: the mention is
 # real, only the mapping is off, so overriding beats ignoring. Keys lowercase surfaces; the
@@ -243,7 +246,8 @@ DISEASE_SURFACE = {
 # Drug abbreviations (lowercase surface -> ChEBI label). They win over the mention's TYPE too: the
 # NER tags some as GENETIC, and "BTZ" is an old alias of CASC3 (Barentsz), so 506 bortezomib
 # mentions of the myeloma corpus were drawn as that gene. The gene's own name, CASC3, is untouched.
-CHEMICAL_SURFACE = {"cfz": "carfilzomib", "dex": "dexamethasone", "btz": "bortezomib"}
+CHEMICAL_SURFACE = {"cfz": "carfilzomib", "dex": "dexamethasone", "btz": "bortezomib",
+                    "ida": "idarubicin"}
 
 
 def drug_surface(e):
@@ -563,15 +567,26 @@ def load_type_flags():
 INHIB_LABEL = {}
 
 
+def tag_antibodies(triples, flags):
+    """Name antibody and CAR-T treatments as such instead of their target gene, in place, for
+    mentions that resolve to a gene node (antibodies.py). Returns (mentions, pairs dropped)."""
+    def symbol_of(e):
+        n = node_of(e, flags)
+        return n[1] if n and n[0] == "gene" else None
+    return AB.tag(triples, symbol_of)
+
+
 def orient_drugs(triples, flags):
-    """Put the drug first in signed gene-drug and disease-drug triples, in place
-    (drug_direction.py). Returns (reversed, left unsigned)."""
+    """Put the drug first in signed gene-drug and disease-drug triples and read the signed drug-drug
+    ones, in place (drug_direction.py). Returns (reversed, left unsigned)."""
     out = []
     for t in triples:
         if t["predicate"].get("text") in DD.D.SIGNED:
             a, b = node_of(t["subject"], flags), node_of(t["object"], flags)
             if a and b and a[0] != "chemical" and b[0] == "chemical":
                 out.append(DD.fix(t, a[0], b[1]))
+            elif a and b and a[0] == b[0] == "chemical":
+                out.append(DD.fix_pair(t))
     return out.count("drug_agent"), out.count("associated")
 
 
@@ -1438,7 +1453,7 @@ __LIBTAG__
  <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
- <div class="row">Filter to drug:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
+ <div class="row">Filter to drug/chemical:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
  <div class="row">Match text in sentence: <button class="ihelp" aria-label="About the text filter" aria-expanded="false">i</button><br><input id="textfilter" placeholder="e.g. phosphorylat or /inhibit(s|ed)?/" autocomplete="off">
   <div class="mut help">Case-insensitive substring; wrap in / / for a regex. Keeps only edges with a matching sentence, and shows just those sentences. Regular expressions are the way to find edges that describe <b>variants</b>: for example, <code>/\s+[A-Z]\d+[A-Z]\s+/</code> finds edges that describe missense and nonsense variants. It is a search: an edge that passes <b>Min unique sentences</b> and <b>Min unique publications</b> on all its sentences is kept if any one of them matches (the Enrich buttons, by contrast, count only their own matching sentences against those minimums). <b>Min connections</b> and <b>Min cluster size</b> are then applied to what the query leaves.</div></div>
 __KINDROW__
@@ -1449,7 +1464,15 @@ __KINDROW__
  <div class="row">Training set behind the edge <button class="ihelp" data-help="src" aria-label="About training sets" aria-expanded="false">i</button></div>
  <div class="row" id="srcbtns"></div>
  <div class="row mut help" data-help="src" id="srchint">Which model kept each <em>sentence</em>. <b>PPI model</b> = every sentence the BioInfer/PPI model kept, shown with <em>its</em> reading &mdash; it has one label, <b>interacts</b>, so every other relation type reads 0 there. <b>BioRED model</b> = every sentence the BioRED model kept, with its typed (often signed) label. A sentence both models kept appears under each button with that model&rsquo;s reading (the tooltip gives both); there is no &ldquo;both&rdquo; view, because the two models do not share relation types. Under <b>All</b> each such sentence carries both readings and matches either relation box, so ticking just <b>interacts</b> shows exactly the PPI-model view, and a typed box exactly the BioRED-model view. Each count is the number of <b>edges holding at least one such sentence</b>, over the whole graph rather than the current filters; an edge counts under every model behind it, so the counts sum past All.</div>
- <div class="row">Relationship score: <b id="scval">&ge;0.99</b><br><input id="conf" type="range" min="0" max="13" step="1" value="__CONFDEF__" aria-label="Minimum relationship score"></div>
+ <div class="row">Relationship score: <b id="scval">&ge;0.99</b> <button class="ihelp" aria-label="About the relationship score" aria-expanded="false">i</button><br><input id="conf" type="range" min="0" max="13" step="1" value="__CONFDEF__" aria-label="Minimum relationship score">
+  <div class="mut help">Each sentence&rsquo;s triple has its own score, 0&ndash;1; the slider hides sentences below it.<br><b>Score = P &times; NER &times; cue &times; result &times; section &times; self</b> (at most 1)<br>
+  &bull; <b>P</b>: the relation model&rsquo;s probability for its best label, calibrated. It carries most of the weight.<br>
+  &bull; <b>NER</b>: the lower of the two entities&rsquo; recognition scores.<br>
+  &bull; <b>cue</b>: 1 with a relation word in the sentence, else 0.85.<br>
+  &bull; <b>result</b>: 1 to 1.1, higher the more the sentence reads as a result.<br>
+  &bull; <b>section</b>: results, abstract, figure 1; discussion 0.97; other 0.95; introduction 0.90.<br>
+  &bull; <b>self</b>: 0.5 for a gene paired with itself (unless it can bind or act on itself), else 1.<br>
+  Scores below 0.5 are not kept. If both models keep a pair, the score that ranks higher within its own model is used. Corrections made afterwards (direction, negation, knockdown) do not change the score.</div></div>
  <div class="row mut" id="stats"></div>
 </div>
 <div id="net"></div>
@@ -2463,7 +2486,8 @@ function build(thr){
    focusActive=true;
    const seeds=new Set(), labs=[];
    if(gf){const fn=DATA.nodes.find(n=>n.label.toLowerCase()===gf)||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(gf)===0);if(fn){seeds.add(fn.id);labs.push(fn.label);}else labs.push('(no gene: '+gf+')');}
-   if(chemSel){DATA.nodes.forEach(n=>{if((n.chems||[]).indexOf(chemSel)>=0)seeds.add(n.id);});labs.push('chem: '+chemSel);}
+   if(chemSel.indexOf('node:')===0){seeds.add(chemSel.slice(5));labs.push(chemSel.slice(5));}
+   else if(chemSel){DATA.nodes.forEach(n=>{if((n.chems||[]).indexOf(chemSel)>=0)seeds.add(n.id);});labs.push('chem: '+chemSel);}
    focusSeeds=seeds;focusHops=parseInt(document.getElementById('hops').value)||1;
    edges=focusKeep(edges,focusSeeds,focusHops);
    focusLabel=labs.join(', ');
@@ -2756,7 +2780,7 @@ const txtEl=document.getElementById('textfilter');let txtTimer=null;   // deboun
 txtEl.addEventListener('input',()=>{clearTimeout(txtTimer);txtTimer=setTimeout(()=>build(+thr.value),350);});
 txtEl.addEventListener('keydown',ev=>{if(ev.key==='Enter'){clearTimeout(txtTimer);build(+thr.value);}});
 const searchBox=document.getElementById('search');
-function doSearch(q){q=(q||'').trim();const info=document.getElementById('info');if(!q)return;const hit=DATA.nodes.find(n=>n.label.toLowerCase()===q.toLowerCase())||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(q.toLowerCase())===0);if(!hit){info.innerHTML='No gene matching "'+q+'"';return;}try{network.selectNodes([hit.id]);network.focus(hit.id,{scale:1.3,animation:true});info.innerHTML='<b>'+hit.label+'</b>';}catch(e){info.innerHTML='<b>'+hit.label+'</b> not in current view';}}
+function doSearch(q){q=(q||'').trim();const info=document.getElementById('info');if(!q)return;const hit=DATA.nodes.find(n=>n.label.toLowerCase()===q.toLowerCase())||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(q.toLowerCase())===0);if(!hit){info.innerHTML='No node matching "'+esc(q)+'"';return;}if(!nodeDrawn(hit.id)){info.innerHTML=hiddenNote(hit);return;}try{network.selectNodes([hit.id]);network.focus(hit.id,{scale:1.3,animation:true});info.innerHTML='<b>'+hit.label+'</b>';}catch(e){info.innerHTML='<b>'+hit.label+'</b> not in current view';}}
 searchBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')doSearch(searchBox.value);});
 searchBox.addEventListener('change',()=>doSearch(searchBox.value));
 function zoomBy(f){if(!network)return;const s=network.getScale();network.moveTo({scale:s*f,animation:{duration:200}});}
@@ -2770,7 +2794,56 @@ yl.value=MINY;yh.value=MAXY;
 function updYr(){const a=activeYears();document.getElementById('yrlab').textContent=a[0]+'–'+a[1];}
 [yl,yh].forEach(el=>el.addEventListener('input',()=>{updYr();build(+thr.value);}));
 updYr();
-const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});csel.addEventListener('change',()=>build(+thr.value));
+const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]=chemGenes[c]||[]).push(n.label);}));const csel=document.getElementById('chemfilter');Object.keys(chemGenes).sort().forEach(c=>{const g=chemGenes[c].slice().sort();const o=document.createElement('option');o.value=c;o.textContent=c+' → '+g.join(', ');csel.appendChild(o);});
+// The table above knows only drugs with a curated target. Every chemical node is listed below it
+// (value "node:<id>"), and choosing one shows that node with its own edges, like Filter to gene.
+(function(){const g=document.createElement('optgroup');g.label='Chemical nodes (own edges)';
+ DATA.nodes.filter(n=>n.kind==='chemical').sort((a,b)=>a.label.localeCompare(b.label)).forEach(n=>{
+  const o=document.createElement('option');o.value='node:'+n.id;o.textContent=n.label;g.appendChild(o);});
+ if(g.children.length)csel.appendChild(g);})();
+// Why a node of the graph is not on the canvas: the settings that alone remove all its edges; if
+// none does so alone, the first one at which none are left; then what acts on the whole picture.
+function whyHidden(id){
+ const E=DATA.edges.filter(e=>e.from===id||e.to===id), conf=activeConf(), [lo,hi]=activeYears(), cats=activeCats(),
+  kinds=activeKinds(), t=+thr.value, mp=activeMinPub(), md=activeMinDegree(), other=e=>e.from===id?e.to:e.from;
+ if(!E.length)return 'it has no edges';
+ const pubs=s=>new Set(s.map(z=>z.pmid)).size;
+ const steps=[
+  ['Node types',null,e=>!kinds||(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to]))],
+  ['Relationship score',(e,s)=>s.sc>=conf],
+  ['Years',(e,s)=>passYear(s.yr,lo,hi)],
+  ['model (training set)',(e,s)=>srcPass(e,s,SRC_MODE)],
+  ['Relation type',(e,s)=>sentCats(e,s).some(c=>cats.has(c))],
+  ['Match text / Enrich',(e,s)=>!TM||TM.test(s.text,e)],
+  ['Min unique sentences',null,(e,S)=>S.length>=t],
+  ['Min unique publications',null,(e,S)=>mp<=1||pubs(S)>=mp]];
+ const left=(e,sel)=>{let S=e.sents;for(const [,f] of sel)if(f)S=S.filter(s=>f(e,s));
+  return S.length>0&&sel.every(z=>!z[2]||z[2](e,S));};
+ const bad=steps.filter(z=>!E.some(e=>left(e,[z]))).map(z=>z[0]);
+ let L=E.filter(e=>left(e,steps));
+ if(!bad.length&&!L.length)for(let k=1;k<=steps.length;k++)
+  if(!E.some(e=>left(e,steps.slice(0,k)))){bad.push(steps.slice(0,k).map(z=>z[0]).filter((n,i)=>i===k-1||!E.every(e=>left(e,[steps[i]]))).join(' + '));break;}
+ const gf=(document.getElementById('genefilter').value||'').trim(), focus=gf||csel.value;
+ // single-link nodes: too few partners under any settings, so say it along with the rest
+ if(!focus&&md>1&&!(DIS_KEEP.size&&document.getElementById('disconn').checked)&&new Set(E.map(other)).size<md)bad.push('Min connections');
+ if(!bad.length){
+  if(focus)bad.push('Filter to gene / drug');
+  else if(DIS_KEEP.size)bad.push('Keep diseases');
+  else if(md>1)bad.push('Min connections (its partners drop out too)');
+  else if(activeMinCluster()>2)bad.push('Min cluster size');
+  else if(HIDE_LONE)bad.push('Hide stand-alone nodes');
+  else bad.push('the current settings');
+ }
+ return bad.join(', ');
+}
+function nodeDrawn(id){return !!(NODEDS&&NODEDS.get(id));}
+function hiddenNote(n){return '<b>'+esc(n.label)+'</b> is in the graph, hidden by: '+esc(whyHidden(n.id));}
+function showDrug(label){const info=document.getElementById('info'),v=csel.value;
+ if(!v){if(label)info.innerHTML='';return;}
+ const n=v.indexOf('node:')===0?DATA.nodes.find(x=>x.id===v.slice(5)):null;
+ if(n&&!nodeDrawn(n.id)){info.innerHTML=hiddenNote(n);return;}
+ info.innerHTML='Drug filter: <b>'+esc(n?n.label:v)+'</b>';}
+csel.addEventListener('change',()=>{build(+thr.value);showDrug(true);});
 // disease list for the tissue controls; the gene-only graph has none, so the row hides itself
 (function(){const ds=DATA.nodes.filter(n=>(n.kind||'gene')==='disease').sort((a,b)=>a.label.localeCompare(b.label));
  const trow=document.getElementById('tissuerow');
@@ -2784,7 +2857,7 @@ const chemGenes={};DATA.nodes.forEach(n=>(n.chems||[]).forEach(c=>{(chemGenes[c]
  // also a position control: replay from BASEPOS instead of rebuilding the whole network
  document.getElementById('tissuestack').addEventListener('change',applyLayoutShape);
 })();
-const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value);const m=opts.find(o=>o.value.toLowerCase()===q)||opts.find(o=>o.value.toLowerCase().indexOf(q)===0)||opts.find(o=>o.value.toLowerCase().indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);info.innerHTML='Drug filter: <b>'+esc(m.value)+'</b>';}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
+const drugBox=document.getElementById('drugsearch');function findDrug(q){q=(q||'').trim().toLowerCase();if(!q)return;const info=document.getElementById('info');const opts=[...csel.options].filter(o=>o.value),nm=o=>o.value.replace(/^node:/,'').toLowerCase();const m=opts.find(o=>nm(o)===q)||opts.find(o=>nm(o).indexOf(q)===0)||opts.find(o=>nm(o).indexOf(q)>=0);if(m){csel.value=m.value;build(+thr.value);showDrug();}else{info.innerHTML='No drug matching "'+esc(q)+'"';}}drugBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')findDrug(drugBox.value);});drugBox.addEventListener('change',()=>findDrug(drugBox.value));
 // The left panel is exactly as wide as its zoom row: measured at runtime rather than guessed in
 // CSS, because the buttons' width depends on the font that actually resolved. Fit's right edge
 // then lands on the content edge, so the gap to the border is the padding -- the same gap the
@@ -2944,6 +3017,9 @@ def main():
     n_pos, n_drop = recheck_negation(raw)
     print(f"negation: {n_pos:,} triple(s) no longer negated (the cue denies something else: subgroup, "
           f"other clause, but not X, half words); {n_drop:,} dropped (the two sides of 'X but not Y')")
+    n_ab, n_abdrop = tag_antibodies(raw, flags)
+    print(f"antibody / CAR-T treatments: {n_ab:,} gene mention(s) named as the treatment, {n_abdrop:,} "
+          f"pair(s) of one antibody's two names dropped -- gpu_bundle/antibodies.py")
     (n_sign, n_unsign), n_name, (n_loss, n_drug) = K.apply(raw)
     print(f"si/shRNA constructs: {n_sign:,} signed triple(s) re-signed from the sentence, {n_unsign:,} "
           f"left unsigned (associated), {n_name:,} name(s) corrected -- gpu_bundle/constructs.py")
@@ -2951,7 +3027,7 @@ def main():
           f"{n_drug:,} with a drug left unsigned (associated)")
     n_agent, n_resp = orient_drugs(raw, flags)
     print(f"drug direction: {n_agent:,} signed triple(s) reversed to put the drug first, {n_resp:,} on "
-          f"drug response left unsigned (associated) -- gpu_bundle/drug_direction.py")
+          f"drug response or a drug combination left unsigned (associated) -- gpu_bundle/drug_direction.py")
     d, merge_note = merge_models(raw, args.merge, args.typed_model, args.gate_model, args.merge_scale)
     print(merge_note)
     # Ceilings are read from the PRE-merge triples: after the merge a pair keeps the typed

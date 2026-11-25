@@ -30,6 +30,18 @@ CASES = [
     ("[[FTO]] inhibits <<ATRA>>-induced differentiation of APL cells.", "gene", "inhibits", (False, "inhibits")),
     ("[[ABCB1]] reduced <<succinate>> levels.", "gene", "inhibits", (False, "inhibits")),
 ]
+# two drugs, first mentioned [[A]], second <<B>>; paper; expected (B is the subject, label)
+PAIRS = [
+    ("Reduction in the IC50 of [[VTP50469]] when combined with <<MK-2206>>.", "", (False, "associated")),
+    ("Increased apoptosis in the MLL-AF9+[[Verapamil]]+<<DOX>> group.", "", (False, "associated")),
+    ("[[IACS-010759]] also abrogated <<cytarabine>> resistance in MA9 cells", "", (False, "associated")),
+    ("[[Sunitinib]] synergizes with <<ABT-199>> in SEM cells.", "", (False, "associated")),
+    ("[[BetA]] with Dox co-treatment attenuated <<Dox>>-induced cell death", "", (False, "inhibits")),
+    ("Pretreatment with [[MM102]] ameliorated <<cisplatin>>-induced apoptosis.", "", (False, "inhibits")),
+    ("Importantly, [[Ca2+]] inhibitors <<EGTA>> and BAPTA-AM rescued apoptosis.", "", (True, "inhibits")),
+    ("[[VTP-50469]]-induced loss of IKAROS protein was partially rescued using the proteosome inhibitor, <<bortezomib>> (BTZ)", "", (True, "inhibits")),
+    ("cytotoxicity of [[cytarabine]] was lower when first exposed to (<<AC220>>)", "PMC5226548", (True, "inhibits")),
+]
 NAME = {"activates": DD.UP, "inhibits": DD.DOWN, "associated": "associated"}
 
 
@@ -48,7 +60,20 @@ def main():
         if (t["subject"] == "d", t["predicate"]["text"]) != (swap, NAME[want]):
             bad += 1
             print(f"FAIL want {swap, want}, got {t['subject'], t['predicate']['text']}: {marked}")
-    print(f"{len(CASES) - bad}/{len(CASES)} passed")
+    for marked, paper, (swap, want) in PAIRS:
+        text, spans = re.sub(r"\[\[|\]\]|<<|>>", "", marked), []
+        for m in re.finditer(r"\[\[(.+?)\]\]|<<(.+?)>>", marked):
+            at = len(re.sub(r"\[\[|\]\]|<<|>>", "", marked[:m.start()]))
+            spans.append((at, at + len(m.group(1) or m.group(2))))
+        (g0, g1), (d0, d1) = spans
+        t = {"subject": "g", "object": "d", "predicate": {"text": DD.DOWN}, "polarity": "positive",
+             "direction": "reading_order", "sentence": text, "pmid": paper, "pair_id": f"x:0:{g0}-{g1}:{d0}-{d1}"}
+        DD.fix_pair(t)
+        if (t["subject"] == "d", t["predicate"]["text"]) != (swap, NAME[want]):
+            bad += 1
+            print(f"FAIL want {swap, want}, got {t['subject'], t['predicate']['text']}: {marked}")
+    n = len(CASES) + len(PAIRS)
+    print(f"{n - bad}/{n} passed")
     return bad
 
 

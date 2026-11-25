@@ -84,6 +84,7 @@ def main():
     for t in raw:
         H.D.orient(t)
     H.recheck_negation(raw)
+    H.tag_antibodies(raw, flags)
     H.K.apply(raw)
     H.orient_drugs(raw, flags)
     merged, note = H.merge_models(raw, a.merge)

@@ -34,10 +34,17 @@ SIGNED = {UP, DOWN}
 CONSTRUCT = re.compile(r"^(?:si|sh)[-‐– ]?(?=[A-Z0-9])|\b(?:si|sh)[- ]?RNAs?\b")
 CONTROL = re.compile(r"^(?:sh|si|sg)-?ctr(?![A-Za-z0-9])", re.I)
 # (paper, surface) -> HGNC symbol, None = not a gene there
+ST2_PAPER = "PMC4699312"
 PAPER_NAMES = {
+    (ST2_PAPER, "sST2"): "IL1RL1",          # soluble and membrane ST2, not CORT / STK3
+    (ST2_PAPER, "mST2"): "IL1RL1",
     ("PMC5388432", "shM1"): "HOTAIRM1",     # an shRNA against HOTAIRM1, not MRLN
     ("PMC5388432", "A6"): None,             # HOXA6 in "HOXA4, A5, A6 and A7", not TWF1
 }
+# (paper, subject, object, words of the sentence) -> sign the sentence gives
+PAPER_SIGNS = {(ST2_PAPER, "ST2", y, "ST2 blockade decreased systemic"): DOWN for y in ("IL-10", "IL-33")}
+# tagged CHEMICAL, but the surface is a gene (ChEBI: naphthyloxyacetic acid, NCIt: deoxypyridinoline)
+CHEM_GENES = {"NOXA": "PMAIP1", "Noxa": "PMAIP1", "DPYD": "DPYD"}
 
 _UP = (r"(?:up-?regulat|increas|enhanc|elevat|induc|activat|promot|stimulat|aggravat|augment|"
        r"rais|restor)")
@@ -222,6 +229,11 @@ def fix_names(t):
     n, paper = 0, (t.get("pmid") or "").split(".")[0]
     for e in (t["subject"], t["object"]):
         txt = (e.get("text") or "").strip()
+        if e.get("type") == "CHEMICAL" and txt in CHEM_GENES:
+            for k in ("chebi_label", "ncit_label", "chebi_via"):
+                e.pop(k, None)
+            e.update(type="GENETIC", hgnc_symbol=CHEM_GENES[txt], control="no")
+            n += 1
         if e.get("type") != "GENETIC":
             continue
         if CONTROL.search(txt) and e.get("control") != "yes":
@@ -230,6 +242,9 @@ def fix_names(t):
         if (paper, txt) in PAPER_NAMES and e.get("hgnc_symbol") != PAPER_NAMES[paper, txt]:
             e["hgnc_symbol"] = PAPER_NAMES[paper, txt]
             n += 1
+    for (p, x, y, words), sign in PAPER_SIGNS.items():
+        if (paper, t["subject"].get("text"), t["object"].get("text")) == (p, x, y)                 and words in (t.get("sentence") or "") and t["predicate"].get("text") in SIGNED - {sign}:
+            t["predicate"]["text"] = sign
     return n
 
 
