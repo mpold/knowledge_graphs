@@ -69,6 +69,12 @@ LOSS = [
     ("<<Runx1>> upregulation in [[Runx2]]-deficient cells", "GENETIC", "activates", ("Runx2", "inhibits")),
     ("In turn, <<HoxA9>> expression was decreased upon loss of [[Dot1l]].", "GENETIC", "inhibits", ("Dot1l", "activates")),
     ("[[Fbxo22]] loss significantly represses development of <<AML>>.", "DISEASE", "inhibits", ("Fbxo22", "activates")),
+    # the lost gene named as the cells' treatment; not when the siRNA targets a fusion
+    ("Expression of <<c-Jun>>, c-Myc, Akt was downregulated in HOS cells transfected with [[MLLT3]]-siRNA.", "GENETIC", "activates", ("MLLT3", "activates")),
+    ("The level of <<c-Jun>>, BCL-2 and c-Myc was significantly decreased in HOS cells with [[MLLT3]] knockdown.", "GENETIC", "activates", ("MLLT3", "activates")),
+    ("<<Bax>> was increased in cells treated with [[MLLT3]] siRNA.", "GENETIC", "activates", ("MLLT3", "inhibits")),
+    ("<<caspase 8>> expression was increased in cells treated with MLL–[[AFF1]] siRNA.", "GENETIC", "activates", None),
+    ("<<caspase 8>> expression was increased in cells treated with MLL::[[AFF1]] siRNA.", "GENETIC", "activates", None),
     ("[[CEBPE]] depletion could reverse the activation of <<S100A9>>.", "GENETIC", "activates", None),
     ("[[ERa]] knockdown downregulates E2 and BPA induced expression of <<HOXC6>>.", "GENETIC", "activates", None),
     ("[[Mll1]] knockdown significantly increased sensitivity to <<Wnt3a>>.", "GENETIC", "activates", None),

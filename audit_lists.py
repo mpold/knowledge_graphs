@@ -85,6 +85,7 @@ def main():
         H.D.orient(t)
     H.recheck_negation(raw)
     H.K.apply(raw)
+    H.orient_drugs(raw, flags)
     merged, note = H.merge_models(raw, a.merge)
     print(note)
     by_pair = {t["pair_id"]: t for t in merged}

@@ -150,6 +150,22 @@ def drug_effect(text, g, c, y):
         and not _NOT_DRUG_LOSS.search(text[max(0, c[0] - 40):y[0]])
 
 
+# "Y was decreased in HOS cells transfected with X siRNA / in cells with X knockdown"
+_IN_CELLS = re.compile(r"\s+" + _LY + r"in\s+(?:[\w./+-]+\s+){0,4}?cells?\s+"
+                       r"(?:(?:transfected|transduced|treated)\s+)?with\s+", re.I)
+_FUSED = re.compile(r"\w\s?(?:[-‐–/]|::)\s?$")           # "MLL-AFF1 siRNA": the fusion was lost
+
+
+def cells_effect(text, g, c, y):
+    """Effect on Y (span y) in cells that lost the gene at span g (c = with its loss wording)."""
+    if y[1] > c[0] or c[0] != g[0] or _FUSED.search(text[max(0, g[0] - 4):g[0]]):
+        return None
+    mid = text[y[1]:c[0]]
+    found = list(EFFECT.finditer(mid))
+    if HARD.search(mid) or len(found) != 1 or not _IN_CELLS.fullmatch(mid, found[0].end()):
+        return None
+    return _sign(found)
+
 
 def loss_span(text, start, end):
     """Span of the gene at [start, end) with its loss wording, or None."""
@@ -191,6 +207,8 @@ def fix_loss(t):
             or PART.match(text, c[1]):
         return None
     got = effect(text, c, y)
+    if got is None:
+        got = cells_effect(text, span[side], c, y)
     if got is None:
         return None
     t["direction"], t["predicate"]["text"] = "loss", DOWN if got > 0 else UP

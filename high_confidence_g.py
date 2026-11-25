@@ -95,6 +95,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "gpu_bundle"))
 import constructs as K  # noqa: E402
+import drug_direction as DD  # noqa: E402
 import direction as D  # noqa: E402  (shared with relation_extraction.py)
 
 ROOT = Path(__file__).resolve().parent
@@ -560,6 +561,18 @@ def load_type_flags():
 # '-i' inhibitor shorthand (BRAFi, MEKi) that triples.py recast as a drug class: one node per
 # class, case-insensitively ("eIF4F inhibitor" / "eiF4F inhibitor"), labelled as first seen
 INHIB_LABEL = {}
+
+
+def orient_drugs(triples, flags):
+    """Put the drug first in signed gene-drug and disease-drug triples, in place
+    (drug_direction.py). Returns (reversed, left unsigned)."""
+    out = []
+    for t in triples:
+        if t["predicate"].get("text") in DD.D.SIGNED:
+            a, b = node_of(t["subject"], flags), node_of(t["object"], flags)
+            if a and b and a[0] != "chemical" and b[0] == "chemical":
+                out.append(DD.fix(t, a[0], b[1]))
+    return out.count("drug_agent"), out.count("associated")
 
 
 def node_of(e, flags):
@@ -2936,6 +2949,9 @@ def main():
           f"left unsigned (associated), {n_name:,} name(s) corrected -- gpu_bundle/constructs.py")
     print(f"gene loss (knockdown, deletion ...): {n_loss:,} signed triple(s) read from the sentence, "
           f"{n_drug:,} with a drug left unsigned (associated)")
+    n_agent, n_resp = orient_drugs(raw, flags)
+    print(f"drug direction: {n_agent:,} signed triple(s) reversed to put the drug first, {n_resp:,} on "
+          f"drug response left unsigned (associated) -- gpu_bundle/drug_direction.py")
     d, merge_note = merge_models(raw, args.merge, args.typed_model, args.gate_model, args.merge_scale)
     print(merge_note)
     # Ceilings are read from the PRE-merge triples: after the merge a pair keeps the typed

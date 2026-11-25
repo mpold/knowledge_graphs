@@ -470,7 +470,17 @@ re-read from the sentence (`gpu_bundle/constructs.py`): *siMLL1 decreased AURKA*
 `activates` AURKA. Where no sign can be read reliably (group labels such as *shX + DOX group*,
 comparisons, no clear verb) the relation is drawn as `associated`. A gene named with its loss
 (*knockdown of X*, *X-deficient*) is read the same way when its partner is a gene or a disease and
-the verb is plain; with a drug the relation is `associated`; otherwise the model's label stays.
+the verb is plain, also as *decreased in cells transfected with X siRNA* (but not when the siRNA
+targets a fusion); with a drug the relation is `associated`; otherwise the model's label stays.
+
+## Drugs as agents
+
+The models predict no direction, and the first-mentioned entity is taken as the agent unless the
+text says otherwise. Between a gene or disease and a drug the drug is made the agent
+(`gpu_bundle/drug_direction.py`): *the BCL-2 inhibitor venetoclax* is drawn as venetoclax `inhibits`
+BCL2. Sentences on drug response (*G expression and resistance to D*) labelled `activates` become
+`associated`; those of a gene labelled `inhibits` (*FTO inhibits ATRA-induced differentiation*),
+natural metabolites and negated relations keep their reading.
 
 ## Stand-alone nodes
 
