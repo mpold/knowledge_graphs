@@ -27,7 +27,7 @@ stand for its gene ends are set in bold blue, so you can see what was read as th
 
 **Edges** — colour is the relation carried by most of its sentences *in view*: `activates`
 green, `inhibits` red, `binds` blue, `interacts` purple, `associated` grey, negations amber and
-dashed. Thickness and arrowhead size scale with **independent publications**, square-rooted and
+dashed. *activates* ends in an arrowhead, *inhibits* in an inhibition bar (T). Thickness and arrowhead / bar size scale with **independent publications**, square-rooted and
 capped, so a paper repeating itself never outweighs several papers agreeing once each. An edge
 takes its best-supported direction.
 
@@ -321,6 +321,9 @@ The order is deliberate, and it is what keeps the panel honest:
   a search, not a lens: an edge that passes the thresholds on its own support is found if any one
   of its sentences contains the text (CTNNB1–SNAI1, five sentences with one naming OXCT1, is found
   by *OXCT1* at min 2 sentences). Typing can only remove edges from the view you had.
+- **Min connections counts links of every relation type**, ticked or not (since 2026-11-25), so
+  unticking types never hides a well-connected node; the bullet below otherwise holds. The stats
+  line says how many edges it hides.
 - **Structure comes last** — `Min connections` and `Min cluster size` describe the picture, so
   they run on what is actually drawn. `Min connections` is peeled until it holds, so every node
   left has at least that many links on screen, and a node that is not drawn (say, a chemical
@@ -453,6 +456,12 @@ written. **Run the script once in each project** to populate them; until then th
 the corpora still missing, and the denominator is honestly smaller. Re-running a project after
 its pipeline changes refreshes its slice automatically — the cache is keyed to the source file's
 size and mtime.
+
+## Re-layout
+
+*Re-layout this view* places the drawn nodes afresh from the drawn edges alone, with *Shrink
+periphery* and *Expand center* at 0%. The original positions and slider values are kept: *Restore
+layout*, or any change that draws a node the re-laid view did not have, brings them back.
 
 ## List edges
 

@@ -696,26 +696,43 @@ def stats(d, T):
 
 
 def recheck_negation(triples):
-    """Re-judge the polarity of stored "negated" triples with stage 2's own
-    (since corrected) rule, _NOT_A_NEGATION; returns how many turn positive. Runs scored by the
-    corrected relation_extraction.py have nothing to change, and NegEx verdicts are left alone."""
+    """Re-judge stored "negated" triples with stage 2's own (since corrected) rules, in place.
+    Returns (turned positive, dropped): dropped are pairs of the two sides of an "X but not Y".
+    Runs scored by the corrected relation_extraction.py have nothing to change; NegEx verdicts are
+    left alone; without sentences/ the "but not" rules cannot be applied."""
     import relation_extraction as RX      # gpu_bundle; needs no torch to import
-    n = 0
+    todo = {}
     for t in triples:
-        sent = t.get("sentence") or ""
-        if t.get("polarity") != "negated" or "negex" in (t.get("assertion_cues") or ()):
+        m = re.search(r"^(.*):(\w+):(\d+)-(\d+):(\d+)-(\d+)$", t.get("pair_id") or "")
+        if m and t.get("polarity") == "negated" and "negex" not in (t.get("assertion_cues") or ()):
+            todo[id(t)] = (t, m.group(1), m.group(2), [int(x) for x in m.groups()[2:]])
+    need, ents = {v[1] for v in todo.values()}, {}
+    for fp in SENT_DIR.glob("*.json") if SENT_DIR.is_dir() else ():
+        try:
+            rec = json.loads(fp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             continue
-        m = re.search(r":(\d+)-(\d+):(\d+)-(\d+)$", t.get("pair_id") or "")
-        if not m:
+        pmid = Path(rec.get("source_file", fp.name)).stem
+        for s in rec.get("sentences", []) if pmid in need else ():
+            sig = hashlib.md5(s.get("text", "").encode("utf-8", "replace")).hexdigest()[:8]
+            ents[pmid, sig] = sorted((e for e in s.get("entities", []) if e.get("start") is not None),
+                                     key=lambda e: e["start"])
+    turned, drop = 0, set()
+    for t, pmid, sig, (s1, e1, s2, e2) in todo.values():
+        es, sent = ents.get((pmid, sig), []), t.get("sentence") or ""
+        lab = {e["start"]: e["label"] for e in es}
+        a = {"start": s1, "end": e1, "label": lab.get(s1)}
+        b = {"start": s2, "end": e2, "label": lab.get(s2)}
+        if es and a["label"] and RX.contrast_sides(sent, a, b, es):
+            drop.add(id(t))
             continue
-        s1, e1, s2, e2 = map(int, m.groups())
-        if not RX._neg_cues(sent, {"start": s1, "end": e1}, {"start": s2, "end": e2}):
+        neg = RX._neg_cues(sent, a, b, es)
+        if not neg:
             t["polarity"] = "positive"
-            # drop the cue that no longer counts, keep the rest
-            t["assertion_cues"] = [c for c in t.get("assertion_cues") or []
-                                   if c not in RX._NOT_A_NEGATION]
-            n += 1
-    return n
+            t["assertion_cues"] = [c for c in t.get("assertion_cues") or [] if not RX.NEG_RE.fullmatch(c)]
+            turned += 1
+    triples[:] = [t for t in triples if id(t) not in drop]
+    return turned, len(drop)
 
 
 # ----- list edges: one predicate, several genes -------------------------------
@@ -1272,7 +1289,7 @@ __LIBTAG__
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
  #catfilters .cnt{color:#5b6677;font-size:11px}
- #zoom button,#srcbtns button,#labelbtns button,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn,#resbtn,#acqbtn,#slbtn,#bmkbtn,#prgbtn,#clnbtn,#vivbtn,#oncbtn,#tsgbtn,#immbtn,#mtsbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
+ #zoom button,#srcbtns button,#labelbtns button,#relay,#relayback,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn,#resbtn,#acqbtn,#slbtn,#bmkbtn,#prgbtn,#clnbtn,#vivbtn,#oncbtn,#tsgbtn,#immbtn,#mtsbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
  #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#catall:hover,#drvbtn:hover,#fusbtn:hover,#itdbtn:hover,#oexbtn:hover,#ampbtn:hover,#delbtn:hover,#trubtn:hover,#exobtn:hover,#cnbtn:hover,#metbtn:hover,#resbtn:hover,#acqbtn:hover,#slbtn:hover,#bmkbtn:hover,#prgbtn:hover,#clnbtn:hover,#vivbtn:hover,#oncbtn:hover,#tsgbtn:hover,#immbtn:hover,#mtsbtn:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button{margin-bottom:4px}
  #disfilters{display:block;max-height:148px;overflow-y:auto;margin-top:0}
@@ -1318,6 +1335,8 @@ __LIBTAG__
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
  <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease" data-label="Disease names">Disease names</button><button class="lblb" data-kind="chemical" data-label="Drug names">Drug names</button></span>
   <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed.</div></div>
+ <div class="row"><button id="relay">Re-layout this view</button> <button id="relayback" disabled>Restore layout</button> <button class="ihelp" aria-label="About re-layout" aria-expanded="false">i</button>
+  <div class="mut help">Filtering hides nodes but leaves the rest where they were, so distances still reflect links you no longer see. <b>Re-layout this view</b> places the drawn nodes afresh from the drawn edges alone (more sentences in view = shorter edge; nodes also push each other apart, so distances stay approximate). It sets <em>Shrink periphery</em> and <em>Expand center</em> to 0%, as both bend distances. Filtering further keeps the new places; a change that brings in other nodes, or <b>Restore layout</b>, returns to the original places and slider values.</div></div>
  <div class="row">Shrink periphery: <b id="shv">90%</b> <button class="ihelp" aria-label="About shrink periphery" aria-expanded="false">i</button><br><input id="shrink" type="range" min="0" max="90" step="5" value="90" aria-label="Shrink periphery">
   <div class="mut help">Pulls everything past the middle distance inward, so the small clusters physics flung to the edges come back where you can read them without zooming out. The centre is left alone.</div></div>
  <div class="row">Expand center: <b id="exv">100%</b> <button class="ihelp" aria-label="About expand center" aria-expanded="false">i</button><br><input id="expand" type="range" min="0" max="100" step="5" value="100" aria-label="Expand center">
@@ -1398,7 +1417,7 @@ __LIBTAG__
   <div class="mut help">Distinct PMIDs behind an edge; raise it to drop relations that rest on one paper repeating itself.</div></div>
  <div class="row">Font size: <b id="fsv">100%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="100" aria-label="Label font size"></div>
  <div class="row">Min cluster size: <select id="mincluster"><option value="2" selected>2 (off)</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select> <button class="ihelp" aria-label="About min cluster size" aria-expanded="false">i</button><div class="mut help">Drops connected components smaller than this. <b>2 is off, not a floor</b>: the components are built from the edges that survive every other filter, so the smallest one possible already has two nodes and a pair joined by a single edge always passes. Raise it to 3 or more to peel the small islands a loose score leaves behind &mdash; and note it runs AFTER min-connections, so a node that drops below that bar can take its whole component with it.</div></div>
- <div class="row">Min connections: <select id="mindeg"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides genes linked to fewer than this many others; thins the hairball's single-link fringe. Applied until it holds: removing a node can push its neighbours below the bar, so they go too, and every node left has at least this many links <em>on screen</em>. <b>1</b> turns it off and keeps that fringe &mdash; the only way to see a node whose whole evidence is one edge. Expect a denser canvas: it is the setting that admits every hapax in the corpus.</div></div>
+ <div class="row">Min connections: <select id="mindeg"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides nodes linked to fewer than this many others; thins the hairball's single-link fringe. Links of <b>every relation type</b> count, ticked or not, so unticking types never hides a well-connected gene; the line under the graph says how many edges it hides. Applied until it holds: removing a node can push its neighbours below the bar, so they go too, and every node left has at least this many links, though with relation types unticked fewer of them may be <em>on screen</em>. <b>1</b> turns it off and keeps that fringe &mdash; the only way to see a node whose whole evidence is one edge. Expect a denser canvas: it is the setting that admits every hapax in the corpus.</div></div>
  <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
@@ -1408,7 +1427,7 @@ __LIBTAG__
 __KINDROW__
  <div class="row">Relation type <button class="ihelp" data-help="rel" aria-label="About relation types" aria-expanded="false">i</button>
   <div class="mut help" data-help="rel">As predicted by the RE model; &ldquo;not X&rdquo; = negated statement, drawn dashed. Unticking one hides <em>sentences</em> with that label, and any edge left without support.</div></div><div id="catfilters"></div><div class="row" style="margin-top:4px"><button id="catall" type="button">Check all</button></div>
- <div class="row mut help" data-help="rel">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. Only <b>activates</b>/<b>inhibits</b> edges have an arrowhead (agent &rarr; target); <b>interacts</b>, <b>associated</b> and <b>binds</b> are symmetric and drawn without one. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels. Thickness and arrowhead size follow the number of <b>independent publications</b> behind the edge, not its sentence count &mdash; one paper repeating itself never thickens a line.</div>
+ <div class="row mut help" data-help="rel">Edge colour = the relation the model predicted. <b>activates</b>/<b>inhibits</b> are signed and come from the BioRED checkpoint; <b>interacts</b> is the unsigned PPI verdict. Only <b>activates</b>/<b>inhibits</b> edges show a direction (agent &rarr; target): <b>activates</b> ends in an arrowhead, <b>inhibits</b> in an <b>inhibition bar</b> (&#8867;); <b>interacts</b>, <b>associated</b> and <b>binds</b> are symmetric and drawn without one. An edge takes its best-supported direction, and is drawn as the relation most of its sentences <em>in view</em> carry &mdash; so narrowing the filters can recolour an edge. Hover for the per-sentence labels. Thickness and arrowhead size follow the number of <b>independent publications</b> behind the edge, not its sentence count &mdash; one paper repeating itself never thickens a line.</div>
  <div class="row mut help" data-help="rel">Counts read <em>total &middot; in view</em>: the total is every edge in the file carrying at least one sentence of that type (an edge with mixed readings counts under each, so the totals exceed the edge count), &ldquo;in view&rdquo; is how many survive the current score, year, text, min-publications, min-connections and min-cluster settings. <span style="color:#b3243b">A red 0</span> means the type is ticked but everything of it is pruned &mdash; usually its edges sit in components smaller than <b>Min cluster size</b>, so lower that (or the score) to see them.</div>
  <div class="row">Training set behind the edge <button class="ihelp" data-help="src" aria-label="About training sets" aria-expanded="false">i</button></div>
  <div class="row" id="srcbtns"></div>
@@ -1466,6 +1485,17 @@ let BASEPOS=null, TGROUPS=[];
 // where they were and are held there while physics places only the new ones, next to their
 // neighbours. A position, once learned, is only replaced when the node is laid out afresh.
 const LAYOUT={};
+// "Re-layout this view": positions made from the drawn edges alone, kept apart from LAYOUT so the
+// original picture can come back. null = the original layout is in force.
+let RELAID=null, RELAYING=false, RELAY_SLIDERS=null, REFIT=false;
+function setShape(s,x){const a=document.getElementById('shrink'),b=document.getElementById('expand');
+ a.value=s;b.value=x;document.getElementById('shv').textContent=a.value+'%';document.getElementById('exv').textContent=b.value+'%';}
+function relayOn(){
+ if(!RELAY_SLIDERS)RELAY_SLIDERS=[document.getElementById('shrink').value,document.getElementById('expand').value];
+ setShape(0,0);RELAID={};RELAYING=true;REFIT=true;document.getElementById('relayback').disabled=false;}
+function relayOff(){
+ RELAID=null;REFIT=true;document.getElementById('relayback').disabled=true;
+ if(RELAY_SLIDERS){setShape(RELAY_SLIDERS[0],RELAY_SLIDERS[1]);RELAY_SLIDERS=null;}}
 // Fit, but never closer than FIT_MAX_SCALE (the size nodes and labels are designed for): a view of
 // three nodes used to be blown up to fill the whole screen. Frames the drawn positions, with margin.
 const FIT_MAX_SCALE=1.0;
@@ -2354,6 +2384,24 @@ function focusKeep(edges,seeds,hops){
  // edge between two reached nodes drew 237 edges for SIRT3, which has 40.)
  return edges.filter(o=>inner.has(o.e.from)||inner.has(o.e.to));
 }
+// An inhibition bar stops BAR_PAD screen pixels short of its node (at any zoom), and the line runs
+// up to the bar. vis honours endPointOffset only on curved edges and these are straight, so the
+// straight-edge class itself is adjusted, once; arrowheads are untouched.
+const BAR_PAD=3;
+function padInhibitionBars(net){
+ const ed=Object.values(net.body.edges).find(e=>e.edgeType&&e.from!==e.to); if(!ed)return;
+ const P=Object.getPrototypeOf(ed.edgeType); if(P._barPad)return;
+ P._barPad=true;
+ const orig=P.getArrowData;
+ P.getArrowData=function(ctx,which,...rest){
+  const a=orig.call(this,ctx,which,...rest);
+  if(a.type==='bar'&&which!=='middle'&&this.from!==this.to){
+   const pad=BAR_PAD/(network?network.getScale():1),c=Math.cos(a.angle),s=Math.sin(a.angle);
+   a.point={x:a.point.x-pad*c,y:a.point.y-pad*s};
+   a.core={x:a.point.x-0.1*a.length*c,y:a.point.y-0.1*a.length*s};   // inside the bar (0.15 deep)
+  }
+  return a;};
+}
 function build(thr){
  const conf=activeConf(), cats=activeCats(); VIEW_CATS=cats; const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
  // Enrich buttons combine in OR within a box and in AND across boxes: Drivers + Oncogene keeps a
@@ -2377,11 +2425,14 @@ function build(thr){
  // nodes unconnected, but that fallback skipped min-connections, min-cluster and the disease
  // keep-list, so unticking gene and chemical brought back diseases the full view had filtered
  // out. Unticking a node type now only ever removes nodes.) kindOK: any edge fits the ticks.
- let kindOK=false;
+ let kindOK=false, hiddenMin=0;
+ const allRel=[];   // the same edges with EVERY relation type in: what min-connections counts on
  const disConnOn=DIS_KEEP.size>0&&document.getElementById('disconn').checked;
  DATA.edges.forEach(e=>{
    const kf=!kinds||(kinds.has(KIND[e.from])&&kinds.has(KIND[e.to]));
    if(kf)kindOK=true;
+   if(kf&&md>1){const s=visSents(e,conf,ylo,yhi,null,null,SRC_MODE);
+     if(s.length>=thr&&(mp<=1||new Set(s.map(z=>z.pmid)).size>=mp))allRel.push({e:e,sup:s});}
    const sup=visSents(e,conf,ylo,yhi,null,cats,SRC_MODE); if(sup.length<thr)return;
    const np=new Set(sup.map(s=>s.pmid)).size;
    if(mp>1&&np<mp)return;
@@ -2416,7 +2467,7 @@ function build(thr){
   // and re-cut the neighbourhood on what the lens left, so a focus view never shows the seed's
   // neighbours to each other with the seed itself missing
   if(m&&focusActive)es=focusKeep(es,focusSeeds,focusHops);
-  // Structure comes LAST, on the edges that are actually drawn: min-connections peels the
+  // Structure comes LAST: min-connections (counted over every relation type, see below) peels the
   // single-link fringe, then min-cluster drops the small components -- so "min cluster size 6"
   // is a statement about the picture, not about some graph behind it. (It once ran before the
   // lens, and typing a word then shattered a 6-node floor into pairs and triples.)
@@ -2429,12 +2480,23 @@ function build(thr){
     // Not under "Only their direct neighbours": a gene whose one link is to the ticked disease is
     // exactly what that view is for (DICER1, GRK2, COX5A under glioblastoma).
     if(md>1&&!disConnOn){
+      // Counted over ALL relation types, ticked or not: on the ticked ones alone, "not binds" by
+      // itself hid 63 of its 69 edges, PGAM1 / PGAM2 - CHEK2 among them, though all three are
+      // well connected. Every other setting (score, years, lens, node types ...) still counts.
+      let pool=allRel;
+      if(m)pool=pool.filter(o=>{if(!o.sup.some(s=>m.test(s.text,o.e)))return false;
+        if(lens){const L=o.sup.filter(s=>lens.test(s.text,o.e));if(L.length<thr)return false;if(mp>1&&new Set(L.map(s=>s.pmid)).size<mp)return false;}
+        return true;});
       for(;;){
-        const deg={};es.forEach(o=>{deg[o.e.from]=(deg[o.e.from]||0)+1;deg[o.e.to]=(deg[o.e.to]||0)+1;});
-        const next=es.filter(o=>deg[o.e.from]>=md&&deg[o.e.to]>=md);
-        if(next.length===es.length)break;
-        es=next;
+        const deg={};pool.forEach(o=>{deg[o.e.from]=(deg[o.e.from]||0)+1;deg[o.e.to]=(deg[o.e.to]||0)+1;});
+        const next=pool.filter(o=>deg[o.e.from]>=md&&deg[o.e.to]>=md);
+        if(next.length===pool.length)break;
+        pool=next;
       }
+      const core=new Set();pool.forEach(o=>{core.add(o.e.from);core.add(o.e.to);});
+      const before=es.length;
+      es=es.filter(o=>core.has(o.e.from)&&core.has(o.e.to));
+      if(menu)hiddenMin=before-es.length;
     }
     const adj={};
     es.forEach(o=>{(adj[o.e.from]=adj[o.e.from]||[]).push(o.e.to);(adj[o.e.to]=adj[o.e.to]||[]).push(o.e.from);});
@@ -2509,23 +2571,30 @@ function build(thr){
   return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+(SURF[n.id]?String.fromCharCode(10)+surfLine(n.id):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
    borderWidth:1,borderWidthSelected:2};});
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
- // arrowheads only on directed (signed) relations; interacts/associated/binds are symmetric,
+ // inhibits ends in a flat bar (T), activates in an arrowhead, as pathway diagrams draw them;
+ // (padInhibitionBars keeps the bar off the node and joins the line to it);
+ // either only on directed (signed) relations; interacts/associated/binds are symmetric,
  // so an arrow there would only show which entity the sentence happened to mention first
- const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),length:edgeLength(o.w),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:DIRECTED.has(o.cat.replace(/^not /,'')),scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
+ const eds=edges.map((o,i)=>({id:i,from:o.e.from,to:o.e.to,width:edgeWidth(o.np),length:edgeLength(o.w),color:{color:CCOLOR[o.cat]||o.e.color,opacity:0.6},dashes:o.cat.indexOf('not ')===0,arrows:{to:{enabled:DIRECTED.has(o.cat.replace(/^not /,'')),type:o.cat.replace(/^not /,'')==='inhibits'?'bar':'arrow',scaleFactor:arrowScale(o.np)}},title:edgeTip(o.e,o.vis,o.cat)}));
  const vpub=new Set();edges.forEach(o=>o.vis.forEach(s=>vpub.add(s.pmid)));
  const nkinds=new Set(nodes.map(n=>KIND[n.id]));
  // name what is actually on screen: "378 diseases" beats "378 genes" in a disease-only view
  const KLAB={gene:'genes',disease:'diseases',chemical:'chemicals'};
  document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes').replace(/s$/,nodes.length===1?'':'s')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(enrichLabel()?' &middot; <b>enriched for '+enrichLabel()+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(kinds&&!kindOK?' &middot; <b>nothing relates '+(kinds.size===1?'a '+[...kinds][0]+' to another '+[...kinds][0]:'these node types to each other')+'</b> &mdash; '+(kinds.has('disease')&&kinds.size===1?'diseases link only to genes and chemicals, so tick one of them':'tick another node type'):'')
+   +(hiddenMin?' &middot; <b>'+hiddenMin+'</b> edge'+(hiddenMin>1?'s':'')+' hidden by Min connections':'')
    +(cats.size?'':' &middot; <b>no relation type is ticked</b>')
    +(loneDis.length?' &middot; <b>'+loneDis.length+'</b> kept disease'+(loneDis.length>1?'s have':' has')+' no link under these settings, drawn on '+(loneDis.length>1?'their':'its')+' own'
      +(cats.has('associated')?'':' &mdash; diseases are linked by <b>associated</b>, so tick it to see '+(loneDis.length>1?'their':'its')+' genes and drugs'):'');
  // seed positions: known nodes where they were (held fixed while physics settles the rest), new
  // nodes at the mean of their already-placed neighbours, nudged apart so they do not coincide
- const known=nodes.filter(n=>LAYOUT[n.id]);
- known.forEach(n=>{n.x=LAYOUT[n.id].x;n.y=LAYOUT[n.id].y;n.fixed={x:true,y:true};});
+ // nodes the re-laid view never placed: back to the original layout, not a mix of the two
+ if(RELAID&&!RELAYING&&nodes.some(n=>!RELAID[n.id]))relayOff();
+ RELAYING=false;
+ const LAY=RELAID||LAYOUT;
+ const known=nodes.filter(n=>LAY[n.id]);
+ known.forEach(n=>{n.x=LAY[n.id].x;n.y=LAY[n.id].y;n.fixed={x:true,y:true};});
  const nbr={};eds.forEach(e=>{(nbr[e.from]=nbr[e.from]||[]).push(e.to);(nbr[e.to]=nbr[e.to]||[]).push(e.from);});
- nodes.forEach(n=>{if(LAYOUT[n.id])return;const p=(nbr[n.id]||[]).map(m=>LAYOUT[m]).filter(Boolean);
+ nodes.forEach(n=>{if(LAY[n.id])return;const p=(nbr[n.id]||[]).map(m=>LAY[m]).filter(Boolean);
    if(p.length){const [jx,jy]=idJitter(n.id,40);n.x=p.reduce((a,q)=>a+q.x,0)/p.length+jx;n.y=p.reduce((a,q)=>a+q.y,0)/p.length+jy;}});
  const nNew=nodes.length-known.length;
  // the camera before this rebuild: kept if the new picture still fits inside it (see settled)
@@ -2537,6 +2606,7 @@ function build(thr){
  const options={layout:{improvedLayout:false},physics:{enabled:nNew>0,stabilization:{iterations:known.length?120:200},barnesHut:{gravitationalConstant:-14000,springLength:130,springConstant:0.2,avoidOverlap:0.3}},interaction:{hover:true,tooltipDelay:120},nodes:{shape:'dot',scaling:{min:6,max:60,label:{enabled:false,drawThreshold:1}},font:{color:'rgba(26,26,26,0)'}},edges:{smooth:false,arrowStrikethrough:false,hoverWidth:0,selectionWidth:0,arrows:{to:{enabled:true,scaleFactor:0.6}}}};
  if(network)network.destroy();
  network=new vis.Network(net,data,options);
+ padInhibitionBars(network);
  LABEL_N=nodes.length; LABEL_A=-1;
  // reshape once physics is off, so nothing pulls the moved nodes back, and fit afterwards so the
  // new positions are inside the view. BASEPOS is captured first: it is the layout to replay from.
@@ -2544,14 +2614,15 @@ function build(thr){
  const settled=()=>{network.setOptions({physics:false});
    if(known.length)data.nodes.update(known.map(n=>({id:n.id,fixed:false})));   // draggable again
    BASEPOS=network.getPositions();
-   Object.assign(LAYOUT,BASEPOS);
+   Object.assign(LAY,BASEPOS);
    applyLayoutShape();
    // Camera: stay put when every node is still inside the old view; otherwise frame them with
    // safeFit. A plain fit zoomed straight in on a handful of nodes until they filled the screen,
    // and re-fitting on every tick made the view lurch in and out as relation boxes were ticked.
-   if(view){network.moveTo({position:view.position,scale:view.scale,animation:false});
+   if(view&&!REFIT){network.moveTo({position:view.position,scale:view.scale,animation:false});
      if(!allInView())safeFit(false);}
    else safeFit(false);
+   REFIT=false;
    LABEL_A=-1;updateLabels();refloorLabels();network.redraw();};   // fonts for the final camera, at once
  // nothing new to place: no physics runs, so no stabilization event will come
  if(nNew>0)network.on('stabilizationIterationsDone',settled);else settled();
@@ -2610,6 +2681,8 @@ document.querySelectorAll('.ihelp').forEach(b=>b.addEventListener('click',()=>{
  const dc=document.getElementById('disconn');
  if(dc)dc.addEventListener('change',()=>{if(DIS_KEEP.size)build(+thr.value);});})();
 const shr=document.getElementById('shrink'), exp=document.getElementById('expand');
+document.getElementById('relay').addEventListener('click',()=>{relayOn();build(+thr.value);});
+document.getElementById('relayback').addEventListener('click',()=>{if(!RELAID)return;relayOff();build(+thr.value);});
 shr.addEventListener('input',()=>{document.getElementById('shv').textContent=shr.value+'%';applyLayoutShape();});
 exp.addEventListener('input',()=>{document.getElementById('exv').textContent=exp.value+'%';applyLayoutShape();});
 // name buttons: gene symbols are always drawn, these two add the wordy kinds back
@@ -2839,7 +2912,9 @@ def main():
     n_flip = sum(D.orient(t) for t in raw)
     print(f"direction: {n_flip:,} signed triple(s) reversed to put the agent first "
           f"(passive/agent cue -- gpu_bundle/direction.py)")
-    print(f"negation: {recheck_negation(raw):,} triple(s) no longer negated (\"not only\", \"negative correlation / control / regulator / breast\" ...)")
+    n_pos, n_drop = recheck_negation(raw)
+    print(f"negation: {n_pos:,} triple(s) no longer negated (not only, negative correlation / control, "
+          f"but not X, half words); {n_drop:,} dropped (the two sides of 'X but not Y')")
     d, merge_note = merge_models(raw, args.merge, args.typed_model, args.gate_model, args.merge_scale)
     print(merge_note)
     # Ceilings are read from the PRE-merge triples: after the merge a pair keeps the typed

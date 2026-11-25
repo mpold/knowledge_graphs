@@ -319,18 +319,99 @@ _NEG_WORD = _re.compile(
 _NOT_A_NEGATION = {"not": _NOT_ONLY, "negative": _NEG_WORD}
 
 
-def _neg_cues(text, a, b):
-    """Negation cues in the window around the pair, minus the "not" of "not only" and the
-    "negative" of "negative correlation / control / regulator ..." (looked up in the full text, so a window ending between
-    the words cannot bring them back)."""
-    lo = max(0, a["start"] - NEG_WINDOW_L)
-    region = text[lo:min(len(text), b["end"] + NEG_WINDOW_R)]
-    return [m.group(0).lower() for m in NEG_RE.finditer(region)
-            if not (m.group(0).lower() in _NOT_A_NEGATION
-                    and _NOT_A_NEGATION[m.group(0).lower()].match(text, lo + m.end()))]
+# --- contrast: "A binds X, but not Y" -----------------------------------------------------
+# The "not" denies Y (and a list starting at Y), so only a pair that INCLUDES Y is negated by it;
+# "but not in normal cells" names a context, and the claim stands in the other one. A pair of the
+# two sides themselves (X - Y) is a comparison, not a relation, and is not scored at all.
+_CONTRAST_PRE = _re.compile(r"(?:\bbut|\band|,|;|\()\s*$", _re.I)
+_BUT_PRE = _re.compile(r"\bbut\s*$", _re.I)
+_CONTRAST_GAP = _re.compile(
+    r"\s+(?:(?:in|at|on|with|to|by|of|for|from|the|that|those|its|their|other|total|any|also)\s+){0,4}", _re.I)
+_CONTEXT_PRE = _re.compile(r"\s+(?:in|at|on|within|during|under)\b", _re.I)
+_COMPOUND = _re.compile(r"[-‐–][A-Za-z]{4,}")       # "cetuximab-resistant" describes cells
+_LIST_GAP = _re.compile(r"\s*(?:(?:genes?|mRNAs?|proteins?)\s*)?"
+                        r"(?:,|/|&|,?\s*\b(?:and|or|nor)\b)\s*(?:(?:and|or|nor)\s+)?(?:the\s+)?", _re.I)
+_SIDE_GAP = _re.compile(r"[\s,;(]*(?:(?:genes?|proteins?|mRNAs?|expression|levels?|inhibitors?)[\s,;(]*){0,2}",
+                        _re.I)
 
 
-def negation_modality(text, a, b):
+def _run_from(text, ents, k, step):
+    """Indices of the same-label list containing ents[k], walked forward (1) or backward (-1)."""
+    out = [k]
+    while 0 <= k + step < len(ents):
+        x, y = (ents[k], ents[k + step]) if step > 0 else (ents[k + step], ents[k])
+        if x["label"] != y["label"] or not _LIST_GAP.fullmatch(text[x["end"]:y["start"]]):
+            break
+        k += step
+        out.append(k)
+    return out
+
+
+def _contrast(text, start, end, ents):
+    """What the "not" at [start, end) contrasts: ("entity", indices of the denied list),
+    ("context", []) or None when it is an ordinary negation."""
+    if not _CONTRAST_PRE.search(text, max(0, start - 12), start):
+        return None
+    k = next((n for n, e in enumerate(ents) if e["start"] >= end), None)
+    if k is not None and _CONTRAST_GAP.fullmatch(text[end:ents[k]["start"]]) \
+            and not (_CONTEXT_PRE.match(text, end) and _COMPOUND.match(text, ents[k]["end"])):
+        return "entity", _run_from(text, ents, k, 1)
+    if _BUT_PRE.search(text, max(0, start - 12), start) and _CONTEXT_PRE.match(text, end):
+        return "context", []
+    return None
+
+
+def contrast_sides(text, a, b, ents):
+    """True when a and b are the two sides of one "X but not Y" (same entity type)."""
+    if a.get("label") != b.get("label"):
+        return False
+    for m in _re.finditer(r"\bnot\b", text[a["end"]:b["start"]], _re.I):
+        s, e = a["end"] + m.start(), a["end"] + m.end()
+        c = _contrast(text, s, e, ents)
+        if not c or c[0] != "entity" or b["start"] not in {ents[n]["start"] for n in c[1]}:
+            continue
+        cut = _CONTRAST_PRE.search(text, max(0, s - 12), s).start()
+        k = max((n for n, x in enumerate(ents) if x["end"] <= cut), default=None)
+        if k is not None and _SIDE_GAP.fullmatch(text[ents[k]["end"]:cut]) \
+                and a["start"] in {ents[n]["start"] for n in _run_from(text, ents, k, -1)}:
+            return True
+    return False
+
+
+def _name(text, e):
+    """Surface for "the same entity mentioned again": case and a plural s aside (PKD / PKDs)."""
+    s = text[e["start"]:e["end"]].casefold()
+    return s[:-1] if len(s) > 3 and s.endswith("s") else s
+
+
+def _neg_cues(text, a, b, ents=None):
+    """Negation cues in the window around the pair that apply to it. Left out: the "not" of "not
+    only" and the "negative" of "negative correlation / control / regulator ..." (looked up in the
+    full text); a cue that is only half a word of the text ("no|vel" at the window's edge); and,
+    when the sentence's entities are given, a "but not Y" that denies something else (_contrast)."""
+    lo, hi = max(0, a["start"] - NEG_WINDOW_L), min(len(text), b["end"] + NEG_WINDOW_R)
+    ents = sorted(ents, key=lambda e: e["start"]) if ents else None
+    out = []
+    for m in NEG_RE.finditer(text[lo:hi]):
+        s, e, w = lo + m.start(), lo + m.end(), m.group(0).lower()
+        if s == lo or e == hi:
+            full = next((f for f in NEG_RE.finditer(text, max(0, s - 12))
+                         if f.start() <= s and f.end() >= e), None)
+            if full is None:
+                continue
+            s, e, w = full.start(), full.end(), full.group(0).lower()
+        if w in _NOT_A_NEGATION and _NOT_A_NEGATION[w].match(text, e):
+            continue
+        if w == "not" and ents:
+            c = _contrast(text, s, e, ents)
+            denied = {_name(text, ents[n]) for n in c[1]} if c else set()
+            if c and not ({_name(text, a), _name(text, b)} & denied):
+                continue
+        out.append(w)
+    return out
+
+
+def negation_modality(text, a, b, ents=None):
     """Polarity / modality of the relation. Returns (polarity, modality, sorted_cues).
     Modality (speculation) always uses the cue-list window; negation uses the
     selected backend (cue-list window or negspaCy NegEx scope)."""
@@ -345,9 +426,9 @@ def negation_modality(text, a, b):
                 print(f"  [warn] RE_NEG_BACKEND=negspacy unavailable ({type(e).__name__}: {e}); "
                       f"falling back to cue-list negation. pip install spacy negspacy", flush=True)
                 _NEGEX_WARNED = True
-            neg = _neg_cues(text, a, b)
+            neg = _neg_cues(text, a, b, ents)
     else:
-        neg = _neg_cues(text, a, b)
+        neg = _neg_cues(text, a, b, ents)
     return ("negated" if neg else "positive",
             "speculated" if spec else "asserted",
             sorted(set(neg + spec)))
@@ -504,6 +585,8 @@ def candidate_pairs(sentences, pmid):
             for b in ents[i + 1:]:
                 if b["start"] < a["end"]:        # overlapping spans -> skip
                     continue
+                if contrast_sides(text, a, b, ents):   # "X but not Y": compared, not related
+                    continue
                 if MAX_PAIR_CHARS and (b["start"] - a["end"]) > MAX_PAIR_CHARS:
                     break                        # later b's are only farther
                 if dep_doc is not None:          # dependency-path overlay
@@ -512,7 +595,7 @@ def candidate_pairs(sentences, pmid):
                         _DEP_STATS["pruned"] += 1
                         continue
                 connecting = " ".join(text[a["end"]:b["start"]].split())
-                polarity, modality, asn_cues = negation_modality(text, a, b)
+                polarity, modality, asn_cues = negation_modality(text, a, b, ents)
                 yield {
                     "subject": {"text": T.entity_text(a), "type": a["label"], "score": a.get("score")},
                     "object": {"text": T.entity_text(b), "type": b["label"], "score": b.get("score")},
