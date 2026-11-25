@@ -463,6 +463,14 @@ size and mtime.
 periphery* and *Expand center* at 0%. The original positions and slider values are kept: *Restore
 layout*, or any change that draws a node the re-laid view did not have, brings them back.
 
+## siRNA and shRNA constructs
+
+*siMLL1* and *MLL1 shRNA* are drawn as their target gene, so a signed relation of theirs is
+re-read from the sentence (`gpu_bundle/constructs.py`): *siMLL1 decreased AURKA* is drawn as KMT2A
+`activates` AURKA. Where no sign can be read reliably (group labels such as *shX + DOX group*,
+comparisons, no clear verb) the relation is drawn as `associated`. Other wordings of gene loss
+(*knockdown of X*, *X-deficient*) are not re-read.
+
 ## Stand-alone nodes
 
 *Hide stand-alone nodes* takes off the canvas every node with no drawn edge to another node: a kept

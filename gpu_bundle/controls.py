@@ -168,7 +168,7 @@ HOUSE = {"gapdh", "actin", "β-actin", "beta-actin", "actb", "α-tubulin",
          "36b4"}
 # control sh/si/sg suffix, ANCHORED so 'shNC' matches but 'shNCAM'/'shNCL' do not
 CTRL = re.compile(r"(?i)(?:^|[^A-Za-z])(sh|si|sg)-?"
-                  r"(control|ctrl|scrambled|scramble|scr|ntc|nc)(?![A-Za-z])")
+                  r"(?:(?:control|ctrl|scrambled|scramble|scr|ntc|nc)(?![A-Za-z])|ctr(?![A-Za-z0-9]))")   # not shCtr9 (CTR9)
 REP_KD = re.compile(r"(?i)^(sh|si|sg)-?(gfp|luc|luciferase)(-\w+)?$")
 
 REPORTER_CLASS = "Reporter / visualization protein"
