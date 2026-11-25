@@ -233,7 +233,22 @@ DISEASE_SURFACE = {
     "ptc": "papillary thyroid carcinoma", "npc": "nasopharyngeal carcinoma",
     "cca": "cholangiocarcinoma", "gbc": "gallbladder cancer",
     "t - all": "T-cell acute lymphoblastic leukemia",
+    # myeloma stages of treatment, not subtypes: relapsed/refractory, newly diagnosed
+    "rrmm": "multiple myeloma", "ndmm": "multiple myeloma",
 }
+
+# Drug abbreviations (lowercase surface -> ChEBI label). They win over the mention's TYPE too: the
+# NER tags some as GENETIC, and "BTZ" is an old alias of CASC3 (Barentsz), so 506 bortezomib
+# mentions of the myeloma corpus were drawn as that gene. The gene's own name, CASC3, is untouched.
+CHEMICAL_SURFACE = {"cfz": "carfilzomib", "dex": "dexamethasone", "btz": "bortezomib"}
+
+
+def drug_surface(e):
+    """Drug named by a CHEMICAL_SURFACE abbreviation, whether tagged CHEMICAL or GENETIC, or None."""
+    if e.get("type") not in ("CHEMICAL", "GENETIC"):
+        return None
+    return CHEMICAL_SURFACE.get((e.get("text") or "").strip().lower())
+
 
 # Gene surfaces, the same two holes as for diseases (added 2026-11-24). The normalizer often
 # resolves a surface to SEVERAL HGNC symbols -- "AR" to AR + FDXR + AKR1B1 + AREG, because the
@@ -556,6 +571,8 @@ def node_of(e, flags):
     ic = e.get("inhibitor_class")
     if ic:          # "BRAFi" is a BRAF INHIBITOR, a drug class -- not the BRAF gene
         return ("chemical", INHIB_LABEL.setdefault(ic.lower(), ic))
+    if drug_surface(e):
+        return ("chemical", drug_surface(e))
     if t == "GENETIC":
         s = gene_symbol(e, txt)
         if not s or s == "MKI67" or e.get("control") == "yes":
@@ -588,7 +605,7 @@ def node_drop_report(triples, flags, top=8):
     normalization gaps upstream (disease.py / chemical.py), not deliberate exclusions."""
     kept, drops = collections.Counter(), collections.Counter()
     unnorm, overridden = collections.Counter(), 0
-    merged, inhib = collections.Counter(), collections.Counter()
+    merged, inhib, drugs = collections.Counter(), collections.Counter(), collections.Counter()
     for t in triples:
         for side in ("subject", "object"):
             e = t[side]
@@ -596,6 +613,8 @@ def node_drop_report(triples, flags, top=8):
             key = txt.lower()
             if e.get("inhibitor_class"):
                 inhib[e["inhibitor_class"]] += 1
+            if drug_surface(e):
+                drugs[f"{key} ({typ}) -> {drug_surface(e)}"] += 1
             if typ == "DISEASE":
                 if key in DISEASE_SURFACE:
                     overridden += 1
@@ -631,6 +650,8 @@ def node_drop_report(triples, flags, top=8):
     if inhib:
         out.append(f"  '-i' inhibitor shorthand -> drug-class (chemical) nodes: {sum(inhib.values()):,} "
                    f"mention(s), " + ", ".join(f"{k} x{c}" for k, c in inhib.most_common(top)))
+    if drugs:
+        out.append("  CHEMICAL_SURFACE: " + ", ".join(f"{k} x{c}" for k, c in drugs.most_common()))
     if overridden:
         out.append(f"  DISEASE_SURFACE overrides applied: {overridden:,} mention(s) "
                    f"({', '.join(sorted(DISEASE_SURFACE))})")
@@ -657,7 +678,7 @@ def qualifies_multi(t, T, flags):
     if not a or not b or a == b:
         return False
     genes = [e for e in (t["subject"], t["object"])
-             if e.get("type") == "GENETIC" and not e.get("inhibitor_class")]
+             if e.get("type") == "GENETIC" and not e.get("inhibitor_class") and not drug_surface(e)]
     if genes and not any(e.get("control") == "no" for e in genes):
         return False        # same "annotated control:no" requirement as the gene-only filter
     return True

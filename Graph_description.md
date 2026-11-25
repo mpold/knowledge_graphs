@@ -391,7 +391,11 @@ The order is deliberate, and it is what keeps the panel honest:
   KRAS G12 nearly off pancreatic cancer. `DISEASE_SURFACE` now maps ~35 such surfaces that mean
   one thing in a cancer corpus (*PDAC*, *CRC*, *LUAD*, *pancreatic cancer*, *colon cancer*,
   *bladder cancer*, *RCC*, *HNSC*, ...; 7,802 mentions). Still dropped, as ambiguous: *ALL*,
-  *BC*, *GC*, *PCa*, *PD*, *EC*, *OC*, *UC*, *PDA*.
+  *BC*, *GC*, *PCa*, *PD*, *EC*, *OC*, *UC*, *PDA*. *RRMM* and *NDMM* (relapsed/refractory, newly
+  diagnosed) go to *multiple myeloma*: they are stages of its treatment, not other diseases.
+- **Drug abbreviations** *CFZ*, *Dex*, *BTZ* / *Btz* (any case) are carfilzomib, dexamethasone and
+  bortezomib (`CHEMICAL_SURFACE`), also where the NER tagged them as genes: *BTZ* is an old alias
+  of CASC3, which used to collect 506 bortezomib mentions.
 - **A gene is a node only when its surface resolves to one HGNC symbol** -- and the normalizer
   often gives several: plain *AR* resolves to AR + FDXR + AKR1B1 + AREG (the approved symbol is an
   old alias of three other genes), and was dropped, so the AR node once had 7 sentences and no
