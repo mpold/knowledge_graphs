@@ -468,8 +468,9 @@ layout*, or any change that draws a node the re-laid view did not have, brings t
 *siMLL1* and *MLL1 shRNA* are drawn as their target gene, so a signed relation of theirs is
 re-read from the sentence (`gpu_bundle/constructs.py`): *siMLL1 decreased AURKA* is drawn as KMT2A
 `activates` AURKA. Where no sign can be read reliably (group labels such as *shX + DOX group*,
-comparisons, no clear verb) the relation is drawn as `associated`. Other wordings of gene loss
-(*knockdown of X*, *X-deficient*) are not re-read.
+comparisons, no clear verb) the relation is drawn as `associated`. A gene named with its loss
+(*knockdown of X*, *X-deficient*) is read the same way when its partner is a gene or a disease and
+the verb is plain; with a drug the relation is `associated`; otherwise the model's label stays.
 
 ## Stand-alone nodes
 

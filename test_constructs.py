@@ -1,5 +1,6 @@
 """Regression triples for constructs.py: the signed si/shRNA triples of the KMT2A graph, hand-checked.
 Run: python test_constructs.py     (sentence, offsets of the pair, expected relation or None = unsigned)"""
+import re
 import sys
 from pathlib import Path
 
@@ -59,6 +60,29 @@ CONTROLS = [("shCtr", True), ("siCtr", True), ("sh-Ctr", True), ("shCtrl", None)
             ("CTR9", False), ("shCTRC", False)]     # None: left to controls.py
 NAMES = [("PMC5388432.grobid.tei", "shM1", "MRLN", "HOTAIRM1"), ("PMC5388432.grobid.tei", "A6", "TWF1", None),
          ("PMC1.grobid.tei", "shM1", "MRLN", "MRLN")]
+# a gene named with its loss: [[gene]] <<partner>>, partner type, label before (agent first in the
+# text), expected (subject, relation) or None = untouched, "associated" = drug partner
+LOSS = [
+    ("[[MLL1]] knockout significantly downregulated <<LILRB4>> levels.", "GENETIC", "inhibits", ("MLL1", "activates")),
+    ("Knockdown of [[HOTAIR]] induced expression of <<HOXD10>> and PCDHB5.", "GENETIC", "activates", ("HOTAIR", "inhibits")),
+    ("[[Mettl3]] knockdown decreased <<Akt1>> mRNA levels.", "GENETIC", "activates", ("Mettl3", "activates")),
+    ("<<Runx1>> upregulation in [[Runx2]]-deficient cells", "GENETIC", "activates", ("Runx2", "inhibits")),
+    ("In turn, <<HoxA9>> expression was decreased upon loss of [[Dot1l]].", "GENETIC", "inhibits", ("Dot1l", "activates")),
+    ("[[Fbxo22]] loss significantly represses development of <<AML>>.", "DISEASE", "inhibits", ("Fbxo22", "activates")),
+    ("[[CEBPE]] depletion could reverse the activation of <<S100A9>>.", "GENETIC", "activates", None),
+    ("[[ERa]] knockdown downregulates E2 and BPA induced expression of <<HOXC6>>.", "GENETIC", "activates", None),
+    ("[[Mll1]] knockdown significantly increased sensitivity to <<Wnt3a>>.", "GENETIC", "activates", None),
+    ("Loss of [[Necdin]] enhanced differentiation, leading to delayed development of <<leukemia>>.", "DISEASE", "activates", None),
+    ("In [[BRG1]]-depleted cells hSNF5 could no longer activate <<INK4a>> expression.", "GENETIC", "activates", None),
+    ("Knockdown of [[Taf1c]] decreased the expression of <<MLL>>-ENL target genes.", "GENETIC", "activates", None),
+    ("Loss of [[Puma]] increased resistance to <<cytarabine>>.", "CHEMICAL", "activates", "associated"),
+    ("<<doxycycline>> induced a 60% loss of [[MEN1]] expression.", "CHEMICAL", "inhibits", "associated"),
+    ("The morphology induced by [[LIMK1]] depletion was markedly enhanced by <<palbociclib>>.", "CHEMICAL", "inhibits", "associated"),
+    ("Cells were very sensitive to <<bortezomib>> and loss of [[Noxa]] conveyed resistance.", "CHEMICAL", "activates", "associated"),
+    ("<<MRT199665>> treatment led to dose-dependent loss of [[MEF2C]] phosphorylation.", "CHEMICAL", "inhibits", None),
+    ("<<VTP-50469>>-induced loss of [[IKAROS]] protein was observed.", "CHEMICAL", "inhibits", None),
+    ("Knockdown of [[GPX4]] by shRNA and inhibition of GPX4 enzyme activity by <<RSL3>> induced ferroptosis.", "CHEMICAL", "inhibits", None),
+]
 CAT = {K.UP: "activates", K.DOWN: "inhibits"}
 
 
@@ -86,7 +110,24 @@ def run():
         if e["hgnc_symbol"] != want:
             bad += 1
             print("FAIL name", pmid, txt, e["hgnc_symbol"])
-    n = len(CASES) + len(CONTROLS) + len(NAMES)
+    for marked, kind, before, want in LOSS:
+        found = {m.group(0)[0]: m for m in re.finditer(r"\[\[.+?\]\]|<<.+?>>", marked)}
+        text = re.sub(r"\[\[|\]\]|<<|>>", "", marked)
+        pair = []
+        for k, m in sorted(found.items(), key=lambda z: z[1].start()):
+            at = len(re.sub(r"\[\[|\]\]|<<|>>", "", marked[:m.start()]))
+            pair.append(({"type": "GENETIC" if k == "[" else kind, "text": m.group(0)[2:-2]}, at))
+        (a, i), (b, j) = pair
+        t = {"subject": a, "object": b, "sentence": text, "polarity": "positive",
+             "predicate": {"text": K.UP if before == "activates" else K.DOWN},
+             "pair_id": f"x:0:{i}-{i + len(a['text'])}:{j}-{j + len(b['text'])}"}
+        r = K.fix_loss(t)
+        got = None if r is None else "associated" if r == "unsigned" else \
+            (t["subject"]["text"], CAT[t["predicate"]["text"]])
+        if got != want:
+            bad += 1
+            print(f"FAIL want {want}, got {got}: {marked}")
+    n = len(CASES) + len(CONTROLS) + len(NAMES) + len(LOSS)
     print(f"{n - bad}/{n} passed")
     return bad
 

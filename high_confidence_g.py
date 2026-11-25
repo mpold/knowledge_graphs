@@ -2931,9 +2931,11 @@ def main():
     n_pos, n_drop = recheck_negation(raw)
     print(f"negation: {n_pos:,} triple(s) no longer negated (the cue denies something else: subgroup, "
           f"other clause, but not X, half words); {n_drop:,} dropped (the two sides of 'X but not Y')")
-    n_sign, n_unsign, n_name = K.apply(raw)
+    (n_sign, n_unsign), n_name, (n_loss, n_drug) = K.apply(raw)
     print(f"si/shRNA constructs: {n_sign:,} signed triple(s) re-signed from the sentence, {n_unsign:,} "
           f"left unsigned (associated), {n_name:,} name(s) corrected -- gpu_bundle/constructs.py")
+    print(f"gene loss (knockdown, deletion ...): {n_loss:,} signed triple(s) read from the sentence, "
+          f"{n_drug:,} with a drug left unsigned (associated)")
     d, merge_note = merge_models(raw, args.merge, args.typed_model, args.gate_model, args.merge_scale)
     print(merge_note)
     # Ceilings are read from the PRE-merge triples: after the merge a pair keeps the typed
