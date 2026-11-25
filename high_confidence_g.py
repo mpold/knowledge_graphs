@@ -1121,7 +1121,7 @@ __LIBTAG__
  <div class="row"><button id="delbtn" aria-pressed="false">Deletion / loss</button> <button class="ihelp" aria-label="About enrich for deletion / loss" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence about a gene <b>deleted or lost</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>deletion</i> / <i>deleted</i> / <i>co-deletion</i> (<i>PTEN homozygous deletion</i>, <i>SMAD4-deleted</i>, <i>1p19q co-deletion</i>), a gene's <i>del</i> (<i>CDKN2A del</i>, <i>del(17p)</i>), <i>loss of heterozygosity</i> / <i>LOH</i>, <i>loss of function</i>, and <i>loss</i> tied to a gene or chromosome (<i>PTEN loss</i>, <i>loss of SMAD4</i>, <i>copy-number loss</i>, <i>9p loss</i>). Not counted: activating in-frame deletions (<i>EGFR exon 19 deletion</i>), engineered constructs (<i>domain deletion mutant</i>, <i>deletion constructs</i>), generic loss (<i>weight loss</i>, <i>cell loss</i>, <i>loss of viability</i>), and a lost signal rather than a lost gene (<i>loss of ERK phosphorylation</i>, <i>loss of AKT activity</i>).</div></div>
  <div class="row"><button id="trubtn" aria-pressed="false">Truncation</button> <button class="ihelp" aria-label="About enrich for truncation" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence about a <b>truncating variant</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>truncating</i>, <i>truncation</i> as a mutation (<i>ASXL3 truncations</i>, <i>truncation mutations</i>, <i>premature truncation</i>), <i>truncated</i> with a mutation word (<i>truncated mutations</i>), <i>frameshift</i> / <i>frame-shift</i>, <i>nonsense</i>, <i>stop-gain</i>, <i>premature stop / termination codon</i>, splice-site variants (<i>NF2 splice-site variants</i>, <i>splicing mutation</i>), and stop or frameshift notation (<i>Q55*</i>, <i>R213Ter</i>, <i>P191fs</i>). Not counted: engineered truncated proteins (<i>truncated form of</i>, <i>truncation mutants</i>), splice isoforms (<i>AR splice variant AR-V7</i>), splicing biology and splicing-factor mutations (<i>alternative splicing</i>, <i>splicing factor mutations</i>), and <i>X</i> notation (<i>G719X</i>, where X is any amino acid).</div></div>
+  <div class="mut help">Keeps only edges with a sentence about a <b>truncating variant</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>truncating</i>, <i>truncation</i> as a mutation (<i>ASXL3 truncations</i>, <i>truncation mutations</i>, <i>premature truncation</i>), <i>truncated</i> with a mutation word (<i>truncated mutations</i>), <i>frameshift</i> / <i>frame-shift</i>, <i>nonsense</i>, <i>stop-gain</i>, <i>premature stop / termination codon</i>, splice-site variants (<i>NF2 splice-site variants</i>, <i>splicing mutation</i>), and stop or frameshift notation (<i>Q55*</i>, <i>R213Ter</i>, <i>P191fs</i>; <i>R363X</i> only next to a truncation word). Not counted: engineered truncated proteins (<i>truncated form of</i>, <i>truncation mutants</i>), splice isoforms (<i>AR splice variant AR-V7</i>), splicing biology and splicing-factor mutations (<i>alternative splicing</i>, <i>splicing factor mutations</i>), and <i>X</i> notation (<i>G719X</i>, where X is any amino acid).</div></div>
  <div class="row"><button id="exobtn" aria-pressed="false">Exon variants</button> <button class="ihelp" aria-label="About enrich for exon variants" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence naming a variant <b>by its exon</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. It counts <i>exon N</i> with a variant word close after it (<i>EGFR exon 19 deletion</i>, <i>HER2 exon 20 insertion</i>, <i>MET exon 14 skipping</i>, <i>PIK3CA exon 20 mutations</i>, <i>exon 9 PIK3CA mutations</i>, <i>exon 21 L858R</i>, <i>PDGFRA exon 18 (D842V)</i>), and the compact forms (<i>METex14</i>, <i>MET&Delta;ex14</i>, <i>ERBB2&Delta;Ex16</i>, <i>ex19del</i>, <i>EGFRex20ins</i>, <i>Ex20Ins</i>, <i>EGFR ex20</i>). Not counted: an exon named without a variant (<i>in exons 1 and 2</i>, <i>IRAK4 exon 4 by PRMT5</i>), fusion breakpoints (<i>FGFR3-TACC3 Ex14-16</i>), and look-alikes (the drug <i>EX527</i>, the gene <i>Deltex1</i>, guide RNAs such as <i>sgPpm1dexon6</i>).</div></div>
  <div class="row"><button id="cnbtn" aria-pressed="false">Copy number</button> <button class="ihelp" aria-label="About enrich for copy number" aria-expanded="false">i</button>
@@ -1552,8 +1552,11 @@ function delMatcher(){return {test:t=>delHits(t).length>0,hits:delHits};}
 //   splice: only a splice-SITE variant ("splice-site", "splice mutation", "splicing mutation",
 //     "NF2 splice-site variants"); alternative splicing and splicing-factor mutations (SF3B1, U2AF1) are
 //     biology, not a truncation of the gene in hand
-//   notation: Q55* / R213Ter / P191fs; never "X", which in G719X / C797X means ANY amino acid
-const TRU_ALWAYS=/\btruncating\b|\bframe[- ]?shifts?\b|\bnonsense\b|\bstop[- ]?gain\w*|\bpremature\s+(?:stop|termination)(?:\s+codons?)?/gi;
+//   notation: Q55* / R213Ter / P191fs. "X" is the old sign for a stop (R363X) but in G719X /
+//     C797X means ANY amino acid: it counts only with a truncation word within 60 characters,
+//     and never for a known any-residue hotspot or a residue no single-base change turns into a stop
+// (not "nonsense-mediated decay": RNA quality control, not a variant)
+const TRU_ALWAYS=/\btruncating\b|\bframe[- ]?shifts?\b|\bnonsense\b(?![\s\-‐‑–]*mediated)|\bstop[- ]?gain\w*|\bpremature\s+(?:stop|termination)(?:\s+codons?)?/gi;
 const TRU_NOUN=/\btruncat(?:ions?|ed)\b/gi;
 // (not "mutants" / "variant": "TLOC1 truncation mutants", "CAD-truncated variant" are constructs)
 const TRU_MUT_POST=/^\s*(?:mutations?|alleles?|alterations?|events?)\b/i;
@@ -1563,6 +1566,9 @@ const TRU_PRE_GENE=new RegExp(GENE_TOKEN+String.raw`\s*-?\s*$|\bpremature\s*$`);
 const TRU_SPLICE=/\bsplice[- ]site\w*|\bsplic(?:e|ing)\s+(?:site\s+)?(?:mutations?|alterations?)/gi;
 const TRU_SPLICE_FACTOR=/^\s*(?:factor|machinery|regulator)/i;
 const TRU_NOTATION=/\b[A-Z]\d{1,4}(?:\*|Ter\b|[A-Z]?fs\b(?:\*\d+)?)/g;
+const TRU_X=/(?<![A-Za-z0-9])(?:p\.)?(?:[CEGKLQRSWY]|Arg|Cys|Gln|Glu|Gly|Leu|Lys|Ser|Trp|Tyr)\d{1,4}X(?![A-Za-z0-9])/g;
+const TRU_X_ANY=/^(?:p\.)?(?:(?:G|Gly)(?:12|13|719)|(?:Q|Gln)61|(?:C|Cys)(?:481|797)|(?:L|Leu)(?:858|861)|(?:S|Ser)768|(?:E|Glu)(?:542|545)|(?:K|Lys)(?:27|601)|(?:R|Arg)(?:132|140|172))X$/;
+const TRU_X_CUE=/\btruncat|\bnonsense\b(?![\s\-‐‑–]*mediated)|\bpremature\b|\bstop[- ]?(?:gain|codon|mutation)/i;
 let TRUS=false;
 function truHits(t){t=t||'';const iv=reHits(TRU_ALWAYS,t);
  reHits(TRU_NOUN,t).forEach(([a,b])=>{const w=t.slice(a,b).toLowerCase(),pre=t.slice(Math.max(0,a-30),a),post=t.slice(b,b+30);
@@ -1570,6 +1576,7 @@ function truHits(t){t=t||'';const iv=reHits(TRU_ALWAYS,t);
    if(TRU_MUT_POST.test(post)||(w!=='truncated'&&TRU_PRE_GENE.test(pre)))iv.push([a,b]);});
  reHits(TRU_SPLICE,t).forEach(([a,b])=>{if(!TRU_SPLICE_FACTOR.test(t.slice(b,b+20)))iv.push([a,b]);});
  reHits(TRU_NOTATION,t).forEach(x=>iv.push(x));
+ reHits(TRU_X,t).forEach(([a,b])=>{if(!TRU_X_ANY.test(t.slice(a,b))&&TRU_X_CUE.test(t.slice(Math.max(0,a-60),a)+' '+t.slice(b,b+60)))iv.push([a,b]);});
  return iv;}
 function truMatcher(){return {test:t=>truHits(t).length>0,hits:truHits};}
 // "Enrich for exon variants": a variant named by its exon.

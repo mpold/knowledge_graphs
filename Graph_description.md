@@ -88,7 +88,8 @@ using primers*, *amplification of the cDNA* -- but *MET amplification detected b
 chromosome such as *PTEN loss* or *9p loss*; not *EGFR exon 19 deletion*, engineered deletion
 mutants, generic loss like *weight loss*, or a lost signal like *loss of ERK phosphorylation*); an **Enrich for truncation** toggle (*truncating*, *frameshift*, *nonsense*,
 *stop-gain*, splice-site variants, and *Q55\** / *R213Ter* / *P191fs* notation; not engineered
-truncated proteins, splicing biology or splicing-factor mutations, or *G719X*-style X notation); an **Enrich for exon variants** toggle (*exon N* with a variant word close
+truncated proteins, splicing biology or splicing-factor mutations, or *G719X*-style X notation -- X as a stop, *R363X*, counts only with a
+truncation word within 60 characters -- or *nonsense-mediated decay*, an RNA process); an **Enrich for exon variants** toggle (*exon N* with a variant word close
 after it -- *EGFR exon 19 deletion*, *HER2 exon 20 insertion*, *MET exon 14 skipping*, *exon 21
 L858R* -- and compact forms such as *METex14*, *ex19del*, *EGFRex20ins*, *ERBB2ΔEx16*; not an exon
 named without a variant, fusion breakpoints such as *Ex14-16*, the drug *EX527* or the gene
