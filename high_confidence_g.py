@@ -1,83 +1,78 @@
 #!/usr/bin/env python3
 """
-high_confidence_g.py -- extract the high-confidence Gene-context relation triples from
-the scored RE output, summarize the threshold statistics, and draw the gene / disease /
-chemical relationship graph.
+high_confidence_g.py -- step 3: correct and merge the scored relation triples, export the
+high-confidence ones, and draw the gene / disease / chemical relationship graph.
 
-This is the "G" (gene-only) variant of high_confidence.py -- and, since high_confidence.py
-was DEPRECATED, the maintained step-3 entry point. Where high_confidence.py applies the
-"G_D_C" filter (gene-gene IN a disease/chemical context), this step applies the "G" filter
-(gene-gene, context-agnostic). Its "_M" output names never clobber the other's, so both can
-still target the same data root.
+Standard library only. All inputs come from the pipeline output tree (the run dir gpu.py
+produced), by default ``kaggle_working/`` next to this script (--data-root).
 
-The "G" filter still defines the gene-gene slice reported per threshold in the console
-summary, but it no longer has a graph of its own: the gene-only view ("_G" outputs) was
-retired, and the multi-type graph below is the only one drawn.
+WHAT A RUN DOES, in order
+  1. CORRECTIONS of the triples, read from their own sentences. The input file is not changed,
+     scores stay as they were, and each correction prints how many triples it touched:
+       direction     the agent becomes the subject ("reduced by X")   gpu_bundle/direction.py
+       negation      "not" is kept only where it denies this pair     gpu_bundle/relation_extraction.py
+       treatments    anti-PD-1, CD19 CAR-T, MSLN-targeted ADC are     gpu_bundle/antibodies.py
+                     treatments, not their target gene
+       constructs    signs of siRNA / shRNA and of gene loss          gpu_bundle/constructs.py
+                     (knockdown, deletion ...); some wrong names
+       drugs         a drug acts on the gene or disease; drug         gpu_bundle/drug_direction.py
+                     response and combinations become "associated"
+  2. MERGE. relation_extraction.py --route-mode additive scores a pair with every applicable
+     checkpoint, so the input can hold two triples per pair, sharing a pair_id: the binary PPI
+     verdict and the typed, signed BioRED one. --merge makes them one:
+       union (default)  every pair either model kept, with BioRED's label wherever it has one
+       gate             only pairs the binary model also kept (drops BioRED-only edges)
+       typed            BioRED alone
+       none             no merge (duplicates survive)
+     --merge-scale says whose score a pair both kept takes: rank (default), the one ranking higher
+     within its own model, or calibrated, the larger. A merged triple carries models,
+     corroborated and score_by_model.
+  3. EXPORT of the triples that qualify at --score (default 0.8).
+  4. GRAPH of the triples that qualify at 0.5 (or at --score, if lower), plus LIST EDGES: a relation
+     read for one gene of a list extends to the others (--no-list-edges; never in the export).
 
-TYPED, SIGNED EDGES + MULTI-MODEL MERGE (the two things high_confidence.py does not do)
-  * The graph categorizes each edge by the RELATION the model predicted -- activates /
-    inhibits / binds / interacts / associated, prefixed "not " when the statement is
-    negated -- instead of by polarity alone. With the BioRED checkpoint in the routing
-    that label is SIGNED, so `A inhibits B` and `A activates B` are no longer the same
-    edge. Colour encodes the relation, negated edges are dashed, and the per-sentence
-    tooltip carries each sentence's own label (an edge shows its dominant relation, so a
-    minority reading stays visible there).
-  * relation_extraction.py --route-mode additive scores a pair with EVERY applicable
-    checkpoint, so the input can hold two triples per pair -- the binary PPI verdict and
-    the typed BioRED one, sharing a pair_id. --merge collapses them to one triple per
-    pair; the default `union` keeps every pair EITHER model kept -- so BioRED-only edges
-    (relations BioInfer missed, plus everything BioRED types) are in the graph -- and
-    prefers the TYPED label wherever BioRED fired, so a pair both models claim appears
-    once, signed, scored by the one ranking higher within its own model (--merge-scale). `--merge gate` is the stricter variant
-    (keep only what the binary model also kept) for when BioRED-only edges prove noisy;
-    see also typed / none, and `score_by_model` / `models` / `corroborated` on each
-    merged triple.
+A triple QUALIFIES (qualifies_multi) when ALL of these hold:
+  * score >= the cutoff
+  * both endpoints are nodes, and different ones (see NODES)
+  * no endpoint is annotated control:yes or has hgnc_symbol MKI67
+  * if a gene is involved, at least one gene endpoint is annotated control:no
+The console summary also reports, per --thresholds value, the older gene-only count "G"
+(qualifies: score, control and MKI67 rules only) beside "M" (the rule above).
 
-  The "G" step -- the ONE logic difference from high_confidence.py:
-  the DISEASE-or-CHEMICAL sentence-context requirement (G_D_C rule 5) is DROPPED.
-  A triple QUALIFIES (the "G" filter) when ALL of these hold:
-    1. score >= SCORE                                   (export default 0.8)
-    2. annotated control:no   -- >=1 GENETIC endpoint has control == "no"
-    3. NOT annotated control:yes -- no endpoint has control == "yes"
-    4. NOT hgnc_symbol == "MKI67" on either endpoint
-  (The G_D_C filter's 5th condition -- the sentence must also carry a DISEASE or
-  CHEMICAL entity -- is intentionally NOT applied in this step, so the "G" universe is
-  strictly larger: every high-confidence gene-gene relation, disease/chemical context or not.)
+NODES are identified by normalized id: HGNC symbol, MONDO label, ChEBI label or else NCIt label
+(biologics). Inhibitor shorthand (BRAFi) and the treatments above are drug classes. Left out:
+lab controls, phenotypes and non-chemicals as the pipeline flagged them, DISEASE_IGNORE (too
+generic), CHEMICAL_IGNORE (not compounds under study, or wrong names) and GENE_IGNORE. Surfaces the
+normalizer gets wrong are mapped by GENE_SURFACE, DISEASE_SURFACE, DISEASE_MERGE, CHEMICAL_SURFACE.
 
-All inputs are read from the pipeline output tree (the writable run dir gpu.py produced),
-which defaults to ``kaggle_working/`` next to this script; override with ``--data-root``.
+EDGES: one per unordered pair, categorized by the relation most of its sentences carry -- activates /
+inhibits / binds / interacts / associated, prefixed "not " when negated (dashed). Only activates
+and inhibits are directed. Every sentence keeps its own label, score, year and PMID.
 
-Inputs  : <data-root>/TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json  (scored + normalized)
-          <data-root>/{CHEMICAL,databases,sentences}/...                             (drug targets + year + corpus size)
-          <data-root>/DISEASE/disease.json, <data-root>/CHEMICAL/chemical.json  (phenotype / non_chemical flags)
-Outputs : <data-root>/TRIPLES/high_confidence_M.json     qualifying triples at --score (default 0.8)
-          <data-root>/summaries/high_confidence_M.html    the graph, with a 0.5..0.99 in-browser score slider
-                                                          and a "match text in sentence" filter (substring, or /regex/)
-          <root>/<current_dir>_YYYY_MM_DD_M.html          a copy of that graph, named after the directory
-                                                           holding this script plus today's date;
-                                                           e.g. lung_large_2026_07_19_M.html
+The page opens with "binds" ticked, Min connections at 2 and the score slider at 0.5, its lowest
+stop (most gene-disease edges sit in 0.5-0.8). Graph_description.md is the guide to it.
 
-The output filenames all differ from those written by high_confidence.py (which uses the
-"_G_D_C" JSON, "high_confidence.html" graph, and unsuffixed "<dir>_<date>.html" copy) so the
-two scripts can be run against the same data root without clobbering each other's outputs.
+Inputs  : <data-root>/TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json   REQUIRED
+          the rest is optional, under <data-root> unless noted:
+          sentences/                          entity lists (list edges, negation), corpus size
+          GENETIC/                            gene symbols of listed genes (list edges)
+          experimental_ner/                   corpus size, when it holds the XML
+          CHEMICAL/chemical_to_target.json    drug-target colours and drug menu
+          DISEASE/disease.json, CHEMICAL/chemical.json     phenotype / non_chemical flags
+          databases/pmc_years.json            publication years
+          databases/oncokb_cancerGeneList.tsv Oncogene / Tumor suppressor buttons
+          databases/ HGNC, ChEBI, ncit_drugs.json, cellosaurus.txt    look-alike names of the Candidate
+                                              driver lens (also looked for in gpu_bundle/databases/)
+          summaries/pubmed_query.html         the query shown on the page (also next to this script)
+          vis-network is fetched once and embedded; offline, the page loads it from the CDN
+Outputs : <data-root>/TRIPLES/high_confidence_M.json     the qualifying triples at --score
+          <data-root>/summaries/high_confidence_M.html   the graph (skipped with --no-graph)
+          <root>/<current_dir>_YYYY_MM_DD_M.html         a copy of the graph, named after this script's
+                                                         directory and today's date
 
-  * The graph spans gene, DISEASE and CHEMICAL nodes. A gene-only view draws an edge only
-    when BOTH endpoints carry a single HGNC symbol, which discards everything BioRED adds
-    beyond gene-gene -- on the reference run, 649 of its 655 solo pairs -- and that is why
-    it was retired. DISEASE and CHEMICAL endpoints are nodes too, identified by their
-    normalized id (mondo_label / chebi_label), giving gene-disease / chemical-gene /
-    chemical-disease / chemical-chemical edges. Node hygiene reuses the pipeline's own
-    annotations: control (genes), phenotype (DISEASE/disease.json) and non_chemical
-    (CHEMICAL/chemical.json), plus DISEASE_IGNORE for labels too generic to be a useful
-    node and CHEMICAL_IGNORE for chemicals that are not compounds under study. Outputs
-    take an "_M" suffix so they never clobber high_confidence.py's, node shape encodes the
-    type (gene dot / disease diamond / chemical square), a "Node type" filter appears in
-    the panel, and the score slider opens at >=0.5, its lowest stop (most gene-disease edges sit
-    in 0.5-0.8, so a high default would show an almost empty canvas).
-
-Run::  python high_confidence_g.py [--data-root kaggle_working] [--score 0.8] [--thresholds 0.8,0.95,0.99] [--no-graph]
+Run::  python high_confidence_g.py [--data-root kaggle_working] [--score 0.8] [--thresholds 0.8,0.95,0.99]
        python high_confidence_g.py --merge gate         # drop pairs only BioRED claimed
-       python high_confidence_g.py --merge none         # pre-merge behaviour (duplicates survive)
+       python high_confidence_g.py --no-graph           # JSON export and console summary only
 """
 import argparse
 import bisect
@@ -118,7 +113,7 @@ def set_data_root(data_root):
     DATA_ROOT = Path(data_root).resolve()
     OUT_DIR = DATA_ROOT / "TRIPLES"
     XML_DIR = DATA_ROOT / "experimental_ner"   # input XML corpus (may be empty in the bundle)
-    SENT_DIR = DATA_ROOT / "sentences"         # one JSON per source document (corpus-size fallback)
+    SENT_DIR = DATA_ROOT / "sentences"         # one JSON per source document (entity lists, corpus size)
     RE_FILE = OUT_DIR / "triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"
     PMC_YEARS = DATA_ROOT / "databases" / "pmc_years.json"
     # OncoKB Cancer Gene List (https://www.oncokb.org/api/v1/utils/cancerGeneList.txt), the
@@ -128,7 +123,6 @@ def set_data_root(data_root):
     # normalization libraries carrying the in-place phenotype / non_chemical flags
     DISEASE_LIB = DATA_ROOT / "DISEASE" / "disease.json"
     CHEM_LIB = DATA_ROOT / "CHEMICAL" / "chemical.json"
-    # "_M" output names, distinct from high_confidence.py's "_G_D_C"/"high_confidence.html".
     JSON_OUT = OUT_DIR / "high_confidence_M.json"
     GRAPH_OUT = DATA_ROOT / "summaries" / "high_confidence_M.html"
 
@@ -539,7 +533,7 @@ def ctrl_yes(t):
 
 
 def qualifies(t, T):
-    # gene-only filter: no DISEASE/CHEMICAL sentence-context requirement (that was the "_G_D_C" filter)
+    # the older gene-only filter, reported as "G" in the console; the graph uses qualifies_multi
     sc = t.get("score")
     return (isinstance(sc, (int, float)) and sc >= T
             and ctrl_no(t) and not ctrl_yes(t) and not has_mki67(t))
