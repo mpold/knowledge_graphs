@@ -244,7 +244,8 @@ REFLEXIVE_OK = {s.strip().lower() for s in os.environ.get(
 
 # --- polarity / modality (triples_strategy.html section 6.1) ------------------
 # A lightweight cue-list-in-a-window detector (no spaCy dependency): scan a window
-# around the entity pair for grammatical-negation and speculation/hedge cues.
+# around the entity pair for grammatical-negation and speculation/hedge cues. A negation cue in
+# the window counts only when the pair is what it denies (_negates).
 # A negated or speculated relation is still emitted (it IS a fact: "X does not bind
 # Y") -- polarity/modality are annotations, not score factors or drop conditions.
 # backend for negation: "cuelist" (default, zero-dependency window) or "negspacy"
@@ -384,30 +385,136 @@ def _name(text, e):
     return s[:-1] if len(s) > 3 and s.endswith("s") else s
 
 
+# --- what a negation word applies to ------------------------------------------------------
+# A cue near the pair negates it only when the pair is what it denies. A new clause or a
+# contrast ends its reach ("did not affect A, but suppressed B").
+_BOUND = _re.compile(
+    r";|\b(?:but|whereas|while|whilst|although|though|however|because|since|when|if|thus|"
+    r"suggesting|indicating|which|compared\s+(?:to|with)|than)\b|"
+    r",\s*(?:and\s+)?(?:we|it|they|this|these|the|in)\b", _re.I)
+# "no" / "lack of" must introduce a finding ("no significant effect"), not a subgroup
+_FINDING = (r"(?:(?!(?:of|in|on|and|or|for)\b)[\w-]+\s+){0,3}(?:effects?|changes?|differences?|"
+            r"correlations?|associations?|impacts?|influence|interactions?|binding|increases?|"
+            r"decreases?|reduction|alterations?|relationships?|evidence|responses?|significance|"
+            r"inhibition|activation|induction|regulation|value)\b")
+_NO_FINDING = _re.compile(r"\s+" + _FINDING, _re.I)
+_LACK_FINDING = _re.compile(r"\s+(?:of\s+)?(?:any\s+|an?\s+)?" + _FINDING, _re.I)
+_NO_LONGER = _re.compile(r"\s+longer\b", _re.I)
+# "data not shown", "median not reached"; "not only / entirely / the only" limits, denies nothing
+_NOT_PHRASE = _re.compile(r"\s*-|\s+(?:shown|reached|specific|limited|(?:the\s+)?(?:only|sole|unique|major|main)|"
+                          r"entirely|solely|exclusively|merely|just|necessarily)\b", _re.I)
+_NOT_FOUND = _re.compile(r"\s+(?:\w+ly\s+)?(?:observ|detect|f[io]u?nd|seen?\b|show)\w*", _re.I)
+_WITHOUT_VERB = _re.compile(r"\s+(?:\w+ly\s+)?(?:alter|affect|chang|modif|reduc|increas|decreas|"
+                            r"inhibit|induc|influenc|impair|bind|interact|modulat)\w*", _re.I)
+_NEGATIVE_FOR = _re.compile(r"\s+for\b", _re.I)
+_THOSE = _re.compile(r"\bthose\s+(?:that|who|which)\s+(?:did|do|were|are|had|have)\s*$", _re.I)
+# a cue after the pair must be the predicate of its second entity ("B expression was not ...")
+_PREDICATE = _re.compile(r"[^,;.()]{0,40}\b(?:is|are|was|were|did|does|do|has|had|have|could|can|"
+                         r"would|be|remained)\s*", _re.I)
+_NEW_PHRASE = _re.compile(r"\b(?:and|with|in|on|by|of|for)\b", _re.I)
+_VERB = _re.compile(
+    r"\b(?:is|are|was|were|did|does|do|had|has|have|can|could|"
+    r"(?:reduc|increas|inhibit|suppress|induc|activat|decreas|enhanc|attenuat|block|promot|"
+    r"abolish|restor|downregulat|upregulat|regulat)(?:e|es|ed|s)|reduce|binds?|bound)\b", _re.I)
+# "A inhibits B but had no effect on C": the denied clause borrows the subject A, not B
+_ELIDED = _re.compile(r"\b(?:but|and|yet)\s+(?:\w+ly\s+)?(?:ha[sd]|have|did|does|do|was|were|is|are|"
+                      r"showed|exhibited)\s*$", _re.I)
+# between the subject and its negation: another clause has begun, with a subject of its own
+_NEW_SUBJECT = _re.compile(
+    r";|\.\s+(?=\w)|(?:but|whereas|while|whilst|although|though|however|suggest\w*|indicat\w*|"
+    r"(?:in\s+)?contrast)|,\s*(?:and\s+)?(?:we|it|they|this|these|the)", _re.I)
+_SENTENCE_END = _re.compile(r"[a-z)\]]\.\s+[A-Z]")
+_CONTRAST_TO = _re.compile(r"contrast\s+to\s*$", _re.I)
+_WORD = _re.compile(r"(?!and|nor|the)[a-z]{3,}")
+# where the phrase denied by "but not <phrase>" ends
+_PHRASE_END = _re.compile(r"[,;()]|\.(?:\s|$)|" + _VERB.pattern
+                          + r"|\b(?:led|leads?|result(?:s|ed)|correlat(?:es?|ed)|showed|shows?)\b", _re.I)
+
+
+def _denied_phrase_end(text, end, ents):
+    """End of the phrase after a "but not" at `end`, lists of entities in it included."""
+    m = _PHRASE_END.search(text, end)
+    stop = m.start() if m else len(text)
+    for n in [n for n, e in enumerate(ents) if end <= e["start"] < stop]:
+        stop = max(stop, max(ents[k]["end"] for k in _run_from(text, ents, n, 1)))
+    return stop
+
+
+def _new_clause(gap):
+    """True when a comma in gap opens a new clause (three or more plain words after it), rather
+    than separating the members of a list."""
+    k = gap.find(",")
+    return k >= 0 and len(_WORD.findall(gap[k:])) >= 3
+
+
+def _negates(text, s, e, w, a, b, ents):
+    """True when the negation word w at [s, e) denies the relation of a and b (a before b)."""
+    if any(x["start"] <= s < x["end"] for x in (a, b)):      # part of a name
+        return False
+    before, after = e <= a["start"], s >= b["end"]
+    mid, to_b = text[a["end"]:b["start"]], text[e:b["start"]]
+    between = not before and not after
+    if _SENTENCE_END.search(mid) or _CONTRAST_TO.search(text[max(0, s - 20):s]):
+        return False
+    if w == "not":
+        if _NOT_PHRASE.match(text, e):
+            return False
+        c = _contrast(text, s, e, ents)
+        if c and c[0] == "context":
+            return False
+        if c:
+            denied = {_name(text, ents[n]) for n in c[1]}
+            if not {_name(text, a), _name(text, b)} & denied:
+                return False
+            return not (before and _BOUND.search(mid))
+        if _BUT_PRE.search(text, max(0, s - 12), s):         # "but not a kinase-dead mutant"
+            stop = _denied_phrase_end(text, e, ents)
+            return any(e <= x["start"] < stop for x in (a, b))
+    if w == "without":        # subgroup or condition, except "without affecting B"
+        return between and bool(_WITHOUT_VERB.match(text, e)) and not _BOUND.search(to_b)             and not _new_clause(to_b) and len(to_b) <= NEG_WINDOW_L
+    if w == "negative":       # "CD19-negative", "dominant-negative", "negative effect"
+        return between and bool(_NEGATIVE_FOR.match(text, e)) and not _BOUND.search(to_b)
+    if w.startswith(("absen", "lack")) and not _LACK_FINDING.match(text, e):
+        return False
+    if w == "no" and (_NO_LONGER.match(text, e) or not _NO_FINDING.match(text, e)):
+        return False
+    if after:
+        gap = text[b["end"]:s]
+        return bool(_PREDICATE.fullmatch(gap)) and not _BOUND.search(gap) \
+            and not _NEW_PHRASE.search(gap) and not _VERB.search(mid)             and not _BOUND.search(mid) and not _re.search(r"without", mid, _re.I)
+    if before:
+        if _BOUND.search(text[e:a["start"]]) or _BOUND.search(mid):
+            return False
+        return w != "not" or bool(_NOT_FOUND.match(text, e))
+    if _BOUND.search(to_b) or _new_clause(to_b) or _THOSE.search(text[:s]):
+        return False
+    elided = _ELIDED.search(text, a["end"], s)
+    if _NEW_SUBJECT.search(text[a["end"]:elided.start() if elided else s]):
+        return False
+    if elided:
+        # a must be the subject: no "<entity> ... <verb>" of the same clause ahead of it
+        first = ents[0]
+        lead = text[first["end"]:a["start"]] if first["end"] <= a["start"] else ""
+        if _VERB.search(lead) and not _BOUND.search(lead):
+            return False
+    return True
+
+
 def _neg_cues(text, a, b, ents=None):
-    """Negation cues in the window around the pair that apply to it. Left out: the "not" of "not
-    only" and the "negative" of "negative correlation / control / regulator ..." (looked up in the
-    full text); a cue that is only half a word of the text ("no|vel" at the window's edge); and,
-    when the sentence's entities are given, a "but not Y" that denies something else (_contrast)."""
+    """Negation cues in the window around the pair that deny its relation (_negates). Cues are
+    looked up in the full text, so half a word at the window's edge ("no|vel") is no cue. `ents`
+    are the sentence's entities; without them only the pair itself is known."""
     lo, hi = max(0, a["start"] - NEG_WINDOW_L), min(len(text), b["end"] + NEG_WINDOW_R)
-    ents = sorted(ents, key=lambda e: e["start"]) if ents else None
+    ents = sorted(ents or [a, b], key=lambda e: e["start"])
     out = []
-    for m in NEG_RE.finditer(text[lo:hi]):
-        s, e, w = lo + m.start(), lo + m.end(), m.group(0).lower()
-        if s == lo or e == hi:
-            full = next((f for f in NEG_RE.finditer(text, max(0, s - 12))
-                         if f.start() <= s and f.end() >= e), None)
-            if full is None:
-                continue
-            s, e, w = full.start(), full.end(), full.group(0).lower()
+    for m in NEG_RE.finditer(text):
+        s, e, w = m.start(), m.end(), m.group(0).lower()
+        if e <= lo or s >= hi:
+            continue
         if w in _NOT_A_NEGATION and _NOT_A_NEGATION[w].match(text, e):
             continue
-        if w == "not" and ents:
-            c = _contrast(text, s, e, ents)
-            denied = {_name(text, ents[n]) for n in c[1]} if c else set()
-            if c and not ({_name(text, a), _name(text, b)} & denied):
-                continue
-        out.append(w)
+        if _negates(text, s, e, w, a, b, ents):
+            out.append(w)
     return out
 
 
@@ -1051,7 +1158,8 @@ softmax <code>score</code>. Data: <code>TRIPLES/triples_re.json</code>. Produced
 <h2>By entity-type pair</h2><table><tr><th>subj-&gt;obj</th><th class="num">triples</th></tr>{pair_rows}</table>
 <h2>Score distribution</h2><table><tr><th>bucket</th><th class="num">triples</th></tr>{bkt_rows}</table>
 <h2>Polarity / modality</h2>
-<p>Negation &amp; speculation detected by a cue-list window around each pair. Negated/speculated
+<p>Negation &amp; speculation detected by a cue-list window around each pair
+(a negation cue counts only when the pair is what it denies). Negated/speculated
 relations are <em>kept</em> &mdash; "X does not bind Y" is a fact &mdash; and flagged for downstream use.</p>
 <table><tr><th>polarity / modality</th><th class="num">triples</th></tr>{pm_rows}</table>
 <h2>Top 60 by score</h2><table><tr><th>subject</th><th>relation</th><th>object</th>

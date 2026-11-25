@@ -463,6 +463,13 @@ size and mtime.
 periphery* and *Expand center* at 0%. The original positions and slider values are kept: *Restore
 layout*, or any change that draws a node the re-laid view did not have, brings them back.
 
+## Stand-alone nodes
+
+*Hide stand-alone nodes* takes off the canvas every node with no drawn edge to another node: a kept
+disease whose links are all filtered out, or a node whose only edge is to itself. The button shows
+how many the current filters leave, and it is judged afresh on every change, so a node returns once
+it has a link again.
+
 ## List edges
 
 When one gene of a list has a qualifying relation (score >= 0.5) with an entity outside the

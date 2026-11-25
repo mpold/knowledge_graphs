@@ -1289,8 +1289,8 @@ __LIBTAG__
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
  #catfilters .cnt{color:#5b6677;font-size:11px}
- #zoom button,#srcbtns button,#labelbtns button,#relay,#relayback,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn,#resbtn,#acqbtn,#slbtn,#bmkbtn,#prgbtn,#clnbtn,#vivbtn,#oncbtn,#tsgbtn,#immbtn,#mtsbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
- #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#catall:hover,#drvbtn:hover,#fusbtn:hover,#itdbtn:hover,#oexbtn:hover,#ampbtn:hover,#delbtn:hover,#trubtn:hover,#exobtn:hover,#cnbtn:hover,#metbtn:hover,#resbtn:hover,#acqbtn:hover,#slbtn:hover,#bmkbtn:hover,#prgbtn:hover,#clnbtn:hover,#vivbtn:hover,#oncbtn:hover,#tsgbtn:hover,#immbtn:hover,#mtsbtn:hover{background:#dde4ee}
+ #zoom button,#srcbtns button,#labelbtns button,#relay,#relayback,#lonebtn,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn,#resbtn,#acqbtn,#slbtn,#bmkbtn,#prgbtn,#clnbtn,#vivbtn,#oncbtn,#tsgbtn,#immbtn,#mtsbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
+ #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#lonebtn:hover,#catall:hover,#drvbtn:hover,#fusbtn:hover,#itdbtn:hover,#oexbtn:hover,#ampbtn:hover,#delbtn:hover,#trubtn:hover,#exobtn:hover,#cnbtn:hover,#metbtn:hover,#resbtn:hover,#acqbtn:hover,#slbtn:hover,#bmkbtn:hover,#prgbtn:hover,#clnbtn:hover,#vivbtn:hover,#oncbtn:hover,#tsgbtn:hover,#immbtn:hover,#mtsbtn:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button{margin-bottom:4px}
  #disfilters{display:block;max-height:148px;overflow-y:auto;margin-top:0}
  .dbox{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px;margin:2px 0 8px}   /* the Enrich boxes' frame (.egrid) */
@@ -1301,7 +1301,7 @@ __LIBTAG__
  /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
     carry a trailing margin -- 6px of it would push Fit onto a second line */
  #zoom button:last-child{margin-right:0}
- #srcbtns button.on,#labelbtns button.on,#drvbtn.on,#fusbtn.on,#itdbtn.on,#oexbtn.on,#ampbtn.on,#delbtn.on,#trubtn.on,#exobtn.on,#cnbtn.on,#metbtn.on,#resbtn.on,#acqbtn.on,#slbtn.on,#bmkbtn.on,#prgbtn.on,#clnbtn.on,#vivbtn.on,#oncbtn.on,#tsgbtn.on,#immbtn.on,#mtsbtn.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
+ #srcbtns button.on,#labelbtns button.on,#lonebtn.on,#drvbtn.on,#fusbtn.on,#itdbtn.on,#oexbtn.on,#ampbtn.on,#delbtn.on,#trubtn.on,#exobtn.on,#cnbtn.on,#metbtn.on,#resbtn.on,#acqbtn.on,#slbtn.on,#bmkbtn.on,#prgbtn.on,#clnbtn.on,#vivbtn.on,#oncbtn.on,#tsgbtn.on,#immbtn.on,#mtsbtn.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  /* the name buttons must not move when one is toggled: bold text is wider, so each button reserves
     its bold width up front (a hidden bold copy of its own label) and switching weight changes nothing */
  /* ...and 3px less side padding (no trailing margin) pays for that reserve, so the pair still
@@ -1337,6 +1337,8 @@ __LIBTAG__
   <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed.</div></div>
  <div class="row"><button id="relay">Re-layout this view</button> <button id="relayback" disabled>Restore layout</button> <button class="ihelp" aria-label="About re-layout" aria-expanded="false">i</button>
   <div class="mut help">Filtering hides nodes but leaves the rest where they were, so distances still reflect links you no longer see. <b>Re-layout this view</b> places the drawn nodes afresh from the drawn edges alone (more sentences in view = shorter edge; nodes also push each other apart, so distances stay approximate). It sets <em>Shrink periphery</em> and <em>Expand center</em> to 0%, as both bend distances. Filtering further keeps the new places; a change that brings in other nodes, or <b>Restore layout</b>, returns to the original places and slider values.</div></div>
+ <div class="row"><button id="lonebtn" aria-pressed="false">Hide stand-alone nodes</button> <button class="ihelp" aria-label="About stand-alone nodes" aria-expanded="false">i</button>
+  <div class="mut help">A combination of filters can leave a node with no edge to any other drawn node: a kept disease whose every link is filtered out, or a node whose only edge is to itself. <b>Hide stand-alone nodes</b> takes these off the canvas; the number in brackets is how many the current filters leave. Judged afresh on every change of the filters, so a node comes back as soon as it has a link again. Nothing else changes: linked nodes and their edges stay, small clusters too (for those use <em>Min cluster size</em>), and click again to show the stand-alone nodes.</div></div>
  <div class="row">Shrink periphery: <b id="shv">90%</b> <button class="ihelp" aria-label="About shrink periphery" aria-expanded="false">i</button><br><input id="shrink" type="range" min="0" max="90" step="5" value="90" aria-label="Shrink periphery">
   <div class="mut help">Pulls everything past the middle distance inward, so the small clusters physics flung to the edges come back where you can read them without zooming out. The centre is left alone.</div></div>
  <div class="row">Expand center: <b id="exv">100%</b> <button class="ihelp" aria-label="About expand center" aria-expanded="false">i</button><br><input id="expand" type="range" min="0" max="100" step="5" value="100" aria-label="Expand center">
@@ -1749,6 +1751,7 @@ function fusionHits(t){t=t||'';
  });
  return iv;}
 let FUSIONS=false;
+let HIDE_LONE=false;   // "Hide stand-alone nodes"
 function fusionMatcher(){return {test:t=>fusionHits(t).length>0,hits:fusionHits};}
 // "Enrich for ITD": internal tandem duplications, nearly all FLT3-ITD in this corpus. "ITD" is
 // matched case-SENSITIVELY as a word ("FLT3-ITD", "FLT3/ITD", "ITD-positive"), the long form
@@ -2561,6 +2564,15 @@ function build(thr){
    const linked=new Set();edges.forEach(o=>{linked.add(o.e.from);linked.add(o.e.to);});
    DIS_KEEP.forEach(id=>{if(!linked.has(id))loneDis.push(id);});
  }
+ // "Hide stand-alone nodes": no drawn edge to ANOTHER node. Besides the lone diseases that means a
+ // node whose only edge is a loop on itself; the loop goes with it. Counted in either state, so
+ // the button says how many there are; removing them can not orphan anything else.
+ const joined=new Set(), loneIds=new Set(loneDis);
+ edges.forEach(o=>{if(o.e.from!==o.e.to){joined.add(o.e.from);joined.add(o.e.to);}});
+ edges.forEach(o=>{if(!joined.has(o.e.from))loneIds.add(o.e.from);});
+ const lb=document.getElementById('lonebtn');
+ lb.textContent='Hide stand-alone nodes'+(loneIds.size?' ('+loneIds.size+')':'');
+ if(HIDE_LONE){edges=edges.filter(o=>!loneIds.has(o.e.from));loneDis.length=0;}
  updateCatCounts(edges,cats);   // edges is final here (category, score, year, degree, cluster, text, disease)
  const keep=new Set();edges.forEach(o=>{keep.add(o.e.from);keep.add(o.e.to);});
  loneDis.forEach(id=>keep.add(id));
@@ -2582,6 +2594,7 @@ function build(thr){
  const KLAB={gene:'genes',disease:'diseases',chemical:'chemicals'};
  document.getElementById('stats').innerHTML='Showing <b>'+nodes.length+'</b> '+(nkinds.size===1?(KLAB[[...nkinds][0]]||'nodes'):'nodes').replace(/s$/,nodes.length===1?'':'s')+', <b>'+edges.length+'</b> edges, <b>'+vpub.size+'</b> publications (&ge;'+conf+')'+(txt?' &middot; text: <b>'+esc(txt)+'</b>':'')+(enrichLabel()?' &middot; <b>enriched for '+enrichLabel()+'</b>':'')+(focusActive?' &middot; focus: <b>'+esc(focusLabel)+'</b>':'')+(kinds&&!kindOK?' &middot; <b>nothing relates '+(kinds.size===1?'a '+[...kinds][0]+' to another '+[...kinds][0]:'these node types to each other')+'</b> &mdash; '+(kinds.has('disease')&&kinds.size===1?'diseases link only to genes and chemicals, so tick one of them':'tick another node type'):'')
    +(hiddenMin?' &middot; <b>'+hiddenMin+'</b> edge'+(hiddenMin>1?'s':'')+' hidden by Min connections':'')
+   +(HIDE_LONE&&loneIds.size?' &middot; <b>'+loneIds.size+'</b> stand-alone node'+(loneIds.size>1?'s':'')+' hidden':'')
    +(cats.size?'':' &middot; <b>no relation type is ticked</b>')
    +(loneDis.length?' &middot; <b>'+loneDis.length+'</b> kept disease'+(loneDis.length>1?'s have':' has')+' no link under these settings, drawn on '+(loneDis.length>1?'their':'its')+' own'
      +(cats.has('associated')?'':' &mdash; diseases are linked by <b>associated</b>, so tick it to see '+(loneDis.length>1?'their':'its')+' genes and drugs'):'');
@@ -2681,6 +2694,7 @@ document.querySelectorAll('.ihelp').forEach(b=>b.addEventListener('click',()=>{
  const dc=document.getElementById('disconn');
  if(dc)dc.addEventListener('change',()=>{if(DIS_KEEP.size)build(+thr.value);});})();
 const shr=document.getElementById('shrink'), exp=document.getElementById('expand');
+document.getElementById('lonebtn').addEventListener('click',ev=>{HIDE_LONE=!HIDE_LONE;ev.currentTarget.classList.toggle('on',HIDE_LONE);ev.currentTarget.setAttribute('aria-pressed',HIDE_LONE);build(+thr.value);});
 document.getElementById('relay').addEventListener('click',()=>{relayOn();build(+thr.value);});
 document.getElementById('relayback').addEventListener('click',()=>{if(!RELAID)return;relayOff();build(+thr.value);});
 shr.addEventListener('input',()=>{document.getElementById('shv').textContent=shr.value+'%';applyLayoutShape();});
@@ -2913,8 +2927,8 @@ def main():
     print(f"direction: {n_flip:,} signed triple(s) reversed to put the agent first "
           f"(passive/agent cue -- gpu_bundle/direction.py)")
     n_pos, n_drop = recheck_negation(raw)
-    print(f"negation: {n_pos:,} triple(s) no longer negated (not only, negative correlation / control, "
-          f"but not X, half words); {n_drop:,} dropped (the two sides of 'X but not Y')")
+    print(f"negation: {n_pos:,} triple(s) no longer negated (the cue denies something else: subgroup, "
+          f"other clause, but not X, half words); {n_drop:,} dropped (the two sides of 'X but not Y')")
     d, merge_note = merge_models(raw, args.merge, args.typed_model, args.gate_model, args.merge_scale)
     print(merge_note)
     # Ceilings are read from the PRE-merge triples: after the merge a pair keeps the typed
