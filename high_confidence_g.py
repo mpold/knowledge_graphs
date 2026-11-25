@@ -84,6 +84,7 @@ import bisect
 import collections
 import csv
 import datetime
+import hashlib
 import html
 import json
 import re
@@ -694,6 +695,196 @@ def stats(d, T):
             "filt": len(f), "filt_sentences": len({t.get("sentence") for t in f})}
 
 
+def recheck_negation(triples):
+    """Re-judge the polarity of stored "negated" triples with stage 2's own
+    (since corrected) rule, _NOT_A_NEGATION; returns how many turn positive. Runs scored by the
+    corrected relation_extraction.py have nothing to change, and NegEx verdicts are left alone."""
+    import relation_extraction as RX      # gpu_bundle; needs no torch to import
+    n = 0
+    for t in triples:
+        sent = t.get("sentence") or ""
+        if t.get("polarity") != "negated" or "negex" in (t.get("assertion_cues") or ()):
+            continue
+        m = re.search(r":(\d+)-(\d+):(\d+)-(\d+)$", t.get("pair_id") or "")
+        if not m:
+            continue
+        s1, e1, s2, e2 = map(int, m.groups())
+        if not RX._neg_cues(sent, {"start": s1, "end": e1}, {"start": s2, "end": e2}):
+            t["polarity"] = "positive"
+            # drop the cue that no longer counts, keep the rest
+            t["assertion_cues"] = [c for c in t.get("assertion_cues") or []
+                                   if c not in RX._NOT_A_NEGATION]
+            n += 1
+    return n
+
+
+# ----- list edges: one predicate, several genes -------------------------------
+# "PDH1, IDH2, and SDHB gene expression is under expressed in GBM" makes one claim about three
+# genes, but the RE step scores each gene-GBM pair alone, so list-mates of a kept gene can fall
+# under the cutoff. When ONE gene of a list has a qualifying relation (score >= the graph's 0.5)
+# with an entity outside the list in the same sentence, every other gene of the list that
+# maps to an HGNC symbol gets the same relation. Not applied when:
+#   * the sentence says "respectively" (the members then have different partners),
+#   * the partner stands inside the list (on either side of the predicate is fine: "X inhibits A,
+#     B and C", "A, B and C are inhibited by X"),
+#   * two of its genes were read with conflicting signs, or the two are joined by a bare comma
+#     or by "between A and B",
+#   * it is a slash-written pathway ("PI3K/AKT/mTOR axis") or a cell phenotype ("CD4+PD-1+"),
+#   * the relation is negative ("not associated"),
+#   * the list is broken by anything but a separator ("A, but not B", "A rather than B").
+# An added triple is marked inferred="list", keeps the donor's label, polarity and models, and
+# takes the LOWEST donor score, so it never outlives its evidence on the score slider.
+_LIST_SEP = re.compile(r"^\s*(?:(?:genes?|mRNAs?|proteins?)\s*)?"
+                       r"(?:,|;|/|\+|&|,?\s*\b(?:and|or|as well as)\b)+\s*"
+                       r"(?:(?:and|or|as well as)\s+)?(?:the\s+)?$")
+# a lone comma between two names is not a list ("the effectors of Src, CD36 overexpression ...")
+_LIST_CONJ = re.compile(r"/|\+|&|\b(?:and|or|as well as)\b")
+# "correlation between A and B" relates the two to each other, not both to something else
+_BETWEEN = re.compile(r"\bbetween\s+(?:the\s+)?$", re.I)
+# "the miR-664b-3p/Rheb/mTOR axis" is a chain, not a list ("GLUT1/GLUT4 expression" is one). The
+# chain may run on past the last recognized gene ("STAT3/PKM2/SNAP23 pathway").
+_PATHWAY = re.compile(r"^(?:\s*[/\-‐–]\s*[\w‐-]+){0,4}[\s\-‐]*(?:(?:signal\w*|transduction|metabolic|regulatory|dependent|"
+                      r"mediated)[\s\-]+){0,2}(?:pathways?|ax[ie]s|cascades?|signal+ing)\b", re.I)
+# cell-surface phenotypes: CD4+PD-1+, CD44+/CD24−, CD8 + T cells. A plain hyphen counts after a CD
+# name only: "LDHA- and HK2-silenced cells" is a list.
+_MARKER_AFTER = re.compile(r"^(?:[+⁺]|[−⁻](?![A-Za-z0-9]))")
+_MARKER_CD_AFTER = re.compile(r"^\s?(?:[+⁺]|[-−⁻–](?![A-Za-z0-9]))")
+
+
+def _is_cell_marker(text, e):
+    name, after = e["text"], text[e["end"]:e["end"] + 3]
+    if re.search(r"[+⁺−⁻]$", name) or _MARKER_AFTER.match(after):
+        return True
+    return bool(re.match(r"CD\d", name)
+                and (name.endswith("-") or _MARKER_CD_AFTER.match(after)))
+
+
+def is_gene_list(text, run):
+    """False for runs that only look like a list: 'between A and B', a bare-comma pair, a
+    slash-written pathway, a cell-surface phenotype."""
+    seps = [text[p["end"]:q["start"]] for p, q in zip(run, run[1:])]
+    if _BETWEEN.search(text[:run[0]["start"]]):
+        return False
+    if len(run) == 2 and not _LIST_CONJ.search(seps[0]):
+        return False
+    if any("/" in s for s in seps) and _PATHWAY.match(text[run[-1]["end"]:run[-1]["end"] + 90]):
+        return False
+    return not any(_is_cell_marker(text, e) for e in run)
+
+
+_RESPECTIVELY = re.compile(r"\brespectively\b", re.I)
+
+
+def lists_in(text, ents):
+    """Maximal runs of >= 2 same-label entities (sorted by start) joined only by list separators."""
+    out, run = [], []
+    for e in ents:
+        if run and e["label"] == run[-1]["label"] and e["start"] >= run[-1]["end"] \
+                and _LIST_SEP.match(text[run[-1]["end"]:e["start"]]):
+            run.append(e)
+            continue
+        if len(run) > 1:
+            out.append(run)
+        run = [e]
+    if len(run) > 1:
+        out.append(run)
+    return out
+
+
+def list_edges(merged, flags, T=None):
+    """Inferred triples for list-mates of qualifying genes (see above); `merged` is not changed."""
+    import triples as TR          # gpu_bundle: the surfaces and HGNC lookup stage 2 used
+    T = GRAPH_BASE if T is None else T
+    if not SENT_DIR.is_dir() or not any(t.get("pair_id") for t in merged):
+        print("  list edges: skipped (no sentences/ or no pair_id in the triples)")
+        return []
+    TR.GEN_DIR = DATA_ROOT / "GENETIC"
+    maps = TR.build_genetic_maps()
+    by_pair = {t["pair_id"]: t for t in merged if t.get("pair_id")}
+    wanted = collections.defaultdict(set)          # pmid -> sentence digests with a kept pair
+    for pid in by_pair:
+        pmid, sig = pid.rsplit(":", 3)[:2]
+        wanted[pmid].add(sig)
+
+    def gene(text):
+        el = {"text": text, "type": "GENETIC", "score": None}
+        return TR.normalize_genetic({"subject": el, "object": {"text": "", "type": ""}}, *maps)["subject"]
+
+    out, n_lists, n_resp = [], set(), set()
+    for fp in sorted(SENT_DIR.glob("*.json")):
+        try:
+            rec = json.loads(fp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        pmid = Path(rec.get("source_file", fp.name)).stem
+        for s in rec.get("sentences", []) if pmid in wanted else ():
+            text = s.get("text", "")
+            sig = hashlib.md5(text.encode("utf-8", "replace")).hexdigest()[:8]
+            if sig not in wanted[pmid]:
+                continue
+            ents = sorted((e for e in s.get("entities", []) if e.get("start") is not None),
+                          key=lambda e: e["start"])
+            for run in lists_in(text, ents):
+                if run[0]["label"] != "GENETIC" or not is_gene_list(text, run):
+                    continue
+                for x in ents:
+                    # the list may stand on either side of the predicate, but not around x
+                    if x["start"] < run[-1]["end"] and x["end"] > run[0]["start"]:
+                        continue
+                    pid = {}
+                    for m in run:
+                        p, q = (m, x) if m["start"] < x["start"] else (x, m)
+                        pid[id(m)] = f'{pmid}:{sig}:{p["start"]}-{p["end"]}:{q["start"]}-{q["end"]}'
+                    donors = []
+                    for m in run:
+                        t = by_pair.get(pid[id(m)])
+                        if t is None or not qualifies_multi(t, T, flags):
+                            continue
+                        if t.get("polarity") == "negated":      # "not X" is never copied
+                            continue
+                        side = next((k for k in ("subject", "object")
+                                     if t[k]["type"] == "GENETIC" and t[k]["text"] == TR.entity_text(m)), None)
+                        if side and (node_of(t[side], flags) or ("",))[0] == "gene":
+                            donors.append((t, side))
+                    if not donors or len(donors) == len(run):
+                        continue
+                    if _RESPECTIVELY.search(text):
+                        n_resp.add((pmid, sig))
+                        continue
+                    # one predicate: members the models read with opposite signs share none
+                    if len({rel_cat(t) for t, _ in donors} - {"associated", "interacts", "binds"}) > 1:
+                        continue
+                    best, side = max(donors, key=lambda d: d[0]["score"])
+                    other = "object" if side == "subject" else "subject"
+                    have = {node_of(t[k], flags) for t, k in donors} | {node_of(best[other], flags)}
+                    for m in run:
+                        own = by_pair.get(pid[id(m)])
+                        if own is not None and qualifies_multi(own, T, flags):
+                            continue
+                        el = gene(TR.entity_text(m))
+                        el["score"] = m.get("score")
+                        nd = node_of(el, flags)
+                        if not nd or nd[0] != "gene" or nd in have:
+                            continue
+                        new = dict(best)
+                        new[side], new[other] = el, dict(best[other])
+                        new["predicate"] = dict(best["predicate"])
+                        new["pair_id"] = pid[id(m)]
+                        new["score"] = min(t["score"] for t, _ in donors)
+                        new["inferred"] = "list"
+                        new["inferred_from"] = [t[k]["text"] for t, k in donors]
+                        for k in ("score_by_model", "score_pct_by_model", "score_components", "gate_cat"):
+                            new.pop(k, None)
+                        if not qualifies_multi(new, T, flags):
+                            continue
+                        have.add(nd)
+                        out.append(new)
+                        n_lists.add((pmid, sig))
+    print(f"  list edges: {len(out):,} gene relation(s) added from lists in {len(n_lists):,} sentence(s) "
+          f"(donor score >= {T}); {len(n_resp):,} 'respectively' sentence(s) left alone")
+    return out
+
+
 # ----- the graph -------------------------------------------------------------
 def single(v):
     return v.strip() if isinstance(v, str) and v.strip() else None
@@ -801,6 +992,9 @@ def graph_payload_multi(triples, flags):
     # ("p21" for CDKN1A, "androgen receptor" for AR), shown on the node and marked in sentences
     node_surf = collections.defaultdict(lambda: collections.defaultdict(set))
     kind_of = {}
+    own_pairs = {frozenset((node_of(t["subject"], flags), node_of(t["object"], flags)))
+                 for t in triples if not t.get("inferred")}
+    own_pairs = {frozenset(n[1] for n in pr if n) for pr in own_pairs}
     for t in triples:
         a, b = node_of(t["subject"], flags), node_of(t["object"], flags)
         if not a or not b or a == b:
@@ -815,11 +1009,16 @@ def graph_payload_multi(triples, flags):
         for nd, side in ((a, "subject"), (b, "object")):
             if nd[0] == "gene":
                 node_surf[nd[1]][(t[side].get("text") or "").strip()].add(sent)
-        dir_sent[(ka, kb, cat)].add(sent)
+        # a list-inferred sentence never outvotes the models on a pair they read themselves
+        if not (t.get("inferred") and frozenset((ka, kb)) in own_pairs):
+            dir_sent[(ka, kb, cat)].add(sent)
         pair_src[frozenset((ka, kb))] |= roles
         cur = pair_sent[frozenset((ka, kb))].get(sent)
-        if cur is None or sc > cur[0]:
-            pair_sent[frozenset((ka, kb))][sent] = [sc, pm, cat, spec, src_tag(roles), t.get("gate_cat")]
+        # a model's own reading of the sentence always beats one inferred from a list
+        rank = (not t.get("inferred"), sc)
+        if cur is None or rank > (cur[6] is None, cur[0]):
+            pair_sent[frozenset((ka, kb))][sent] = [sc, pm, cat, spec, src_tag(roles), t.get("gate_cat"),
+                                                    t.get("inferred_from") if t.get("inferred") else None]
         for nd in (ka, kb):
             if node_sent[nd].get(sent, -1) < sc:
                 node_sent[nd][sent] = sc
@@ -836,8 +1035,9 @@ def graph_payload_multi(triples, flags):
         cands.sort(reverse=True)
         _, ff, ft, fcat = cands[0]
         sents = [{"pmid": pm, "text": sent[:300], "sc": round(sc, 4), "yr": years.get(pm),
-                  "rc": cat, "sp": sp, "sr": sr, **({"pc": pc} if sr == "both" and pc else {})}
-                 for sent, (sc, pm, cat, sp, sr, pc) in sd.items()]
+                  "rc": cat, "sp": sp, "sr": sr, **({"pc": pc} if sr == "both" and pc else {}),
+                  **({"li": ", ".join(li)} if li else {})}
+                 for sent, (sc, pm, cat, sp, sr, pc, li) in sd.items()]
         sents.sort(key=lambda z: (-z["sc"], z["pmid"]))
         edges.append({"from": ff, "to": ft, "cat": fcat, "color": RCOLOR.get(fcat, "#888"),
                       "neg": fcat.startswith("not "), "src": src_tag(pair_src[pr]), "sents": sents})
@@ -1128,13 +1328,13 @@ __LIBTAG__
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span>
   <div class="dbox"><div class="legend" id="disfilters"></div>
   <label style="display:block;margin-top:4px"><input type=checkbox id="disconn"> <b style="color:#1c2330">Only their direct neighbours</b></label></div>
-  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Edges between genes and drugs keep only the sentences from <b>papers about a kept disease</b> (a paper&rsquo;s diseases are those its own sentences relate to anything), so a gene pair under <i>brain</i> shows glioma papers, not melanoma ones; an edge left with too few sentences for <i>Min unique sentences / publications</i> is dropped. Edges to a kept disease are untouched. Diseases of the same tissue (read from the name, as for <em>Stack same-tissue diseases</em>) are listed together under a bold tissue heading whose box ticks or unticks them all &mdash; half-ticked when only some are kept; the number beside it is how many diseases it holds and their edges in all. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> switches on by itself when you tick the first disease (untick it to see the whole graph with only those diseases), and goes further: it keeps just the ticked diseases, the genes and drugs with a <em>drawn</em> edge straight to one of them, and the edges among those nodes &mdash; everything else drops out. Every other setting counts: a gene whose own link to the disease is hidden (its relation unticked, an Enrich button, min sentences, min connections, cluster size) is not a neighbour, however it connects to the ones that are. The <b>Match text</b> box is the exception: it searches the neighbourhood without redrawing it &mdash; the neighbours are chosen as if the box were empty, and the text then keeps the edges among them that match. Genes are linked to diseases almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood shrinks to a few drugs, or to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
+  <div class="mut help">Ticking a disease <b>keeps it</b>: the canvas then shows those diseases only, and drops the rest along with the edges that led to them. Edges between genes and drugs keep only the sentences from <b>papers about a kept disease</b> (a paper&rsquo;s diseases are those its own sentences relate to anything), so a gene pair under <i>brain</i> shows glioma papers, not melanoma ones; an edge left with too few sentences for <i>Min unique sentences / publications</i> is dropped. Edges to a kept disease are untouched. Diseases of the same tissue (read from the name, as for <em>Stack same-tissue diseases</em>) are listed together under a bold tissue heading whose box ticks or unticks them all &mdash; half-ticked when only some are kept; the number beside it is how many diseases it holds and their edges in all. <b>Tick nothing and nothing is filtered</b>, which is the default; untick the last one (or press <em>clear</em>) to go back. The list is rebuilt on every redraw from the diseases actually in front of you, with the number of drawn edges each one carries &mdash; so it follows the score, year, text and every other control. It is built from the view <em>before</em> this filter is applied: otherwise ticking one disease would empty the menu you are ticking from. A disease you have ticked stays listed even when the current filters leave it nothing, shown <span style="color:#b3243b">(0)</span>, so you can always untick it. <b>Only their direct neighbours</b> switches on by itself when you tick the first disease (untick it to see the whole graph with only those diseases), and goes further: it keeps just the ticked diseases, the genes and drugs with a <em>drawn</em> edge straight to one of them, and those edges only &mdash; not the links the neighbours have with each other. Every other setting counts: a gene whose own link to the disease is hidden (its relation unticked, an Enrich button, min sentences, cluster size) is not a neighbour, however it connects to the ones that are. <b>Min connections</b> is not applied here, so a gene linked to nothing but the disease is shown. The <b>Match text</b> box is another exception: it searches the neighbourhood without redrawing it &mdash; the neighbours are chosen as if the box were empty, and the text then keeps the edges that match, including those between neighbours. Genes are linked to diseases almost only by <b>associated</b> (drugs also by <b>inhibits</b>), so with that unticked the neighbourhood shrinks to a few drugs, or to the diseases themselves. A ticked disease left with no link is drawn on its own, and the line under the graph says why. It does nothing until a disease is ticked.</div></div>
  <div class="row" id="enrichhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for alteration:</b></div>
  <div id="enrichgrid" class="egrid">
  <div class="row"><button id="drvbtn" aria-pressed="false">Candidate driver</button> <button class="ihelp" aria-label="About enrich for candidate drivers" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, one-letter or three-letter, case-sensitive (<i>V600E</i>, <i>p.Gly12Cys</i>), with any punctuation around it (<i>G12C,</i> <i>V600E-mutant</i> <i>KRAS-G12V</i> <i>L858R/T790M</i> <i>p.L747P</i>) or glued to a gene symbol (<i>KRASG12C</i>, <i>p110&alpha;H1047R</i>), and excluding the figure, table, gene-name, chemical and cell-line look-alikes (<i>H929R</i>, <i>S3I-201</i>, <i>H2S</i>) and phosphosites (<i>S15P-p53</i>).</div></div>
  <div class="row"><button id="fusbtn" aria-pressed="false">Fusions</button> <button class="ihelp" aria-label="About enrich for fusions" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence about a <b>gene fusion</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. A sentence counts if it says <i>fusion</i> (<i>EML4-ALK fusion</i>, <i>RET fusion-positive</i>; not <i>infusion</i>), or uses <i>translocation</i> in the chromosomal sense: after a fusion pair or a gene that drives fusions (<i>EML4-ALK translocation</i>, <i>ROS1 translocation</i>, <i>ALK-translocated</i>), with a karyotype (<i>t(11;22) translocation</i>), after <i>chromosomal</i>, <i>balanced</i>, <i>reciprocal</i> or <i>gene</i>, or as <i>translocation involving MLL</i>. Karyotype notation counts on its own, with no other word: <i>t(4;14)</i>, <i>t(11;14)</i>, <i>t(9;22)(q34;q11)</i>, <i>inv(16)</i>, <i>der(22)</i> &mdash; how myeloma and leukemia papers write their translocations. So does a fusion named by its genes in HGNC notation, <i>NUP98::NSD1</i>, <i>AGK::BRAF</i> (both sides genes of this graph); the older single colon, <i>TMPRSS2:ERG</i>, only with a fusion word in the sentence, since <i>EGFR:GRB2</i> or <i>MAPK8:JUN</i> are not fusions. A protein moving inside the cell &mdash; <i>nuclear translocation of p65</i>, <i>translocation of YAP to the nucleus</i> &mdash; does not count.</div></div>
+  <div class="mut help">Keeps only edges with a sentence about a <b>gene fusion</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. A sentence counts if it says <i>fusion</i> (<i>EML4-ALK fusion</i>, <i>RET fusion-positive</i>; not <i>infusion</i>, <i>mitochondrial fusion</i> or a lab construct such as <i>GST-AKT1 fusion protein</i> or <i>luciferase fusion reporter</i>), or uses <i>translocation</i> in the chromosomal sense: after a fusion pair or a gene that drives fusions (<i>EML4-ALK translocation</i>, <i>ROS1 translocation</i>, <i>ALK-translocated</i>), with a karyotype (<i>t(11;22) translocation</i>), after <i>chromosomal</i>, <i>balanced</i>, <i>reciprocal</i> or <i>gene</i>, or as <i>translocation involving MLL</i>. Karyotype notation counts on its own, with no other word: <i>t(4;14)</i>, <i>t(11;14)</i>, <i>t(9;22)(q34;q11)</i>, <i>inv(16)</i>, <i>der(22)</i> &mdash; how myeloma and leukemia papers write their translocations. So does a fusion named by its genes in HGNC notation, <i>NUP98::NSD1</i>, <i>AGK::BRAF</i> (both sides genes of this graph); the older single colon, <i>TMPRSS2:ERG</i>, only with a fusion word in the sentence, since <i>EGFR:GRB2</i> or <i>MAPK8:JUN</i> are not fusions. A protein moving inside the cell &mdash; <i>nuclear translocation of p65</i>, <i>translocation of YAP to the nucleus</i> &mdash; does not count.</div></div>
  <div class="row"><button id="oexbtn" aria-pressed="false">Overexpression</button> <button class="ihelp" aria-label="About enrich for overexpression" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence about <b>overexpression</b> &mdash; any word starting <i>overexpres</i> or <i>over-expres</i>, in any case (<i>overexpression</i>, <i>overexpressed</i>, <i>over-expressing</i>) &mdash; and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. Note it catches both senses: a gene found overexpressed in tumours, and a gene overexpressed in an experiment.</div></div>
  <div class="row"><button id="ampbtn" aria-pressed="false">Amplification</button> <button class="ihelp" aria-label="About enrich for amplification" aria-expanded="false">i</button>
@@ -1449,9 +1649,33 @@ function driverMatcher(){return {test:t=>driverHits(t).length>0,hits:driverHits}
 // sense -- in this corpus it is mostly a protein moving ("nuclear translocation of p65"), and a
 // hit counts only with a fusion cue next to it and no compartment word before it.
 const FUSION_WORD=/\bfusions?\b/gi;
+// ... unless it is MITOCHONDRIAL fusion, the organelle event (MFN1/2, OPA1), not a gene fusion:
+// "mitochondrial (outer membrane) fusion", "mitochondrial fission and fusion", "fusion of damaged
+// mitochondria", "fusion/fission". Judged per hit, on the words touching it, so an "ALK fusion"
+// elsewhere in the same sentence still counts.
+const MITO_PRE=/(?:\bmito(?:chondri(?:al|on|a))?[\s-]+(?:(?:inner|outer|membranes?|network|dynamics?|fission|division|and|or)[\s\/,-]+)*|\bfission(?:\s*[\/–-]\s*|\s+(?:and|or|to|versus|vs\.?)\s+))$/i;
+const MITO_POST=/^(?:(?:\s*[\/–-]\s*|\s+(?:and|or|to|versus|vs\.?)\s+)fission\b|\s+(?:of|between|among)\s+(?:[a-z]+\s+){0,2}mitochondri(?:a|on)\b)/;
+// ... nor a LAB CONSTRUCT: a tag, reporter or inducible domain joined to a protein ("GST-CENP-N
+// fusion protein", "His-AKT1 fusion", "Myc-ER fusion", "luciferase fusion reporter", "fusion to
+// GFP"). "fusion protein" alone decides nothing (BCR-ABL fusion protein is the real thing): the
+// tag must be in the name touching the word. Case-sensitive ("His", "HA"); Myc is an oncogene
+// here, so it is never itself a tag. A tagged real fusion (GFP-EML4-ALK) still counts: two
+// fusion genes in the name.
+const FUS_TAG=String.raw`(?:GST|MBP|[Ss]umo|(?:6\s?[x×]?\s?|[Hh]exa)?His6?|3?[x×]?(?:FLAG|Flag)|HA|V5|[Ee]?GFP|eGFP|sfGFP|[EeC]?[YCB]FP|RFP|mCherry|tdTomato|mNeonGreen|[Vv]enus|[Ll]uciferase|[Ll]uc|[Nn]ano[Ll]uc|[Ll]ac[Zz]|β-gal(?:actosidase)?|Halo(?:Tag)?|SNAP|BirA\*?|TurboID|APEX2?|GAL4|Gal4|VP16|LexA|dCas9|Cas9|Fc|ER(?:T2?|-?LBD)?|glutathione S-transferase|maltose[- ]binding protein|green fluorescent protein)`;
+const CON_TOK=new RegExp(String.raw`(?:^|[^A-Za-z0-9-])((?:[A-Za-z0-9α-ωΑ-Ω]+[-–:\/])*`+FUS_TAG+String.raw`(?:[-–:\/][A-Za-z0-9α-ωΑ-Ω]+)*)(?:[-\s]+(?:tag(?:ged)?|reporter|gene))?[\s-]+$`);
+const CON_POST=new RegExp(String.raw`^(?:[\s-]+(?:gene\s+|protein\s+)?reporters?\b|[\s-]+tags?\b|\s+(?:proteins?\s+)?(?:to|with|of)\s+(?:an?\s+|the\s+)?`+FUS_TAG+String.raw`(?![A-Za-z0-9]))`);
+function constructFusion(pre,post){
+ const m=CON_TOK.exec(pre);
+ const name=m?m[1]:((/(\S+)\s*$/.exec(pre)||[])[1]||'');
+ if(name==='ER')return false;   // a bare "ER fusion" is an ESR1 fusion; only X-ER is a construct
+ if(name.split(/[-–:\/]+/).filter(x=>FUS_GENE1.test(x)).length>1)return false;
+ return !!m||CON_POST.test(post);}
+function fusionWordHits(t){
+ return reHits(FUSION_WORD,t).filter(([a,b])=>!constructFusion(t.slice(Math.max(0,a-80),a),t.slice(b,b+60))&&!MITO_PRE.test(t.slice(Math.max(0,a-80),a))&&!MITO_POST.test(t.slice(b,b+60)));}
 const TRANSLOC_WORD=/\btransloca(?:tions?|ted)\b/gi;
 // genes whose translocations are the fusion drivers of this literature (partners included)
 const FUSION_GENES='ALK|ROS-?1|RET|NTRK[123]|NRG1|FGFR[123]|MYC|MLL|KMT2A|BCR|ABL1?|BCL2|BCL6|CCND1|IGH|ETV6|RUNX1|EWSR1|FLI1|PAX[37]|FOXO1|TFE3|TFEB|NUTM1|BRD4|PML|RARA|CBFB|MYH11|SS18|SSX[12]?|CIC|DUX4|NUP98|MECOM|NAB2|STAT6|MAML2|CRTC1|TMPRSS2|ERG|ETV[145]|EML4|KIF5B|CD74|CCDC6|NCOA4|CAMTA1|WWTR1|TAZ|YAP1|MA9|AF4|AF9|MLLT3|AFF1|PDGFR[AB]|JAK2|CRLF2|ZNF384|PBX1|TCF3|RSPO[23]';
+const FUS_GENE1=new RegExp('^(?:'+FUSION_GENES+')$','i');
 // a compartment / direction before it: the protein-trafficking sense
 const TL_NEG_PRE=/\b(?:nuclear|nucleus|cytoplasm(?:ic)?|cytosolic|mitochondrial|membrane|plasma|lysosomal|subcellular|golgi)\s*-?\s*$/i;
 // the chromosomal cues: a karyotype or chromosomal word just before ("balanced", "truncating",
@@ -1478,16 +1702,16 @@ const KARYO_RE=/\b(?:t|ins)\(\s*[0-9XY]{1,2}\s*;\s*[0-9XY]{1,2}\s*\)(?:\s*\(\s*[
 // so it counts only with no space around it AND a fusion cue somewhere in the sentence.
 const FUS_PAIR2=/\b([A-Za-z][A-Za-z0-9-]{1,14})\s?::\s?([A-Za-z][A-Za-z0-9-]{1,14})\b/g;
 const FUS_PAIR1=/\b([A-Za-z][A-Za-z0-9-]{1,14})(?<!:):(?!:)([A-Za-z][A-Za-z0-9-]{1,14})\b/g;
-const FUS_CUE=/\b(?:fusions?|fused|transloca\w*|rearrang\w*|chimer\w*)\b/i;
+const FUS_CUE=/\b(?:fused|transloca\w*|rearrang\w*|chimer\w*)\b/i;
 function fusPairHits(t){
  if(!GENESYM)GENESYM=new Set(DATA.nodes.filter(n=>n.kind==='gene').map(n=>String(n.id).toUpperCase()));
  const both=(a,b)=>GENESYM.has(a.toUpperCase())&&GENESYM.has(b.toUpperCase());
  const iv=[];let m;
  FUS_PAIR2.lastIndex=0;while((m=FUS_PAIR2.exec(t))!==null)if(both(m[1],m[2]))iv.push([m.index,m.index+m[0].length]);
- if(FUS_CUE.test(t)){FUS_PAIR1.lastIndex=0;while((m=FUS_PAIR1.exec(t))!==null)if(both(m[1],m[2]))iv.push([m.index,m.index+m[0].length]);}
+ if(FUS_CUE.test(t)||fusionWordHits(t).length){FUS_PAIR1.lastIndex=0;while((m=FUS_PAIR1.exec(t))!==null)if(both(m[1],m[2]))iv.push([m.index,m.index+m[0].length]);}
  return iv;}
 function fusionHits(t){t=t||'';
- const iv=reHits(FUSION_WORD,t).concat(reHits(KARYO_RE,t),fusPairHits(t));
+ const iv=fusionWordHits(t).concat(reHits(KARYO_RE,t),fusPairHits(t));
  reHits(TRANSLOC_WORD,t).forEach(([a,b])=>{
    const pre=t.slice(Math.max(0,a-40),a),post=t.slice(b,b+40);
    if(TL_NEG_PRE.test(pre))return;
@@ -1902,6 +2126,7 @@ function visSents(e,conf,lo,hi,tm,cats,mode){return e.sents.filter(s=>s.sc>=conf
 // mirroring the reverse sort that picked cat in the first place.
 function viewCat(e,vis){
  if(!vis.length)return e.cat;
+ const own=vis.filter(s=>!s.li);if(own.length)vis=own;   // list-inferred sentences do not vote
  const n={};vis.forEach(s=>{const c=sentCat(e,s);n[c]=(n[c]||0)+1;});
  let best=null;
  for(const c in n){if(best===null||n[c]>n[best]||(n[c]===n[best]&&(c===e.cat||(best!==e.cat&&c>best))))best=c;}
@@ -1922,7 +2147,7 @@ function edgeHead(e,vis,cat){const np=new Set(vis.map(s=>s.pmid)).size;return '<
 // edge -- would otherwise be invisible). "?" marks a speculated statement.
 function relTag(s){if(!s.rc)return '';const c=sentCat({},s);
  const src=s.sr==='both'?('BioRED: '+esc(s.rc)+' · PPI: '+esc(ppiCat(s))):(s.sr?esc(SRCLAB[s.sr]||s.sr):'');
- return ' <span class=mut style="color:'+(CCOLOR[c]||'#888')+'">['+esc(c)+(s.sp?' ?':'')+']</span>'+(src?' <span class=mut>'+src+'</span>':'');}
+ return ' <span class=mut style="color:'+(CCOLOR[c]||'#888')+'">['+esc(c)+(s.sp?' ?':'')+']</span>'+(s.li?' <span class=mut>from list: '+esc(s.li)+'</span>':'')+(src?' <span class=mut>'+src+'</span>':'');}
 function edgeTip(e,vis,cat){const d=document.createElement('div');let h=edgeHead(e,vis,cat);const lim=20;vis.slice(0,lim).forEach(s=>{h+='<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span>'+relTag(s)+' '+hl(s.text,e)+'</div>';});if(vis.length>lim)h+='<div class=more>+'+(vis.length-lim)+' more</div>';d.innerHTML=h;return d;}
 // --- the disease keep-list ------------------------------------------------------------------
 // A WHITELIST over disease nodes: empty means no constraint (the default), and any tick means
@@ -2117,15 +2342,17 @@ function activeMinCluster(){const v=parseInt((document.getElementById('mincluste
 function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?2:v;}
 function activeMinPub(){const v=parseInt((document.getElementById('minpub')||{}).value);return isNaN(v)?1:v;}
 // Gene/chem focus: expand `hops` steps from the seeds over the CURRENT edge set and keep the
-// edges whose both endpoints are in reach. It has to run again after the text lens -- expanding
+// edges those steps travel (an end less than `hops` away). It has to run again after the text lens -- expanding
 // text-blind and then letting the query delete edges leaves the neighbourhood the query erased:
 // PIK3CA-AKT1 (two MALAT1 neighbours) drawn while every MALAT1 edge is gone. Re-expanding over
 // what survived means the seed either appears with its links or the canvas is empty.
 function focusKeep(edges,seeds,hops){
  const ag={};edges.forEach(o=>{(ag[o.e.from]=ag[o.e.from]||[]).push(o.e.to);(ag[o.e.to]=ag[o.e.to]||[]).push(o.e.from);});
- const seen=new Set(seeds);let fr=[...seeds];
- for(let h=0;h<hops;h++){const nf=[];fr.forEach(x=>{(ag[x]||[]).forEach(y=>{if(!seen.has(y)){seen.add(y);nf.push(y);}});});fr=nf;}
- return edges.filter(o=>seen.has(o.e.from)&&seen.has(o.e.to));
+ const seen=new Set(seeds);let fr=[...seeds],inner=new Set();   // inner: closer than `hops` steps
+ for(let h=0;h<hops;h++){inner=new Set(seen);const nf=[];fr.forEach(x=>{(ag[x]||[]).forEach(y=>{if(!seen.has(y)){seen.add(y);nf.push(y);}});});fr=nf;}
+ // an edge is within reach only if one end is: 1 hop draws the seed's OWN edges. (Keeping every
+ // edge between two reached nodes drew 237 edges for SIRT3, which has 40.)
+ return edges.filter(o=>inner.has(o.e.from)||inner.has(o.e.to));
 }
 function build(thr){
  const conf=activeConf(), cats=activeCats(); VIEW_CATS=cats; const [ylo,yhi]=activeYears(); const mc=activeMinCluster(); const md=activeMinDegree(); const mp=activeMinPub(); FSCALE=activeFontScale();
@@ -2199,7 +2426,9 @@ function build(thr){
     // than md links, re-count, repeat. A single pass let a removed node still vote -- a gene with
     // one gene partner and one chemical whose only link it was counted 2, kept its gene edge, and
     // ticking "chemical" changed the gene count with not one chemical drawn.
-    if(md>1){
+    // Not under "Only their direct neighbours": a gene whose one link is to the ticked disease is
+    // exactly what that view is for (DICER1, GRK2, COX5A under glioblastoma).
+    if(md>1&&!disConnOn){
       for(;;){
         const deg={};es.forEach(o=>{deg[o.e.from]=(deg[o.e.from]||0)+1;deg[o.e.to]=(deg[o.e.to]||0)+1;});
         const next=es.filter(o=>deg[o.e.from]>=md&&deg[o.e.to]>=md);
@@ -2221,8 +2450,8 @@ function build(thr){
   return es;
  }
  // Direct neighbours, strictly: the ticked diseases, every node with a DRAWN edge to one of
- // them, and the drawn edges among that set -- under all settings: relation boxes, Enrich
- // buttons, min sentences / publications / connections / cluster size. (It was once chosen
+ // them, and the drawn edges to a ticked disease (not those among the neighbours) -- under all settings: relation boxes, Enrich
+ // buttons, min sentences / publications / cluster size, but not min connections. (It was once chosen
  // relation- and lens-blind, so a gene whose own disease link was hidden stayed on through its
  // links to other neighbours, two steps out; with "associated" unticked that was most of them.)
  // One step, not "connected to": the gene graph is one giant component through hubs like TP53,
@@ -2240,7 +2469,9 @@ function build(thr){
    edges=shape(edges,tm,true);
    near=new Set(DIS_KEEP);
    (base||edges).forEach(o=>{if(DIS_KEEP.has(o.e.from))near.add(o.e.to);if(DIS_KEEP.has(o.e.to))near.add(o.e.from);});
-   edges=edges.filter(o=>near.has(o.e.from)&&near.has(o.e.to));
+   // without a text query only the disease's OWN edges are drawn: the links its neighbours have
+   // with each other are not "direct", and they outnumbered the direct ones several times over
+   edges=edges.filter(o=>near.has(o.e.from)&&near.has(o.e.to)&&(tx||DIS_KEEP.has(o.e.from)||DIS_KEEP.has(o.e.to)));
  } else edges=shape(edges,tm,true);
  // Disease context for the edges that do NOT touch a kept disease (gene-gene, gene-drug): only
  // the sentences from papers about a kept disease. The endpoints being neighbours of glioma says
@@ -2571,6 +2802,9 @@ def main():
     ap.add_argument("--score", type=float, default=0.8, help="threshold for the exported JSON (default 0.8)")
     ap.add_argument("--thresholds", default="0.8,0.95,0.99", help="thresholds summarized in the console stats")
     ap.add_argument("--no-graph", action="store_true", help="skip the brain-cancer graph HTML")
+    ap.add_argument("--no-list-edges", action="store_true",
+                    help="do not extend a relation of one listed gene to the other genes of the list "
+                         "(graph only; the exported JSON never contains list edges)")
     ap.add_argument("--merge", choices=MERGE_POLICIES, default="union",
                     help="how to combine several RE checkpoints scoring the same pair "
                          "(relation_extraction.py --route-mode additive): union (default) keeps "
@@ -2605,6 +2839,7 @@ def main():
     n_flip = sum(D.orient(t) for t in raw)
     print(f"direction: {n_flip:,} signed triple(s) reversed to put the agent first "
           f"(passive/agent cue -- gpu_bundle/direction.py)")
+    print(f"negation: {recheck_negation(raw):,} triple(s) no longer negated (\"not only\", \"negative correlation / control / regulator / breast\" ...)")
     d, merge_note = merge_models(raw, args.merge, args.typed_model, args.gate_model, args.merge_scale)
     print(merge_note)
     # Ceilings are read from the PRE-merge triples: after the merge a pair keeps the typed
@@ -2627,6 +2862,8 @@ def main():
     # 3) the graph (universe = qualifying at GRAPH_BASE; in-browser score slider 0.5..0.99)
     if not args.no_graph:
         universe = kept if args.score <= GRAPH_BASE else [t for t in d if keep_fn(t, GRAPH_BASE)]
+        if not args.no_list_edges:
+            universe = universe + list_edges(d, flags)
         payload = graph_payload_multi(universe, flags)
         if N_FALSE_DROPPED:
             print(f"  drug targets: dropped {N_FALSE_DROPPED} curated false gene-chemical "

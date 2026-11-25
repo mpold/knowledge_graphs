@@ -494,11 +494,23 @@ def calibrate(args):
             print(f"calibration: {args.calibration} on {len(xs)} dev positives -> {out_json}")
             print(f"  ECE on {ev_name} ({len(exs)} positives): raw {e_raw:.4f} -> calibrated {e_cal:.4f}")
 
+        # RE_SCORE_MODE=any needs its own calibrator when there are several relation labels
+        if neg_id is not None and n_lbl > 2:
+            axs, ays = Cal.any_pairs(dev_probs, dev_gold, {neg_id})
+            aspec = Cal.fit(axs, ays, method=args.calibration)
+            if aspec:
+                Cal.save(str(model_dir / Cal.ANY_FILE), aspec)
+                exs, eys = Cal.any_pairs(ev_probs, ev_gold, {neg_id})
+                print(f"calibration (any-relation): {args.calibration} on {len(axs)} dev pairs -> "
+                      f"{Cal.ANY_FILE}; ECE on {ev_name}: raw {Cal.ece(exs, eys):.4f} -> "
+                      f"calibrated {Cal.ece([Cal.apply(aspec, x) for x in exs], eys):.4f}")
+
     # ---- outputs listing (model dir files + data TSVs + this summary) ----
     desc = {"model.safetensors": "trained model weights", "config.json": "model config + label map",
             "tokenizer.json": "fast tokenizer", "tokenizer_config.json": "tokenizer config",
             "vocab.txt": "WordPiece vocab", "special_tokens_map.json": "special tokens",
-            "training_args.bin": "training hyperparameters", "calibration.json": "probability calibrator"}
+            "training_args.bin": "training hyperparameters", "calibration.json": "probability calibrator",
+            "calibration_any.json": "any-relation calibrator (RE_SCORE_MODE=any)"}
     outputs = []
     for f in sorted(p for p in model_dir.glob("*") if p.is_file()):
         outputs.append((f"{model_dir.name}/{f.name}", _fmt_bytes(f.stat().st_size),

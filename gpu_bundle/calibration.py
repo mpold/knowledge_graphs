@@ -141,6 +141,22 @@ def ece(ps, ys, bins=10):
     return e
 
 
+# calibrator file for RE_SCORE_MODE=any, next to the checkpoint's calibration.json
+ANY_FILE = "calibration_any.json"
+
+
+def any_pairs(probs, gold, neg_ids):
+    """(x, y) pairs for the any-relation score: x = P(not a no-relation label), y = 1 iff the
+    gold label is a relation of ANY type. Restricted to x >= 0.5, the pairs that mode keeps."""
+    xs, ys = [], []
+    for p, g in zip(probs, gold):
+        x = min(1.0, max(0.0, 1.0 - sum(float(p[i]) for i in neg_ids)))
+        if x >= 0.5:
+            xs.append(x)
+            ys.append(0.0 if int(g) in neg_ids else 1.0)
+    return xs, ys
+
+
 def save(path, spec):
     Path(path).write_text(json.dumps(spec, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

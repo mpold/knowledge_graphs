@@ -35,6 +35,17 @@ by character offset) within a char window:
      relation is reflexive-plausible (RE_REFLEXIVE_OK). Each factor is stored in
      `score_components` for ablation.
 
+SCORE MODE (RE_SCORE_MODE)
+    top  (default) p_rel is the probability of the single best label. A pair the model is sure
+         about but splits between two TYPES (associated 0.71 / downregulator 0.28) is penalized,
+         and can fall below RE_MIN_SCORE although P(no relation) is under 0.01.
+    any  p_rel is 1 - P(no relation), calibrated with calibration_any.json; a pair is kept when
+         that is >= 0.5, and the best relation label only names the type. So `score` answers "is
+         there a relation", NOT "is the type right": predicate.score is still the label's own
+         probability, predicate.score_any the raw any-relation one. Identical to `top` for a
+         checkpoint with one relation label (PPI). A multi-label checkpoint with no
+         calibration_any.json is refused unless RE_CALIBRATE=0.
+
 Pairs whose predicted label is a "no-relation" class (auto-detected, or set via
 RE_NEG_LABELS) are dropped, as are pairs whose COMPOSITE score < RE_MIN_SCORE.
 
@@ -131,6 +142,8 @@ Output : TRIPLES/triples_re.json                  scored triples; predicate carr
            {text:<label>, type:"relation", score:<p_rel>, model:<name>} and the triple
            carries the COMPOSITE score, score_2nd, score_components, self_pair, cues,
            result_margin (+ subject/object NER score)
+         TRIPLES/re_rejected.jsonl.gz              scored pairs that were dropped, and why
+           (no_relation | below_cutoff; `p` in id2label order); read by audit_lists.py
          TRIPLES/relation_extraction.html          summary (label & score dists,
            per-model counts, samples)
 
@@ -147,6 +160,7 @@ import glob
 import hashlib as _hashlib
 import html
 import json
+import gzip
 import os
 import sys
 import time
@@ -167,6 +181,7 @@ ROOT = Path(__file__).resolve().parent
 SENT_DIR = ROOT / "sentences"
 OUT_DIR = ROOT / "TRIPLES"
 JSON_OUT = OUT_DIR / "triples_re.json"
+REJ_OUT = OUT_DIR / "re_rejected.jsonl.gz"
 NORM_OUT = OUT_DIR / "triples_re_GENETIC_DISEASE_CHEMICAL_normalized.json"
 HTML_OUT = OUT_DIR / "relation_extraction.html"
 
@@ -184,6 +199,12 @@ MIN_SCORE = float(os.environ.get("RE_MIN_SCORE", "0.5"))
 # apply a per-checkpoint probability calibrator (calibration.json next to the
 # model, fit by train_re.py) to p_rel before composite scoring. RE_CALIBRATE=0 disables.
 CALIBRATE = os.environ.get("RE_CALIBRATE", "1").strip().lower() in ("1", "true", "yes", "on")
+# what p_rel means: "top" = the best label's probability, "any" = 1 - P(no relation)
+SCORE_MODE = os.environ.get("RE_SCORE_MODE", "top").strip().lower()
+if SCORE_MODE not in ("top", "any"):
+    sys.exit(f"RE_SCORE_MODE must be 'top' or 'any', got {SCORE_MODE!r}")
+# log every scored pair that is NOT kept, with the reason (RE_LOG_REJECTED=0 disables)
+LOG_REJECTED = os.environ.get("RE_LOG_REJECTED", "1").strip().lower() in ("1", "true", "yes", "on")
 # on long full-corpus runs, flush partial results to disk every N seconds so a crash
 # or machine sleep doesn't lose hours of scoring (0 = write only at the end). Time-based,
 # not per-N-batches: each flush rewrites the whole (growing) file, so a batch cadence made
@@ -287,6 +308,28 @@ def _negspacy_negated(text, a, b):
     return any(ent._.negex for ent in doc.ents)
 
 
+# "not only X but also Y" asserts both X and Y; it negates nothing
+_NOT_ONLY = _re.compile(r"\s+only\b", _re.I)
+# "negative" that denies nothing: a correlation / association / relationship (an inverse one), a
+# regulation / regulator (inhibition), an experimental control, a (triple-)negative breast cancer.
+# Up to two words may stand between ("negative expression correlation"), never a preposition.
+_NEG_WORD = _re.compile(
+    r"[\s-]+(?:(?!(?:for|in|of|and|or|to|on|with)\b)[\w-]+\s+){0,2}"
+    r"(?:correlations?|associations?|relationships?|regulations?|regulators?|controls?|breast|BC)\b", _re.I)
+_NOT_A_NEGATION = {"not": _NOT_ONLY, "negative": _NEG_WORD}
+
+
+def _neg_cues(text, a, b):
+    """Negation cues in the window around the pair, minus the "not" of "not only" and the
+    "negative" of "negative correlation / control / regulator ..." (looked up in the full text, so a window ending between
+    the words cannot bring them back)."""
+    lo = max(0, a["start"] - NEG_WINDOW_L)
+    region = text[lo:min(len(text), b["end"] + NEG_WINDOW_R)]
+    return [m.group(0).lower() for m in NEG_RE.finditer(region)
+            if not (m.group(0).lower() in _NOT_A_NEGATION
+                    and _NOT_A_NEGATION[m.group(0).lower()].match(text, lo + m.end()))]
+
+
 def negation_modality(text, a, b):
     """Polarity / modality of the relation. Returns (polarity, modality, sorted_cues).
     Modality (speculation) always uses the cue-list window; negation uses the
@@ -302,9 +345,9 @@ def negation_modality(text, a, b):
                 print(f"  [warn] RE_NEG_BACKEND=negspacy unavailable ({type(e).__name__}: {e}); "
                       f"falling back to cue-list negation. pip install spacy negspacy", flush=True)
                 _NEGEX_WARNED = True
-            neg = [m.lower() for m in NEG_RE.findall(region)]
+            neg = _neg_cues(text, a, b)
     else:
-        neg = [m.lower() for m in NEG_RE.findall(region)]
+        neg = _neg_cues(text, a, b)
     return ("negated" if neg else "positive",
             "speculated" if spec else "asserted",
             sorted(set(neg + spec)))
@@ -596,7 +639,16 @@ def get_model(name, gpu=0):
                 else ll in {"0", "false", "none", "no_relation", "negative", "not_related"}
                 or ll.startswith("no_") or "no-relation" in ll):
             neg_ids.add(i)
-    _CALIBRATORS[name] = Cal.load(Path(name) / "calibration.json") if CALIBRATE else None
+    cal_file = "calibration.json"
+    if SCORE_MODE == "any":
+        if not neg_ids:
+            sys.exit(f"RE_SCORE_MODE=any: {name} has no no-relation label")
+        if len(id2label) - len(neg_ids) > 1:     # one relation label: any == top, same calibrator
+            cal_file = Cal.ANY_FILE
+            if CALIBRATE and not (Path(name) / cal_file).exists():
+                sys.exit(f"RE_SCORE_MODE=any needs {Path(name) / cal_file}: run_re_pipeline.py's "
+                         f"calibration step writes it (or set RE_CALIBRATE=0)")
+    _CALIBRATORS[name] = Cal.load(Path(name) / cal_file) if CALIBRATE else None
     _MODEL_CACHE[(name, gpu)] = (tok, model, device, id2label, neg_ids)
     return _MODEL_CACHE[(name, gpu)]
 
@@ -608,6 +660,20 @@ def score_batch(tok, model, device, marked):
               return_tensors="pt").to(device)
     with torch.no_grad():
         return torch.softmax(model(**enc).logits.float(), dim=-1).cpu().tolist()
+
+
+def decide(p, neg_ids, mode=None):
+    """(label id, evidence probability) for one softmax vector, or None for no relation.
+
+    top: the argmax label and its probability. any: kept when 1 - P(no relation) >= 0.5, with
+    the best relation label naming the type (see SCORE MODE in the module docstring)."""
+    if (mode or SCORE_MODE) == "any":
+        p_any = min(1.0, max(0.0, 1.0 - sum(p[i] for i in neg_ids)))
+        if p_any < 0.5:
+            return None
+        return max((i for i in range(len(p)) if i not in neg_ids), key=lambda i: p[i]), p_any
+    top = max(range(len(p)), key=lambda i: p[i])
+    return None if top in neg_ids else (top, p[top])
 
 
 def section_factor(section):
@@ -678,6 +744,7 @@ def run(limit=None, route_mode=None):
         if limit and (n_cand - skipped) >= limit:
             break
 
+    print(f"score mode: {SCORE_MODE}")
     print(f"routes ({mode}): " + ", ".join(f"{'/'.join(sorted(k))}->{v}" for k, v in routes.items())
           + (f"  biored={biored} ({len(BIORED_PAIRS)} pair types)" if biored else "")
           + (f"  fallback={fallback}" if fallback else ""))
@@ -693,6 +760,24 @@ def run(limit=None, route_mode=None):
     def _flush(ts):
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         JSON_OUT.write_text(json.dumps(ts, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    rej = None
+    if LOG_REJECTED:
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        rej = gzip.open(REJ_OUT, "wt", encoding="utf-8", compresslevel=5)
+    n_rej = Counter()
+
+    def _reject(reason, meta, name, p, neg_ids, label=None, score=None):
+        """One line per scored-but-dropped pair (the sentence is found through pair_id)."""
+        n_rej[reason] += 1
+        if rej is None:
+            return
+        r = {"pair_id": meta["pair_id"], "model": name, "reason": reason,
+             "subject": meta["subject"]["text"], "object": meta["object"]["text"],
+             "p_any": round(1.0 - sum(p[i] for i in neg_ids), 4), "p": [round(x, 4) for x in p]}
+        if label is not None:
+            r["label"], r["score"] = label, score
+        rej.write(json.dumps(r, ensure_ascii=False) + "\n")
 
     triples = []
     total_to_score = sum(len(v) for v in buckets.values())
@@ -733,20 +818,26 @@ def run(limit=None, route_mode=None):
             for k, p in zip(idx, probs):
                 meta = items[k][1]
                 order = sorted(range(len(p)), key=lambda k: p[k], reverse=True)
-                top, second = order[0], (order[1] if len(p) > 1 else order[0])
-                if top in neg_ids:
+                verdict = decide(p, neg_ids)
+                if verdict is None:
+                    _reject("no_relation", meta, name, p, neg_ids)
                     continue
+                top, p_ev = verdict
+                second = next(i for i in order if i != top)
                 label = id2label[top]
                 # surface self-pair (same gene mention twice); refined post-normalization
                 self_pair = (meta["subject"]["type"] == meta["object"]["type"]
                              and meta["subject"]["text"] == meta["object"]["text"])
                 p_raw = p[top]
-                p_rel = Cal.apply(cal, p_raw) if cal else p_raw   # calibrated relation prob
+                p_rel = Cal.apply(cal, p_ev) if cal else p_ev     # calibrated relation prob
                 score, comps = composite_score(p_rel, meta, label, self_pair)
                 if score < MIN_SCORE:                 # threshold on the COMPOSITE score
+                    _reject("below_cutoff", meta, name, p, neg_ids, label, score)
                     continue
                 kept += 1
                 pred = {"text": label, "type": "relation", "score": round(p_raw, 4), "model": name}
+                if SCORE_MODE == "any":
+                    pred["score_any"] = round(p_ev, 4)
                 if cal:
                     pred["score_calibrated"] = round(p_rel, 4)
                 trip = {
@@ -775,6 +866,10 @@ def run(limit=None, route_mode=None):
         print(f"  [{name}] kept {kept:,}", flush=True)
 
     _flush(triples)
+    if rej is not None:
+        rej.close()
+        print(f"rejected pairs: no_relation {n_rej['no_relation']:,}, "
+              f"below_cutoff {n_rej['below_cutoff']:,} -> {REJ_OUT}")
     print(f"kept {len(triples):,} scored triples (>= {MIN_SCORE}) -> {JSON_OUT}")
     return triples
 

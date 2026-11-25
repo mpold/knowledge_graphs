@@ -203,6 +203,8 @@ OPTIONS / ENV
                             DISEASE: disease -> phenotypes | CHEMICAL: chemical ->
                             nonchemical; each writes only its own dir); this env runs them
                             one after the other instead
+  RE_SCORE_MODE             step 17: "top" (default) or "any" (score = P(any relation));
+                            "any" needs biored-biobert-re/calibration_any.json
   BIOBERT_GPUS / RE_GPUS    cap the GPUs steps 5 / 17 spread over (default: all visible)
   BIOBERT_PARSE_WORKERS     processes step 5 parses XML with, ahead of the GPU (default
                             min(4, cores - 1); 0 = inline)

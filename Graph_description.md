@@ -68,7 +68,7 @@ a gene symbol right before, or *mutant* / *mutation* / *variant* / *allele* / *s
 the like within 30 characters. Phosphosite shorthand (*S15P-p53*, *S536P-p65*: the P is phospho, not
 proline) is dropped for S / T / Y sites when *phospho* stands within 60 characters or a protein is
 hyphened on behind, unless in mutation context. On the myeloma graph of 2026-11-24 this took it from 199 to 113 sentences; an **Enrich for fusions** toggle that keeps only
-edges with a sentence saying *fusion* (as a word: not *infusion*) or *translocation* in the
+edges with a sentence saying *fusion* (as a word: not *infusion*, nor the organelle event: *mitochondrial fusion*, *fission and fusion*, nor a lab construct: *GST-CENP-N fusion protein*, *Myc-ER fusion*, *luciferase fusion reporter*) or *translocation* in the
 chromosomal sense -- after a fusion pair or fusion gene (*EML4-ALK translocation*,
 *ALK-translocated*), with a karyotype (*t(11;22)*), after *chromosomal* / *balanced* /
 *reciprocal* / *truncating*, or as *translocation involving MLL*; or karyotype notation on its own, with no other word
@@ -138,7 +138,7 @@ it. Each section's explanation is behind a small round **i** beside its heading.
 
 **Right column — what is in the picture.** Support thresholds (min unique sentences, min unique
 publications); label font size; structural pruning (min cluster size, min connections, both
-floored at 2); gene and drug search; focus-on-gene with 1 or 2 hops; drug filter; free-text
+floored at 2); gene and drug search; focus-on-gene with 1 or 2 hops (only the edges those hops travel); drug filter; free-text
 sentence match (substring, or `/regex/` when wrapped in slashes); node-type, relation-type and
 training-set filters; the score slider — 0.5 to 0.95 in steps of 0.05, then 0.96 to 0.99 — and a
 live stats line.
@@ -347,9 +347,10 @@ The order is deliberate, and it is what keeps the panel honest:
 - **Direct neighbours are strictly one drawn step away, and on by default.** Ticking the first
   disease under *Keep diseases* switches *Only their direct neighbours* on; unticking it is then
   respected until the keep-list is emptied. The option keeps
-  the kept diseases, every node with a *drawn* edge to one of them, and the drawn edges among
-  those. It is judged after every other setting (relation boxes, Enrich buttons, min
-  sentences / publications / connections / cluster size), so a gene whose own disease link is
+  the kept diseases, every node with a *drawn* edge to one of them, and those edges only (since
+  2026-11-24 not the neighbours' links with each other: glioblastoma has 180 direct edges, the old
+  view drew hundreds more). It is judged after every other setting (relation boxes, Enrich buttons, min
+  sentences / publications / cluster size; *Min connections* is not applied), so a gene whose own disease link is
   hidden is not shown, however it connects to the neighbours that are. The **text box** is the
   exception: it *searches* the neighbourhood rather than redrawing it. The neighbours are chosen
   from the view without the text, and the text then keeps the edges among them that match —
@@ -452,3 +453,17 @@ written. **Run the script once in each project** to populate them; until then th
 the corpora still missing, and the denominator is honestly smaller. Re-running a project after
 its pipeline changes refreshes its slice automatically — the cache is keyed to the source file's
 size and mtime.
+
+## List edges
+
+When one gene of a list has a qualifying relation (score >= 0.5) with an entity outside the
+list in the same sentence (before or after it: *X inhibits A, B and C* counts too), every other gene of that list that maps to an HGNC symbol gets the same
+relation: *PDH1, IDH2, and SDHB gene expression is significantly under expressed in GBM* links
+PDHA1 to glioblastoma although its own pair scored 0.387. Such a sentence is marked *from list*
+with the genes it was taken from, carries the lowest donor score, and never changes the direction
+or label of an edge the models read themselves. Not applied to *respectively* sentences, *between A
+and B*, two names joined by a bare comma, slash-written pathways (*Rheb/mTOR axis*), +/− cell markers
+(*CD4+PD-1+*), negative relations (*not associated*), or
+donors read with conflicting signs. The exported JSON
+holds model relations only; `--no-list-edges` turns the rule off. `audit_lists.py` lists what is
+still missing.

@@ -31,6 +31,7 @@ four earlier scripts into one:
   STAGE 3o                        C-ONCOGENE: c-Kit/c-Src/c-Met/c-erbB-N/... spelling -> gene
   STAGE 3p                        GREEK-LETTER: lone Roman letter -> spelled-out Greek word
   STAGE 3q                        DELSEP: all hyphens+spaces removed (PD-L1==PDL1==PD L1), symbol fields
+  STAGE 3r                        SUFFIX: leftover 'X gene(s)/mRNA(s)/protein(s)' -> X's gene
   STAGE 4  (cosine_similarity.py) multi-word word-order cosine match
 
 The unifying idea: STAGES 2 and 3 are the *same* algorithm -- exact equality of
@@ -1302,6 +1303,16 @@ def complex_pass(rows, docs, unmatched_tsv, label):
 # because only one -- wrong -- gene matches). entity -> approved symbol.
 # =======================================================================
 CORRECTIONS = {
+    "PDH1": "PDHA1",             # pyruvate dehydrogenase E1 alpha; HGNC carries no 'PDH1' surface
+    "YAP": "YAP1",               # bare YAP; the same alias collision (YY1AP1 has alias 'YAP')
+    # its variants: earlier stages link these before the bare-YAP correction can apply
+    "p-YAP": "YAP1",
+    "P-YAP": "YAP1",
+    "phospho-YAP": "YAP1",
+    "YAP protein": "YAP1",
+    "YAP promoter": "YAP1",
+    "si-YAP": "YAP1",
+    "siYAP": "YAP1",
     "pYAP": "YAP1",              # phospho-YAP; auto-links to YY1AP1 via the alias 'YAP'
     "nuclear YAP": "YAP1",       # nuclear YAP; same 'YAP' alias collision -> YY1AP1
     "YAP target genes": "YAP1",  # YAP target-set regulator; same 'YAP' collision
@@ -1417,6 +1428,72 @@ def apply_corrections(roman_lib, roman_amb, unmatched_rows, approved, name_occ):
     if not drop:
         return unmatched_rows
     return [r for r in unmatched_rows if r.split("\t", 1)[0] not in drop]
+
+
+# -----------------------------------------------------------------------
+# SUFFIX: a trailing product word left over by the whole cascade
+# -----------------------------------------------------------------------
+_SUFFIX_RE = re.compile(r"^(?P<base>.*\S)[ -](?P<word>genes?|mRNAs?|proteins?)$")
+# the stripped surface is a reagent / inhibitor / target set, not the gene itself
+_SUFFIX_SKIP_MODES = {"anti- stripped", "RNAi/KO construct stripped", "inhibitor-i stripped",
+                      "regulatory target-set (not the gene)"}
+# ordinary words and family / enzyme-class names that are also symbols or aliases: 'clock
+# genes' are not CLOCK, 'hub genes' not ELAVL2 (alias HUB), 'HAT proteins' not TMPRSS11D
+_SUFFIX_WORDS = {"clock", "rest", "set", "impact", "target", "fusion", "reporter", "reference",
+                 "hub", "cox", "esr", "mtc", "hat", "glut", "14-3-3",
+                 "ap", "rfp", "rab", "caga"}
+
+
+def suffix_pass(rows, roman_lib, docs, label):
+    """Link 'X gene(s)' / 'X mRNA(s)' / 'X protein(s)' leftovers to X's gene.
+
+    Runs after every other stage AND the manual corrections, on leftovers only, so it
+    never changes an existing link. X is resolved as the cascade resolved it in this
+    corpus (SDHB gene -> SDHB; p-AKT protein -> AKT1, via PHOSPHO), which also covers the
+    plurals PROTEIN cannot ('PKM2 proteins' -> 'PKM2s' there). An X never seen on its own
+    is matched on the symbol fields, unique gene only, if it looks like a symbol (a digit
+    or two capitals). Plural 'X genes' may name a family or program, so it takes only the
+    corpus route. Ambiguous, reagent and NON_GENE X stay unmatched.
+    """
+    fields = ["symbol", "alias_symbol", "prev_symbol"]
+    index, gid_symbol = build_index(docs, fields, hsfold)
+    lib, sample, unmatched = {}, [], []
+    by_field, by_mode = defaultdict(int), defaultdict(int)
+    occ = {"total": 0, "matched": 0, "ambiguous": 0, "unmatched": 0}
+    for ln in rows:
+        name, rest = ln.split("	", 1)
+        n = int(rest.split("	", 1)[0])
+        occ["total"] += n
+        sym = field = None
+        m = _SUFFIX_RE.match(name)
+        base = m.group("base") if m else ""
+        if m and name not in NON_GENE and base not in NON_GENE                 and base.casefold() not in _SUFFIX_WORDS:
+            hit = roman_lib.get(base)
+            if hit:
+                if hit["match_mode"] not in _SUFFIX_SKIP_MODES:
+                    sym, field = hit["hgnc_symbol"], hit["match_field"]
+            elif m.group("word") != "genes" and re.search(r"\d|[A-Z].*[A-Z]", base):
+                genes = index.get(hsfold(base)) or {}
+                if len(genes) == 1:
+                    gid, sf = next(iter(genes.items()))
+                    seen = set().union(*sf.values())
+                    sym, field = gid_symbol.get(gid), next(f for f in fields if f in seen)
+        if not sym:
+            unmatched.append(ln)
+            occ["unmatched"] += n
+            continue
+        mode = "gene/mRNA/protein suffix stripped"
+        lib[name] = {"hgnc_symbol": sym, "occurrences": n,
+                     "match_field": field, "match_mode": mode}
+        occ["matched"] += n
+        by_field[field] += 1
+        by_mode[mode] += 1
+        sample.append(f"{name}	{rest}	{field}		{sym}")
+    return {"label": label, "fields": list(by_field), "n_total": len(rows),
+            "n_matched": len(lib), "n_ambiguous": 0, "n_unmatched": len(unmatched),
+            "by_field": dict(by_field), "by_mode": dict(by_mode), "occ": occ,
+            "sample": sample[:10], "unmatched_rows": unmatched,
+            "matched_lib": lib, "ambiguous_lib": {}}
 
 
 # =======================================================================
@@ -1600,6 +1677,11 @@ def main():
     name_occ = {r.split("\t", 1)[0]: int(r.split("\t")[1]) for r in roman_rows}
     final_unmatched = apply_corrections(roman_lib, roman_amb,
                                         ds2["unmatched_rows"], approved_symbols, name_occ)
+    # SUFFIX needs the finished library (corrections included), so it runs after it
+    sx = suffix_pass(final_unmatched, roman_lib, docs,
+                     "SUFFIX - trailing ' gene(s)'/' mRNA(s)'/' protein(s)' stripped from leftovers")
+    roman_lib.update(sx["matched_lib"])
+    final_unmatched = sx["unmatched_rows"]
     _write_block(SUMMARY_DIR / "unmatched.tsv", TSV_HEADER, final_unmatched)
     (SUMMARY_DIR / "roman.json").write_text(
         json.dumps(roman_lib, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -1618,7 +1700,7 @@ def main():
         key=lambda r: -r[1])
 
     roman_occ = sum(int(r.split("\t")[1]) for r in roman_rows)
-    passes = [cx, t1, t2, nm, ph, an, cl, pr, tr, vr, ms, ms2, ih, mr, pm, dh, pp, wt, nu, tg, hs, co, gx, gx2, ds, ds2]
+    passes = [cx, t1, t2, nm, ph, an, cl, pr, tr, vr, ms, ms2, ih, mr, pm, dh, pp, wt, nu, tg, hs, co, gx, gx2, ds, ds2, sx]
     write_html(s1, passes, cos, roman_occ, nongene_rows)
     report(s1, passes, cos, roman_occ, nongene_rows)
     print(f"consolidated : roman.json ({len(roman_lib):,} matched), "
@@ -2071,7 +2153,8 @@ for the name/phospho steps) and the mode that explains the link
 <code>complex&rarr;subunits</code>, <code>receptor family (ambiguous)</code>,
 <code>c-oncogene&rarr;gene alias</code>,
 <code>c-oncogene&rarr;genes (ambiguous)</code>,
-<code>greek-letter spelled out</code>, or
+<code>greek-letter spelled out</code>,
+<code>gene/mRNA/protein suffix stripped</code> (leftover <code>SDHB gene</code>&rarr;SDHB), or
 <code>manual correction</code>).
 Because each entity is linked by the
 strictest step that succeeds and leftovers flow forward, the keys are unique
