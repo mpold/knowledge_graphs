@@ -65,7 +65,9 @@ be different amino acids (not *U266R*, *LCAR-B38M*, *R10R*); cell-line derivativ
 corpus at build time, never count; a gene, chemical or cell line of that very name (HGNC, ChEBI, NCIt,
 Cellosaurus: *C3G*, *H2S*) and any position below 10 (*Q2W* dosing) count only in mutation context -- *p.*,
 a gene symbol right before, or *mutant* / *mutation* / *variant* / *allele* / *substitution* / *WT* and
-the like within 30 characters. On the myeloma graph of 2026-11-24 this took it from 199 to 113 sentences; an **Enrich for fusions** toggle that keeps only
+the like within 30 characters. Phosphosite shorthand (*S15P-p53*, *S536P-p65*: the P is phospho, not
+proline) is dropped for S / T / Y sites when *phospho* stands within 60 characters or a protein is
+hyphened on behind, unless in mutation context. On the myeloma graph of 2026-11-24 this took it from 199 to 113 sentences; an **Enrich for fusions** toggle that keeps only
 edges with a sentence saying *fusion* (as a word: not *infusion*) or *translocation* in the
 chromosomal sense -- after a fusion pair or fusion gene (*EML4-ALK translocation*,
 *ALK-translocated*), with a karyotype (*t(11;22)*), after *chromosomal* / *balanced* /

@@ -1111,7 +1111,7 @@ __LIBTAG__
  <div class="row" id="enrichhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for alteration:</b></div>
  <div id="enrichgrid" class="egrid">
  <div class="row"><button id="drvbtn" aria-pressed="false">Candidate driver</button> <button class="ihelp" aria-label="About enrich for candidate drivers" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, one-letter or three-letter, case-sensitive (<i>V600E</i>, <i>p.Gly12Cys</i>), with any punctuation around it (<i>G12C,</i> <i>V600E-mutant</i> <i>KRAS-G12V</i> <i>L858R/T790M</i> <i>p.L747P</i>) or glued to a gene symbol (<i>KRASG12C</i>, <i>p110&alpha;H1047R</i>), and excluding the figure, table, gene-name, chemical and cell-line look-alikes (<i>H929R</i>, <i>S3I-201</i>, <i>H2S</i>).</div></div>
+  <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, one-letter or three-letter, case-sensitive (<i>V600E</i>, <i>p.Gly12Cys</i>), with any punctuation around it (<i>G12C,</i> <i>V600E-mutant</i> <i>KRAS-G12V</i> <i>L858R/T790M</i> <i>p.L747P</i>) or glued to a gene symbol (<i>KRASG12C</i>, <i>p110&alpha;H1047R</i>), and excluding the figure, table, gene-name, chemical and cell-line look-alikes (<i>H929R</i>, <i>S3I-201</i>, <i>H2S</i>) and phosphosites (<i>S15P-p53</i>).</div></div>
  <div class="row"><button id="fusbtn" aria-pressed="false">Fusions</button> <button class="ihelp" aria-label="About enrich for fusions" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence about a <b>gene fusion</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. A sentence counts if it says <i>fusion</i> (<i>EML4-ALK fusion</i>, <i>RET fusion-positive</i>; not <i>infusion</i>), or uses <i>translocation</i> in the chromosomal sense: after a fusion pair or a gene that drives fusions (<i>EML4-ALK translocation</i>, <i>ROS1 translocation</i>, <i>ALK-translocated</i>), with a karyotype (<i>t(11;22) translocation</i>), after <i>chromosomal</i>, <i>balanced</i>, <i>reciprocal</i> or <i>gene</i>, or as <i>translocation involving MLL</i>. Karyotype notation counts on its own, with no other word: <i>t(4;14)</i>, <i>t(11;14)</i>, <i>t(9;22)(q34;q11)</i>, <i>inv(16)</i>, <i>der(22)</i> &mdash; how myeloma and leukemia papers write their translocations. So does a fusion named by its genes in HGNC notation, <i>NUP98::NSD1</i>, <i>AGK::BRAF</i> (both sides genes of this graph); the older single colon, <i>TMPRSS2:ERG</i>, only with a fusion word in the sentence, since <i>EGFR:GRB2</i> or <i>MAPK8:JUN</i> are not fusions. A protein moving inside the cell &mdash; <i>nuclear translocation of p65</i>, <i>translocation of YAP to the nucleus</i> &mdash; does not count.</div></div>
  <div class="row"><button id="oexbtn" aria-pressed="false">Overexpression</button> <button class="ihelp" aria-label="About enrich for overexpression" aria-expanded="false">i</button>
@@ -1393,10 +1393,17 @@ function driverContext(t,a,b){
  if(!GENESYM)GENESYM=new Set(DATA.nodes.filter(n=>n.kind==='gene').map(n=>String(n.id).toUpperCase()));
  return GENESYM.has(m[1].toUpperCase());
 }
+// Phosphosite shorthand: the final P of S15P-p53, S536P-p65 is "phospho", not proline. Only S / T / Y
+// are written so, and S->P / T->P are real mutations too, hence evidence is needed -- "phospho"
+// within 60 characters, or the name hyphened onto the FRONT of a protein -- and mutation context wins.
+function driverIsPhosphosite(t,a,b,w){
+ return /^[STY]\d+P$/.test(w)&&(/phospho/i.test(t.slice(Math.max(0,a-60),a)+' '+t.slice(b,b+60))
+  ||/^[-‐‑–](?:p\d{2,3}(?![A-Za-z0-9])|[A-Z][A-Za-z0-9]*[A-Z0-9](?![a-z]))/.test(t.slice(b,b+20)));}
 function driverIsChange(t,a,b){
  const w=t.slice(a,b);
  if(!/^[A-Z]\d+[A-Z]$/.test(w))return true;   // three-letter notation
  if(!AA1_RE.test(w)||NOVAR_HARD.has(w))return false;
+ if(driverIsPhosphosite(t,a,b,w)&&!driverContext(t,a,b))return false;
  return (!NOVAR_SOFT.has(w)&&parseInt(w.slice(1),10)>=10)||driverContext(t,a,b);
 }
 let DRIVERS=false;
