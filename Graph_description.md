@@ -59,7 +59,13 @@ but not to the front of a longer symbol (*CDKN2A*, *PPARGC1A*); no letter or dig
 (*S8B Fig*) -- and neither is a stoplist of look-alikes: *S6K*, *S6R*, *E2F*, *E2A*, *G9A*, *G2M*,
 *S1P*, *S100P*, *B2M*, the histones *H2A* / *H2B*, the drug code *H3B*, and the cell lines *T47D*,
 *T98G*, *M059J*, *NCI-H295R*. (Until 2026-11-24 the change had to stand between spaces or in
-parentheses, which caught 1,076 sentences; it now catches 2,110.); an **Enrich for fusions** toggle that keeps only
+parentheses, which caught 1,076 sentences; it now catches 2,110.) Beyond that list, general rules apply to one-letter changes: the two letters must
+be different amino acids (not *U266R*, *LCAR-B38M*, *R10R*); cell-line derivatives (*H929R*: its stem
+*H929* is used as a cell line; *ANBL-6/V10R*) and compound codes (*S3I-201*), both learned from the
+corpus at build time, never count; a gene, chemical or cell line of that very name (HGNC, ChEBI, NCIt,
+Cellosaurus: *C3G*, *H2S*) and any position below 10 (*Q2W* dosing) count only in mutation context -- *p.*,
+a gene symbol right before, or *mutant* / *mutation* / *variant* / *allele* / *substitution* / *WT* and
+the like within 30 characters. On the myeloma graph of 2026-11-24 this took it from 199 to 113 sentences; an **Enrich for fusions** toggle that keeps only
 edges with a sentence saying *fusion* (as a word: not *infusion*) or *translocation* in the
 chromosomal sense -- after a fusion pair or fusion gene (*EML4-ALK translocation*,
 *ALK-translocated*), with a karyotype (*t(11;22)*), after *chromosomal* / *balanced* /
@@ -422,6 +428,10 @@ The Oncogene / Tumor suppressor roles come from `databases/oncokb_cancerGeneList
 root is not in git, so a fresh checkout needs it fetched again:
 `curl -o kaggle_working/databases/oncokb_cancerGeneList.tsv https://www.oncokb.org/api/v1/utils/cancerGeneList.txt`).
 Without it the build warns and the two buttons keep nothing.
+
+Cell-line names for the Candidate driver lens come from Cellosaurus (CC BY 4.0, SIB; optional,
+122 MB, warned about when absent), looked for in `databases/` of the data root, then `gpu_bundle`:
+`curl -o gpu_bundle/databases/cellosaurus.txt https://ftp.expasy.org/databases/cellosaurus/cellosaurus.txt`.
 
 Publication years come from `databases/pmc_years.json`, built by `pub_years.py` (stage-2
 step 4); re-run it if the corpus has grown, or the year slider will silently drop undated

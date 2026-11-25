@@ -862,6 +862,117 @@ def _cancer_gene_roles():
     return out
 
 
+# --- Names shaped like an amino-acid change that are not one (the Candidate driver lens) -------
+# One-letter changes only: two DIFFERENT residues of the 20. The lens itself (driverHits) applies
+# the same alphabet, and the low-position rule; what needs the corpus or a database is here.
+_AA1 = "ACDEFGHIKLMNPQRSTVWY"
+_CHANGE = re.compile(rf"(?<![A-Za-z0-9])([{_AA1}])\d{{1,4}}(?!\1)[{_AA1}](?![A-Za-z0-9])")
+# mutation context -- KEEP IN STEP with driverContext() in GRAPH_TEMPLATE. "resistant" and
+# "phospho" are deliberately not cues: they sit next to cell lines and inhibitors just as often.
+_MUT_WORD = re.compile(r"\b(?:mutants?|mutations?|mutated|variants?|alleles?|substitutions?|missense"
+                       r"|hotspots?|WT|wild[- ]?type)\b", re.I)
+_PRE_WORD = re.compile(r"([A-Za-z][A-Za-z0-9]*)[ -]$")
+
+
+def _mut_context(s, a, b, genes):
+    """True when s[a:b] reads as a mutation: HGVS "p.", a gene symbol right before, or a
+    mutation word within 30 characters."""
+    pre = s[max(0, a - 30):a]
+    if pre.endswith("p.") or _MUT_WORD.search(pre) or _MUT_WORD.search(s[b:b + 30]):
+        return True
+    m = _PRE_WORD.search(pre)
+    return bool(m and m.group(1).upper() in genes)
+
+
+def _database(name):
+    """<data-root>/databases/<name>, else gpu_bundle/databases/<name>, else None (warned)."""
+    for base in (DATA_ROOT / "databases", ROOT / "gpu_bundle" / "databases"):
+        if (base / name).exists():
+            return base / name
+    print(f"  WARNING: databases/{name} not found -- its names are not screened out of Candidate driver")
+    return None
+
+
+def _lexicon_names(wanted):
+    """({names in HGNC / ChEBI / NCIt}, {names in Cellosaurus}) among `wanted`, case-exact."""
+    known, cells = set(), set()
+    p = _database("hgnc_complete_set_2026-05-01.json")
+    if p:
+        for x in json.loads(p.read_text(encoding="utf-8"))["response"]["docs"]:
+            for k in ("symbol", "alias_symbol", "prev_symbol"):
+                v = x.get(k) or []
+                known.update([v] if isinstance(v, str) else v)
+    p = _database("chebi.json")
+    if p:   # labels and synonyms only: the formula field holds "C21N"-like strings
+        for n in json.loads(p.read_text(encoding="utf-8"))["graphs"][0]["nodes"]:
+            known.add(n.get("lbl"))
+            known.update(y.get("val") for y in n.get("meta", {}).get("synonyms", []))
+    p = _database("ncit_drugs.json")
+    if p:
+        for key, val in json.loads(p.read_text(encoding="utf-8")).get("names", {}).items():
+            known.add(val[1] if isinstance(val, list) and len(val) > 1 else key)
+    p = _database("cellosaurus.txt")
+    if p:
+        with open(p, encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith(("ID   ", "SY   ")):
+                    cells.update(x.strip() for x in line[5:].split(";"))
+    return known & wanted, cells & wanted
+
+
+def not_variants(sentences, payload):
+    """{"hard": [...], "soft": [...]}: names in the graph shaped like an amino-acid change that
+    are something else. HARD ones never count; SOFT ones count only in mutation context.
+      hard  a cell line's derivative: the name minus its last letter is used as a cell line
+            (H929 cells -> H929R), or it hangs off a cell line's name (ANBL-6/V10R)
+      hard  a compound code: the name is followed by -<digits> (S3I-201 -> S3I)
+      soft  a gene, chemical (HGNC, ChEBI, NCIt) or cell line (Cellosaurus) of that very name
+    The stem, not the name, is tested against "cells", because "G12C cells" is ordinary usage.
+    A name the corpus mostly writes in mutation context is never listed."""
+    in_graph = {m.group() for m in _CHANGE.finditer(
+        json.dumps(payload["edges"], ensure_ascii=False).replace("\\n", " "))}
+    if not in_graph:
+        return {"hard": [], "soft": []}
+    genes = {str(n["id"]).upper() for n in payload["nodes"] if n.get("kind", "gene") == "gene"}
+    stem_re = re.compile(r"(?<![A-Za-z0-9])([A-Z]\d{1,4})(?![A-Za-z0-9])"
+                         r"(\s+(?:(?:MM|myeloma|parental|control|resistant|sensitive|WT)\s+)?"
+                         r"cell(?:s|\s+lines?)?\b)?")
+    host_re = re.compile(r"([A-Za-z][A-Za-z0-9-]*)[/-]$")
+    stem, stem_cell, total, ctx, code = (collections.Counter() for _ in range(5))
+    hosts = collections.defaultdict(collections.Counter)
+    for s in set(sentences):
+        for m in stem_re.finditer(s):
+            stem[m.group(1)] += 1
+            stem_cell[m.group(1)] += bool(m.group(2))
+        for m in _CHANGE.finditer(s):
+            w, a, b = m.group(), m.start(), m.end()
+            if w not in in_graph:
+                continue
+            total[w] += 1
+            ctx[w] += _mut_context(s, a, b, genes)
+            code[w] += bool(re.match(r"-\d", s[b:b + 2]))
+            h = host_re.search(s[max(0, a - 25):a])
+            if h:
+                hosts[w][h.group(1)] += 1
+    known, cells = _lexicon_names(in_graph | {h for c in hosts.values() for h in c})
+    hard, soft = set(), set()
+    for w in in_graph:
+        if 2 * ctx[w] > total[w]:
+            continue
+        st = w[:-1]
+        # a host that is also a gene is the mutated gene (CSN5-H138Q), not a cell line
+        on_line = sum(c for h, c in hosts[w].items() if h in cells and h.upper() not in genes)
+        # an engineered line carries real mutations too (T47D-Y537S): one such context clears it
+        if ((stem_cell[st] >= 3 and stem_cell[st] >= .2 * stem[st]) or code[w] >= 2
+                or (on_line >= 2 and not ctx[w])):
+            hard.add(w)
+        elif w in known or w in cells:
+            soft.add(w)
+    print(f"  candidate driver: {len(hard)} look-alike name(s) never counted "
+          f"({', '.join(sorted(hard))}); {len(soft)} only in mutation context ({', '.join(sorted(soft))})")
+    return {"hard": sorted(hard), "soft": sorted(soft)}
+
+
 def read_pubmed_query():
     """Pull the PubMed query out of summaries/pubmed_query.html (the step-1 publications
     summary), i.e. the value after 'Query (read strictly from <STDIN>):'. Looks under the
@@ -1000,7 +1111,7 @@ __LIBTAG__
  <div class="row" id="enrichhead" style="margin-bottom:2px"><b style="color:#1c2330">Enrich for alteration:</b></div>
  <div id="enrichgrid" class="egrid">
  <div class="row"><button id="drvbtn" aria-pressed="false">Candidate driver</button> <button class="ihelp" aria-label="About enrich for candidate drivers" aria-expanded="false">i</button>
-  <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, one-letter or three-letter, case-sensitive (<i>V600E</i>, <i>p.Gly12Cys</i>), with any punctuation around it (<i>G12C,</i> <i>V600E-mutant</i> <i>KRAS-G12V</i> <i>L858R/T790M</i> <i>p.L747P</i>) or glued to a gene symbol (<i>KRASG12C</i>, <i>p110&alpha;H1047R</i>), and excluding the figure, table, gene-name and cell-line look-alikes.</div></div>
+  <div class="mut help">Keeps only edges with a sentence naming a <b>single amino acid change</b>, one-letter or three-letter, case-sensitive (<i>V600E</i>, <i>p.Gly12Cys</i>), with any punctuation around it (<i>G12C,</i> <i>V600E-mutant</i> <i>KRAS-G12V</i> <i>L858R/T790M</i> <i>p.L747P</i>) or glued to a gene symbol (<i>KRASG12C</i>, <i>p110&alpha;H1047R</i>), and excluding the figure, table, gene-name, chemical and cell-line look-alikes (<i>H929R</i>, <i>S3I-201</i>, <i>H2S</i>).</div></div>
  <div class="row"><button id="fusbtn" aria-pressed="false">Fusions</button> <button class="ihelp" aria-label="About enrich for fusions" aria-expanded="false">i</button>
   <div class="mut help">Keeps only edges with a sentence about a <b>gene fusion</b>, and the nodes those edges connect; the matching sentences are the ones shown, the hits highlighted. A sentence counts if it says <i>fusion</i> (<i>EML4-ALK fusion</i>, <i>RET fusion-positive</i>; not <i>infusion</i>), or uses <i>translocation</i> in the chromosomal sense: after a fusion pair or a gene that drives fusions (<i>EML4-ALK translocation</i>, <i>ROS1 translocation</i>, <i>ALK-translocated</i>), with a karyotype (<i>t(11;22) translocation</i>), after <i>chromosomal</i>, <i>balanced</i>, <i>reciprocal</i> or <i>gene</i>, or as <i>translocation involving MLL</i>. Karyotype notation counts on its own, with no other word: <i>t(4;14)</i>, <i>t(11;14)</i>, <i>t(9;22)(q34;q11)</i>, <i>inv(16)</i>, <i>der(22)</i> &mdash; how myeloma and leukemia papers write their translocations. So does a fusion named by its genes in HGNC notation, <i>NUP98::NSD1</i>, <i>AGK::BRAF</i> (both sides genes of this graph); the older single colon, <i>TMPRSS2:ERG</i>, only with a fusion word in the sentence, since <i>EGFR:GRB2</i> or <i>MAPK8:JUN</i> are not fusions. A protein moving inside the cell &mdash; <i>nuclear translocation of p65</i>, <i>translocation of YAP to the nucleus</i> &mdash; does not count.</div></div>
  <div class="row"><button id="oexbtn" aria-pressed="false">Overexpression</button> <button class="ihelp" aria-label="About enrich for overexpression" aria-expanded="false">i</button>
@@ -1265,11 +1376,34 @@ const FIG_POST=/^(?:\s*(?:[-–,;&]|and|or)?\s*S\d{1,2}[A-Za-z]{0,2})*\s*Figs?\b
 //   S6R  phospho-S6 ribosomal protein   S100P  a gene            B2M  beta-2-microglobulin
 //   H3B  the H3B-6545 drug code
 const DRIVER_STOP=new Set(['S6K','E2F','T47D','T98G','M059J','G2M','S1P','E2A','G9A','H2A','H2B','S6R','S100P','B2M','H3B']);
+// The general rules behind that list: (1) a one-letter change swaps two DIFFERENT residues of the
+// 20 (not U266R, B38M, R10R); (2) DATA.novar.hard -- cell-line derivatives (H929R, ANBL-6/V10R) and
+// compound codes (S3I-201), found from the corpus by not_variants() -- never counts; (3) a gene,
+// chemical or cell line of that name (DATA.novar.soft: H2S, C3G), and any position below 10 (Q2W
+// dosing, G4S linker), counts only in mutation context. Three-letter changes are exempt.
+const AA1_RE=/^([ACDEFGHIKLMNPQRSTVWY])\d{1,4}(?!\1)[ACDEFGHIKLMNPQRSTVWY]$/;
+const MUT_WORD=/\b(?:mutants?|mutations?|mutated|variants?|alleles?|substitutions?|missense|hotspots?|WT|wild[- ]?type)\b/i;
+const NOVAR_HARD=new Set((DATA.novar||{}).hard||[]),NOVAR_SOFT=new Set((DATA.novar||{}).soft||[]);
+// KEEP IN STEP with _mut_context() in high_confidence_g.py (a gene GLUED on also counts here)
+function driverContext(t,a,b){
+ const pre=t.slice(Math.max(0,a-30),a);
+ if(/p\.$/.test(pre)||/[A-Za-z0-9Ͱ-Ͽ]$/.test(pre)||MUT_WORD.test(pre)||MUT_WORD.test(t.slice(b,b+30)))return true;
+ const m=/([A-Za-z][A-Za-z0-9]*)[ -]$/.exec(pre);
+ if(!m)return false;
+ if(!GENESYM)GENESYM=new Set(DATA.nodes.filter(n=>n.kind==='gene').map(n=>String(n.id).toUpperCase()));
+ return GENESYM.has(m[1].toUpperCase());
+}
+function driverIsChange(t,a,b){
+ const w=t.slice(a,b);
+ if(!/^[A-Z]\d+[A-Z]$/.test(w))return true;   // three-letter notation
+ if(!AA1_RE.test(w)||NOVAR_HARD.has(w))return false;
+ return (!NOVAR_SOFT.has(w)&&parseInt(w.slice(1),10)>=10)||driverContext(t,a,b);
+}
 let DRIVERS=false;
 function driverHits(t){t=t||'';
  return reHits(DRIVER_RE,t).filter(([a,b])=>{
   if(DRIVER_STOP.has(t.slice(a,b).replace(/[\s()]/g,'')))return false;
-  if(!driverLeftOK(t,a))return false;
+  if(!driverLeftOK(t,a)||!driverIsChange(t,a,b))return false;
   while(/[\s(]/.test(t[a]))a++;            // the hit's own leading space / parenthesis
   // a label RIGHT after the word is a panel whatever its letter -- "Fig. S6K", "Fig. E3B"
   // (extended data), "Figure A1C" (appendix), "Table R2A": no mutation is written that way
@@ -2462,6 +2596,7 @@ def main():
         if N_FALSE_DROPPED:
             print(f"  drug targets: dropped {N_FALSE_DROPPED} curated false gene-chemical "
                   f"pair(s) (FALSE_TARGETS)")
+        payload["novar"] = not_variants((t.get("sentence") or "" for t in raw), payload)
         yrs = [s["yr"] for e in payload["edges"] for s in e["sents"] if s.get("yr")]
         miny, maxy = (min(yrs), max(yrs)) if yrs else (2000, 2026)
         lib = get_vis_lib()

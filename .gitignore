@@ -10,6 +10,7 @@ env/
 # Ontology databases required by step 2 (HGNC / MONDO / ChEBI are 30-500 MB each).
 gpu_bundle/databases/*.json
 gpu_bundle/databases/*.tsv
+gpu_bundle/databases/*.txt
 # NER corpus assembled by step 1 (thousands of XML, ~1 GB).
 gpu_bundle/experimental_ner/
 # Trained model checkpoints + their converted TSVs produced by stage-2 steps 1-2.
