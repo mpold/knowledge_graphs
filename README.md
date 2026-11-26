@@ -436,7 +436,8 @@ present), and a copy of the graph in the bundle root named after the current dir
 **Reading the graph.** The page is self-contained — payload, library and all — and every edge
 traces back to the sentences behind it, with clickable PMIDs. It opens on the `binds` relation
 only, with *Min connections* at 2, so most nodes are hidden at first: click *Check all* under
-*Relation type* for the rest. *Search gene or variant*, *Search drug* and *Filter to drug/chemical*
+*Relation type* for the rest — the red **Click for disease associations** beside it says so: none of
+the 4,441 gene–disease edges is a `binds` edge, and 4,315 of them are `associated`. *Search gene or variant*, *Search drug* and *Filter to drug/chemical*
 reach every node, and say which setting hides one that is not drawn.
 [`Graph_description.md`](Graph_description.md) is the guide to the controls, the order the filters
 run in, and the limits worth carrying.
