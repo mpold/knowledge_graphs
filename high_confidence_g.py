@@ -1570,8 +1570,9 @@ function labelOpacity(sc){ return 1; }
 // alike from one filter to the next. ZSCALE is the zoom the fonts were last sized for.
 const LABEL_MIN_PX=8;
 let ZSCALE=1, zoomTimer=null;
-// on-screen px for a base size (fontSize(), 11-20 for genes): the slider stretches the part
-// above the 8px floor, so 50% shows the base sizes, 10% runs ~8.6-10.4px and 100% 14-32px --
+// on-screen px for a base size (kindFontSize(): 9-24 for genes, 8.8-19 for chemicals and
+// diseases): the slider stretches the part above the 8px floor, so 50% shows the base sizes,
+// 10% runs ~8.2-11.2px for genes and 100% 10-40px (chemicals and diseases 9.6-30px) --
 // every step changes every label and none is ever under 8px
 function screenPx(base){return LABEL_MIN_PX+FSCALE*Math.max(0,base-LABEL_MIN_PX);}
 function refloorLabels(){ if(!network||!NODEDS)return; const sc=network.getScale(); if(!(sc>0))return;
@@ -2355,16 +2356,20 @@ function arrowScale(np){return Math.min(0.5+0.18*Math.sqrt(Math.max(0,np-1)),1.6
 // hover tooltip, which is transient and already framed by the edge you are pointing at
 const INFO_HEAD='<div class="ihead">Sentences of interest</div>';
 function scaleNode(s){return 6+Math.sqrt(s)*3.4;}
-// on-screen px at the 50% slider, by unique sentences in view: log scale, 11px for 1 sentence to
-// 20px from 64 on (2 -> 12.5, 8 -> 15.5, 16 -> 17). It once jumped 13 -> 26 between 4 and 5
-// sentences and ran to 96, so one ticked box could double half the labels.
-function fontSize(c){return 11+9*Math.min(1,Math.log2(Math.max(1,c))/6);}
+// on-screen px at the 50% slider, by unique sentences in view: log scale over a band per node
+// kind, [px at 1 sentence, px from 64 on] -- genes 9 -> 24 (2 -> 11.5, 8 -> 16.5, 16 -> 19).
+// The 100% slider doubles the part above 8px (screenPx), so genes show at 10-40px and chemicals
+// and diseases at 9.6-30px there. A linear size once jumped 13 -> 26 between 4 and 5 sentences
+// and ran to 96, so one ticked box could double half the labels.
+const LABEL_BAND={gene:[9,24],disease:[8.8,19],chemical:[8.8,19]};
+function kindFontSize(k,c){const b=LABEL_BAND[k]||LABEL_BAND.gene;
+ return b[0]+(b[1]-b[0])*Math.min(1,Math.log2(Math.max(1,c))/6);}
 // Label size is a per-node property (a busy gene is drawn larger), so the slider is a single
-// multiplier on top of fontSize(): every label shrinks by the same factor and the size ranking
+// multiplier on top of kindFontSize(): every label shrinks by the same factor and the size ranking
 // survives. The base size rides along on each node as _fs, which is what lets the slider relabel
 // the existing DataSet instead of rebuilding -- a rebuild would re-run the layout.
 let FSCALE=1;
-// FS_BASE: the slider reading that means "the size fontSize() computed". Everything above it
+// FS_BASE: the slider reading that means "the size kindFontSize() computed". Everything above it
 // enlarges, so the old ceiling (the built-in size) now sits mid-scale at 50% and the slider
 // runs to twice that. The divisor -- not the range -- is what fixes where 1.0x lands.
 const FS_BASE=50;
@@ -2377,12 +2382,11 @@ function activeFontScale(){const el=document.getElementById('fscale');const v=el
 const LABEL_KINDS=new Set(['gene']);
 // Gene symbols are short and are the thing you read positionally; disease and chemical names are
 // long prose that competes with them for the same canvas. So when those names are switched on
-// they are set in a CONDENSED face at 80% of the size a gene of the same weight would take, and
+// they are set in a CONDENSED face, in a smaller size band than genes (LABEL_BAND), and
 // drugs are additionally italic -- three cues (shape, width, slope) doing what size alone had to.
-// The ratio is applied to the BASE size, not the rendered one, so the font slider and the
+// The band sets the BASE size, not the rendered one, so the font slider and the
 // per-node "busier is bigger" ranking both survive untouched.
 const NARROW_FACE='Arial Narrow,Liberation Sans Narrow,Segoe UI Semilight,Arial,sans-serif';
-const KIND_FS={gene:1,disease:0.8,chemical:0.8};
 // Italic has no plain switch in vis-network: the slanted face lives in the multi-font "ital"
 // slot, which only applies to text the label marks up. So a drug label carries <i>...</i> and
 // the node opts into multi:'html'. Anything that builds a label has to go through labelFor(),
@@ -2612,7 +2616,7 @@ function build(thr){
  const nss={};edges.forEach(o=>{o.vis.forEach(s=>{(nss[o.e.from]=nss[o.e.from]||new Set()).add(s.text);(nss[o.e.to]=nss[o.e.to]||new Set()).add(s.text);});});
  const nsz=id=>(nss[id]?nss[id].size:0);
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
-  const fs=fontSize(nsz(n.id))*(KIND_FS[k]||1);
+  const fs=kindFontSize(k,nsz(n.id));
   return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+(SURF[n.id]?String.fromCharCode(10)+surfLine(n.id):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
    borderWidth:1,borderWidthSelected:2};});
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
