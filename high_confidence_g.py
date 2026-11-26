@@ -1394,8 +1394,8 @@ __LIBTAG__
     a panel that also scrolls hides ticked types from anyone who does not think to scroll it */
  #catfilters{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px}
  #catfilters .cnt{color:#5b6677;font-size:11px}
- #zoom button,#srcbtns button,#labelbtns button,#relay,#relayback,#lonebtn,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn,#resbtn,#acqbtn,#slbtn,#bmkbtn,#prgbtn,#clnbtn,#vivbtn,#oncbtn,#tsgbtn,#immbtn,#mtsbtn{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
- #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#lonebtn:hover,#catall:hover,#drvbtn:hover,#fusbtn:hover,#itdbtn:hover,#oexbtn:hover,#ampbtn:hover,#delbtn:hover,#trubtn:hover,#exobtn:hover,#cnbtn:hover,#metbtn:hover,#resbtn:hover,#acqbtn:hover,#slbtn:hover,#bmkbtn:hover,#prgbtn:hover,#clnbtn:hover,#vivbtn:hover,#oncbtn:hover,#tsgbtn:hover,#immbtn:hover,#mtsbtn:hover{background:#dde4ee}
+ #zoom button,#srcbtns button,#labelbtns button,#relay,#relayback,#lonebtn,#catall,#drvbtn,#fusbtn,#itdbtn,#oexbtn,#ampbtn,#delbtn,#trubtn,#exobtn,#cnbtn,#metbtn,#resbtn,#acqbtn,#slbtn,#bmkbtn,#prgbtn,#clnbtn,#vivbtn,#oncbtn,#tsgbtn,#immbtn,#mtsbtn,#varall{background:#eef2f7;color:#1c2330;border:1px solid #cdd5e0;border-radius:6px;padding:4px 10px;cursor:pointer;margin-right:6px;font-size:13px}
+ #zoom button:hover,#srcbtns button:hover,#labelbtns button:hover,#lonebtn:hover,#catall:hover,#drvbtn:hover,#fusbtn:hover,#itdbtn:hover,#oexbtn:hover,#ampbtn:hover,#delbtn:hover,#trubtn:hover,#exobtn:hover,#cnbtn:hover,#metbtn:hover,#resbtn:hover,#acqbtn:hover,#slbtn:hover,#bmkbtn:hover,#prgbtn:hover,#clnbtn:hover,#vivbtn:hover,#oncbtn:hover,#tsgbtn:hover,#immbtn:hover,#mtsbtn:hover,#varall:hover{background:#dde4ee}
  #srcbtns button,#labelbtns button{margin-bottom:4px}
  #disfilters{display:block;max-height:148px;overflow-y:auto;margin-top:0}
  .dbox{border:1px solid #cdd5e0;border-radius:6px;padding:4px 6px;margin:2px 0 8px}   /* the Enrich boxes' frame (.egrid) */
@@ -1406,7 +1406,7 @@ __LIBTAG__
  /* the zoom row sets the left panel's width (see fitLeftPanel), so the last button must not
     carry a trailing margin -- 6px of it would push Fit onto a second line */
  #zoom button:last-child{margin-right:0}
- #srcbtns button.on,#labelbtns button.on,#lonebtn.on,#drvbtn.on,#fusbtn.on,#itdbtn.on,#oexbtn.on,#ampbtn.on,#delbtn.on,#trubtn.on,#exobtn.on,#cnbtn.on,#metbtn.on,#resbtn.on,#acqbtn.on,#slbtn.on,#bmkbtn.on,#prgbtn.on,#clnbtn.on,#vivbtn.on,#oncbtn.on,#tsgbtn.on,#immbtn.on,#mtsbtn.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
+ #srcbtns button.on,#labelbtns button.on,#lonebtn.on,#drvbtn.on,#fusbtn.on,#itdbtn.on,#oexbtn.on,#ampbtn.on,#delbtn.on,#trubtn.on,#exobtn.on,#cnbtn.on,#metbtn.on,#resbtn.on,#acqbtn.on,#slbtn.on,#bmkbtn.on,#prgbtn.on,#clnbtn.on,#vivbtn.on,#oncbtn.on,#tsgbtn.on,#immbtn.on,#mtsbtn.on,#varall.on{background:#0969da;border-color:#0969da;color:#fff;font-weight:600}
  /* the name buttons must not move when one is toggled: bold text is wider, so each button reserves
     its bold width up front (a hidden bold copy of its own label) and switching weight changes nothing */
  /* ...and 3px less side padding (no trailing margin) pays for that reserve, so the pair still
@@ -1415,6 +1415,11 @@ __LIBTAG__
  #labelbtns button:last-child{margin-right:0}
  #labelbtns button::after{content:attr(data-label);font-weight:600;height:0;overflow:hidden;visibility:hidden;pointer-events:none}
  #srcbtns button:disabled{opacity:.45;cursor:default}
+ /* variant selectors: two short rows, greyed out until the Variants button is on */
+ #varopts .vrow{margin-top:2px} #varopts .vrow.off{opacity:.45}
+ /* the drawn-name buttons and the variant controls, boxed like .egrid / #catfilters */
+ #lblrow .lbox{border:1px solid #cdd5e0;border-radius:6px;padding:6px 6px 6px;margin-top:4px}
+ #varall{margin-right:0}
  .vis-tooltip{max-width:480px!important;white-space:normal!important;background:#fff!important;color:#1a1a1a!important;border:1px solid #999!important;border-radius:8px!important;padding:8px 10px!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;font:12px/1.45 Segoe UI,Arial,sans-serif!important}
  .eth{font-size:13px;margin-bottom:6px} .stip{padding:3px 0;border-top:1px solid #e3e3e3}
  .pm{display:inline-block;background:#eef3fb;color:#2b6cb0;border-radius:4px;padding:0 5px;margin-right:5px;font-weight:600;font-size:11px;text-decoration:none}
@@ -1444,11 +1449,15 @@ __LIBTAG__
  <button class="pclose" data-panel="lpanel" title="Close this menu" aria-label="Close the left menu">&times;</button>
  __PUBMED_QUERY__
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
- <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease" data-label="Disease names">Disease names</button><button class="lblb" data-kind="chemical" data-label="Drug names">Drug names</button><button class="lblb" data-kind="variant" data-label="Variants" id="varlbl">Variants</button></span>
-  <div id="varopts" style="margin-top:2px">Variants per gene <select id="varmax" aria-label="Variants drawn per gene"><option>3</option><option selected>5</option><option>10</option><option>20</option><option value="0">all</option></select>
-   in &ge; <select id="varmin" aria-label="Minimum papers per drawn variant"><option>1</option><option selected>2</option><option>5</option><option>10</option><option>50</option></select> papers
-   <button id="varall">All variants</button></div>
-  <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed. <b>Variants</b> writes each gene&rsquo;s sequence variants (HGVS p./c./g./r., tmVar 3 via PubTator3) under its symbol in a small monospace face, most-reported first: <em>Variants per gene</em> caps how many, <em>papers</em> drops those fewer papers report. <b>All variants</b> lists every gene&rsquo;s full list in the details box.</div></div>
+ <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button>
+  <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed. <b>Variants</b> writes each gene&rsquo;s sequence variants under its symbol (see the <b>i</b> below).</div>
+  <div class="lbox"><span id="labelbtns"><button class="lblb" data-kind="disease" data-label="Disease names">Disease names</button><button class="lblb" data-kind="chemical" data-label="Drug names">Drug names</button><button class="lblb" data-kind="variant" data-label="Variants" id="varlbl">Variants</button></span>
+  <div id="varopts" style="margin-top:4px">
+   <div class="vrow">Draw up to <select id="varmax" aria-label="Most variants drawn per gene"><option>3</option><option selected>5</option><option>10</option><option>20</option><option value="0">all</option></select> variants per gene,</div>
+   <div class="vrow">each in &ge; <select id="varmin" aria-label="Fewest papers a drawn variant must have"><option>1</option><option selected>2</option><option>5</option><option>10</option><option>50</option></select> papers <button class="ihelp" data-help="var" aria-label="About variants" aria-expanded="false">i</button></div>
+   <div style="margin-top:4px"><button id="varall">List every gene&rsquo;s variants</button></div>
+   <div class="mut help" data-help="var"><b>Variants</b> writes each gene&rsquo;s sequence variants (HGVS p./c./g./r., tmVar 3 via NCBI PubTator3) under its symbol in a small monospace face, most-reported first. The two selectors only act while <b>Variants</b> is on (they are greyed out otherwise): <em>Draw up to</em> caps how many variants a gene node shows, and <em>each in &ge; N papers</em> hides variants fewer papers report. &ldquo;+N more&rdquo; under a node counts everything not drawn, the hidden ones included. With 5 and 2, EGFR shows its five most-reported variants (p.T790M, p.L858R, p.C797S, p.L861Q, p.G719X) and &ldquo;+642 more&rdquo;. The tooltip and the click panel always show a gene&rsquo;s full list. <b>List every gene&rsquo;s variants</b> leaves the canvas alone and fills the details box with all genes that have variants, most first; click a gene there to unfold its summary by HGVS type and its variants. &ldquo;not in the current view&rdquo; marks a gene your filters hide.</div>
+  </div></div></div>
  <div class="row"><button id="relay">Re-layout this view</button> <button id="relayback" disabled>Restore layout</button> <button class="ihelp" aria-label="About re-layout" aria-expanded="false">i</button>
   <div class="mut help">Filtering hides nodes but leaves the rest where they were, so distances still reflect links you no longer see. <b>Re-layout this view</b> places the drawn nodes afresh from the drawn edges alone (more sentences in view = shorter edge; nodes also push each other apart, so distances stay approximate). It sets <em>Shrink periphery</em> and <em>Expand center</em> to 0%, as both bend distances. Filtering further keeps the new places; a change that brings in other nodes, or <b>Restore layout</b>, returns to the original places and slider values.</div></div>
  <div class="row"><button id="lonebtn" aria-pressed="false">Hide stand-alone nodes</button> <button class="ihelp" aria-label="About stand-alone nodes" aria-expanded="false">i</button>
@@ -2886,12 +2895,26 @@ document.querySelectorAll('.lblb').forEach(b=>b.addEventListener('click',()=>{
  const k=b.getAttribute('data-kind');
  if(LABEL_KINDS.has(k))LABEL_KINDS.delete(k);else LABEL_KINDS.add(k);
  b.classList.toggle('on',LABEL_KINDS.has(k));
+ if(k==='variant')updVarOpts();
  applyLabelKinds();}));
-// variant lines: the two selectors relabel in place; "All variants" fills the details box
+// the two variant selectors act only while Variants is on: greyed out and disabled otherwise
+function updVarOpts(){const on=showVars();
+ ['varmax','varmin'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=!on;});
+ document.querySelectorAll('#varopts .vrow').forEach(r=>r.classList.toggle('off',!on));}
+updVarOpts();
+// variant lines: the two selectors relabel in place; "List every gene's variants" fills the details
+// box. It toggles like the other buttons: on (blue) while its list is in the box, off when clicked
+// again (the box returns to its prompt) or when anything else -- a node, an edge, a search --
+// takes the box over, which the observer below notices by the list's id being gone.
 ['varmax','varmin'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{if(showVars())applyLabelKinds();}));
-document.getElementById('varall').addEventListener('click',()=>{const info=document.getElementById('info');
+const varAllBtn=document.getElementById('varall'), INFO_PROMPT=document.getElementById('info').innerHTML;
+new MutationObserver(()=>{if(!document.getElementById('varlist'))varAllBtn.classList.remove('on');})
+ .observe(document.getElementById('info'),{childList:true});
+varAllBtn.addEventListener('click',()=>{const info=document.getElementById('info');
+ if(varAllBtn.classList.contains('on')){varAllBtn.classList.remove('on');info.innerHTML=INFO_PROMPT;return;}
+ varAllBtn.classList.add('on');
  const ids=Object.keys(VARS).sort((a,b)=>VARS[b].length-VARS[a].length||a.localeCompare(b));
- info.innerHTML='<div class=ihead>All variants <span class=mut>('+ids.length+' genes, '+ids.reduce((t,id)=>t+VARS[id].length,0)+' variants)</span></div>'
+ info.innerHTML='<div class=ihead id=varlist>All variants <span class=mut>('+ids.length+' genes, '+ids.reduce((t,id)=>t+VARS[id].length,0)+' variants)</span></div>'
   +ids.map(id=>'<details class=var><summary><b>'+esc(id)+'</b> <span class=mut>'+VARS[id].length+(nodeDrawn(id)?'':' · not in the current view')+'</span></summary>'
    +typeSummary(id)
    +varTypes(id).map(([k,n,ts])=>'<div class=vlev>'+VLEV[k]+' — '+n+'</div>'+ts.map(([t,c])=>'<div class=vtyp>'+esc(t)+' — '+c+'</div><div>'

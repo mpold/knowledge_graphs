@@ -33,7 +33,7 @@ HGVS form (*T790M* → *p.T790M*) and names the gene the variant belongs to, whi
 listed under. They are read over each document's whole text (the abstract only, where PubTator3 has
 no full text), so a variant is listed whether or not a sentence naming it became a triple.
 Each gene's variants are also summarized by **HGVS type**, in the tooltip, at the top of the
-click panel and in *All variants*: per level, how many are *missense*, *nonsense*, *synonymous*,
+click panel and in *List every gene's variants*: per level, how many are *missense*, *nonsense*, *synonymous*,
 *unspecified (X)*, *deletion*, *insertion*, *duplication*, *delins*, *frameshift* or *extension*
 (p.), and *substitution*, *deletion*, *insertion*, *duplication*, *delins* or *inversion* (c., g.,
 r.); the list below is grouped the same way. *X* is left open because it means "any residue" in
@@ -42,10 +42,15 @@ that is not one change (*p.L19,858R*, a patient carrying two). The type is set i
 `gpu_bundle/variants.py` (`hgvs_type`), and `summaries/gene_variants.md` / `.tsv` carry it too.
 
 The *Variants* button (next to *Disease names* / *Drug names*) writes the variants into the gene
-nodes themselves, under the symbol in a small monospace face, most-reported first. *Variants per
-gene* caps how many are drawn (3, 5, 10, 20 or all) and *in ≥ N papers* hides those fewer papers
-report; a gene with more shows "+N more". *All variants* lists every gene's full list, grouped by
-level, in the details box.
+nodes themselves, under the symbol in a small monospace face, most-reported first. Two selectors
+below it act only while *Variants* is on (they are greyed out otherwise): *Draw up to N variants
+per gene* (3, 5, 10, 20 or all) caps how many a node shows, and *each in ≥ N papers* (1, 2, 5, 10,
+50) hides variants fewer papers report. "+N more" under a node counts everything not drawn, the
+hidden ones included: with 5 and 2, EGFR shows p.T790M, p.L858R, p.C797S, p.L861Q, p.G719X and
+"+642 more". *List every gene's variants* leaves the canvas alone and fills the details box with
+every gene that has variants, most first. Like the other buttons it turns blue while on; a second
+click, or a click on a node or edge, gives the box back. Each gene unfolds to its type summary and its variants
+grouped by level and type, and "not in the current view" marks a gene the filters hide.
 *Search gene or variant* takes a variant too (*T790M*, *p.T790M*, *c.2573T>G*): it selects every
 gene carrying it and lists them with their paper counts.
 
