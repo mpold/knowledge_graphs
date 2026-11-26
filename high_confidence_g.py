@@ -1419,6 +1419,8 @@ __LIBTAG__
  #varopts .vrow{margin-top:2px} #varopts .vrow.off{opacity:.45}
  /* the drawn-name buttons and the variant controls, boxed like .egrid / #catfilters */
  #lblrow .lbox{border:1px solid #cdd5e0;border-radius:6px;padding:6px 6px 6px;margin-top:4px}
+ /* "Graph view options": re-layout down to tissue stacking, boxed the same way */
+ .optbox{border:1px solid #cdd5e0;border-radius:6px;padding:6px 6px 2px;margin:0 0 10px}
  #varall{margin-right:0}
  .vis-tooltip{max-width:480px!important;white-space:normal!important;background:#fff!important;color:#1a1a1a!important;border:1px solid #999!important;border-radius:8px!important;padding:8px 10px!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;font:12px/1.45 Segoe UI,Arial,sans-serif!important}
  .eth{font-size:13px;margin-bottom:6px} .stip{padding:3px 0;border-top:1px solid #e3e3e3}
@@ -1449,7 +1451,7 @@ __LIBTAG__
  <button class="pclose" data-panel="lpanel" title="Close this menu" aria-label="Close the left menu">&times;</button>
  __PUBMED_QUERY__
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
- <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button>
+ <div class="row" id="lblrow"><b style="color:#1c2330">Draw names for:</b> <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button>
   <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed. <b>Variants</b> writes each gene&rsquo;s sequence variants under its symbol (see the <b>i</b> below).</div>
   <div class="lbox"><span id="labelbtns"><button class="lblb" data-kind="disease" data-label="Disease names">Disease names</button><button class="lblb" data-kind="chemical" data-label="Drug names">Drug names</button><button class="lblb" data-kind="variant" data-label="Variants" id="varlbl">Variants</button></span>
   <div id="varopts" style="margin-top:4px">
@@ -1458,6 +1460,8 @@ __LIBTAG__
    <div style="margin-top:4px"><button id="varall">List every gene&rsquo;s variants</button></div>
    <div class="mut help" data-help="var"><b>Variants</b> writes each gene&rsquo;s sequence variants (HGVS p./c./g./r., tmVar 3 via NCBI PubTator3) under its symbol in a small monospace face, most-reported first. The two selectors only act while <b>Variants</b> is on (they are greyed out otherwise): <em>Draw up to</em> caps how many variants a gene node shows, and <em>each in &ge; N papers</em> hides variants fewer papers report. &ldquo;+N more&rdquo; under a node counts everything not drawn, the hidden ones included. With 5 and 2, EGFR shows its five most-reported variants (p.T790M, p.L858R, p.C797S, p.L861Q, p.G719X) and &ldquo;+642 more&rdquo;. The tooltip and the click panel always show a gene&rsquo;s full list. <b>List every gene&rsquo;s variants</b> leaves the canvas alone and fills the details box with all genes that have variants, most first; click a gene there to unfold its summary by HGVS type and its variants. &ldquo;not in the current view&rdquo; marks a gene your filters hide.</div>
   </div></div></div>
+ <div class="row" id="viewhead" style="margin-bottom:2px"><b style="color:#1c2330">Graph view options:</b></div>
+ <div class="optbox">
  <div class="row"><button id="relay">Re-layout this view</button> <button id="relayback" disabled>Restore layout</button> <button class="ihelp" aria-label="About re-layout" aria-expanded="false">i</button>
   <div class="mut help">Filtering hides nodes but leaves the rest where they were, so distances still reflect links you no longer see. <b>Re-layout this view</b> places the drawn nodes afresh from the drawn edges alone (more sentences in view = shorter edge; nodes also push each other apart, so distances stay approximate). It sets <em>Shrink periphery</em> and <em>Expand center</em> to 0%, as both bend distances. Filtering further keeps the new places; a change that brings in other nodes, or <b>Restore layout</b>, returns to the original places and slider values.</div></div>
  <div class="row"><button id="lonebtn" aria-pressed="false">Hide stand-alone nodes</button> <button class="ihelp" aria-label="About stand-alone nodes" aria-expanded="false">i</button>
@@ -1468,6 +1472,7 @@ __LIBTAG__
   <div class="mut help">Blows the crowded core outward and carries the rest along, thinning the hairball without moving anything past its neighbours. Both reshape the drawn layout only &mdash; radially, from the stabilized positions, so nothing changes order and returning a slider to 0% restores the layout exactly.</div></div>
  <div class="row" id="tissuerow"><label><input type=checkbox id="tissuestack" checked> Stack same-tissue diseases</label> <button class="ihelp" aria-label="About tissue stacking" aria-expanded="false">i</button>
   <div class="mut help">Drops the disease nodes naming one tissue onto a single spot, overlapping, so <em>lung cancer</em>, <em>lung adenocarcinoma</em> and <em>non-small cell lung carcinoma</em> read as one place on the canvas instead of three. They stay separate nodes with their own edges and tooltips &mdash; only their positions are pooled, after the layout settles. Tissue is read from the name (<span id="tissuen"></span>).</div></div>
+ </div>
  <div class="row" id="disrow"><b style="color:#1c2330">Keep diseases:</b> <button class="ihelp" aria-label="About the disease keep-list" aria-expanded="false">i</button>
   <span id="disclear" class="mut" style="cursor:pointer;text-decoration:underline;float:right">clear</span>
   <div class="dbox"><div class="legend" id="disfilters"></div>
@@ -1668,6 +1673,7 @@ function labelOpacity(sc){ return 1; }
 // floor, a small one at zoom 1 drew busy genes at 96px, and the same 50% slider looked nothing
 // alike from one filter to the next. ZSCALE is the zoom the fonts were last sized for.
 const LABEL_MIN_PX=8;
+const VAR_PX=10;   // the variant lines under a gene symbol: a fixed on-screen size in every view
 let ZSCALE=1, zoomTimer=null;
 // on-screen px for a base size (kindFontSize(): 9-24 for genes, 8.8-19 for chemicals and
 // diseases): the slider stretches the part above the 8px floor, so 50% shows the base sizes,
@@ -2532,34 +2538,49 @@ const NARROW_FACE='Arial Narrow,Liberation Sans Narrow,Segoe UI Semilight,Arial,
 function labelFor(id,kind,text){
  if(!LABEL_KINDS.has(kind||'gene'))return '';
  const t=text===undefined?(labelById[id]||''):text;
- if(kind==='chemical')return '<i>'+esc(t)+'</i>';
- // a gene with its variants switched on: symbol, then the variants in <code> (the "mono" slot of
- // nodeFont), three to a line. Its font opts into multi:'html', so the symbol is escaped here too.
- if((kind||'gene')==='gene'&&showVars()){const v=varsDrawn(id);
-  if(v.length){const rows=[];for(let i=0;i<v.length;i+=3)rows.push('<code>'+v.slice(i,i+3).map(lblEsc).join('  ')+'</code>');
-   const more=(VARS[id]||[]).length-v.length;
-   return lblEsc(t)+'\n'+rows.join('\n')+(more>0?'\n<code>+'+more+' more</code>':'');}}
- return t;
+ return (kind==='chemical')?'<i>'+esc(t)+'</i>':t;
 }
-// vis-network's html labels decode only &lt; and &amp;, so '>' (c.2573T>G) must stay raw
-function lblEsc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
-// Variant lines drawn on gene nodes: on with the Variants button, capped per gene (varmax, 0 = all)
+// Variant rows under gene symbols: on with the Variants button, capped per gene (varmax, 0 = all)
 // and by the papers behind each variant (varmin). The full list is always one click away.
+// They are NOT part of the vis label. vis-network makes every label line as tall as the label's own
+// font -- it measures empty spacer blocks before dropping them -- so rows under a 40px symbol would
+// sit 40px apart and change with every view. drawVariantRows() paints them itself, after vis has
+// drawn the graph, at VAR_PX on screen with a fixed pitch, whatever the zoom, font slider or gene.
 function showVars(){return LABEL_KINDS.has('variant');}
 function varsDrawn(id){const v=VARS[id];if(!v)return [];
  const mx=parseInt((document.getElementById('varmax')||{}).value)||0, mn=parseInt((document.getElementById('varmin')||{}).value)||1;
  const keep=v.filter(x=>x[1]>=mn).map(x=>x[0]);return mx?keep.slice(0,mx):keep;}
+// the text rows of one gene: three variants to a row, then "+N more" for everything not drawn
+function varRows(id){const v=varsDrawn(id);if(!v.length)return [];
+ const rows=[];for(let i=0;i<v.length;i+=3)rows.push(v.slice(i,i+3).join('  '));
+ const more=(VARS[id]||[]).length-v.length;if(more>0)rows.push('+'+more+' more');
+ return rows;}
+const VAR_PITCH=1.3;   // row pitch, in multiples of VAR_PX: 13px between baselines at 10px
+function drawVariantRows(ctx){
+ if(!showVars()||LABEL_A!==1||!NODEDS)return;
+ const sc=network.getScale();if(!(sc>0))return;
+ const px=VAR_PX/sc, pitch=px*VAR_PITCH, nodes=network.body.nodes;
+ ctx.save();ctx.font=px+'px Consolas,Menlo,monospace';ctx.fillStyle='#3d4a5c';ctx.textAlign='center';ctx.textBaseline='top';
+ NODEDS.getIds().forEach(id=>{if((KIND[id]||'gene')!=='gene')return;
+  const rows=varRows(id);if(!rows.length)return;
+  const n=nodes[id];if(!n||n.options.hidden||!n.shape)return;
+  // start just under the drawn symbol: the label's own box (top + height). The node's boundingBox
+  // is not enough -- for a dot it reaches only about halfway down the label below it.
+  const L=n.labelModule&&n.labelModule.size, b=n.shape.boundingBox;
+  let y=(L&&L.height>0?L.top+L.height:(b?b.bottom:n.y))+px*0.2;
+  rows.forEach(r=>{ctx.fillText(r,n.x,y);y+=pitch;});});
+ ctx.restore();}
 function nodeFont(kind,base){
  const f={size:screenPx(base)/Math.max(ZSCALE,1e-3)};   // screen px -> canvas units at this zoom
  if(kind==='disease')f.face=NARROW_FACE;
  if(kind==='chemical'){f.face=NARROW_FACE;f.multi='html';f.ital={face:NARROW_FACE,mod:'italic'};}
- if((kind||'gene')==='gene'&&showVars()){f.multi='html';f.mono={face:'Consolas,Menlo,monospace',size:Math.max(f.size*0.5,9/Math.max(ZSCALE,1e-3)),color:'#3d4a5c'};}
  return f;
 }
 function nodeLabel(n){return labelFor(n.id,n.kind||'gene',n.label);}
 function applyLabelKinds(){
  if(!NODEDS)return;
  NODEDS.update(NODEDS.get().map(n=>{const k=KIND[n.id]||'gene';return {id:n.id,label:labelFor(n.id,k),font:nodeFont(k,n._fs||11)};}));
+ if(network)network.redraw();   // the variant rows are painted, not labels: repaint them too
 }
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?2:v;}
 function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?2:v;}
@@ -2811,6 +2832,7 @@ function build(thr){
  if(network)network.destroy();
  network=new vis.Network(net,data,options);
  padInhibitionBars(network);
+ network.on('afterDrawing',drawVariantRows);
  LABEL_N=nodes.length; LABEL_A=-1;
  // reshape once physics is off, so nothing pulls the moved nodes back, and fit afterwards so the
  // new positions are inside the view. BASEPOS is captured first: it is the layout to replay from.

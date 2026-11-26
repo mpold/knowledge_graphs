@@ -42,7 +42,9 @@ that is not one change (*p.L19,858R*, a patient carrying two). The type is set i
 `gpu_bundle/variants.py` (`hgvs_type`), and `summaries/gene_variants.md` / `.tsv` carry it too.
 
 The *Variants* button (next to *Disease names* / *Drug names*) writes the variants into the gene
-nodes themselves, under the symbol in a small monospace face, most-reported first. Two selectors
+nodes themselves, under the symbol in a monospace face, most-reported first, three to a row. They
+are always 10 px on screen with rows 13 px apart, whatever the zoom, the *Font size* slider or the
+size of the gene's symbol. Two selectors
 below it act only while *Variants* is on (they are greyed out otherwise): *Draw up to N variants
 per gene* (3, 5, 10, 20 or all) caps how many a node shows, and *each in ≥ N papers* (1, 2, 5, 10,
 50) hides variants fewer papers report. "+N more" under a node counts everything not drawn, the
