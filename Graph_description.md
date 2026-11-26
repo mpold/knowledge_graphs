@@ -43,7 +43,7 @@ that is not one change (*p.L19,858R*, a patient carrying two). The type is set i
 
 The *Variants* button (next to *Disease names* / *Drug names*) writes the variants into the gene
 nodes themselves, under the symbol in a monospace face, most-reported first, three to a row. They
-are always 10 px on screen with rows 13 px apart, whatever the zoom, the *Font size* slider or the
+are always 12 px on screen with rows 15.6 px apart, whatever the zoom, the *Font size* slider or the
 size of the gene's symbol. Two selectors
 below it act only while *Variants* is on (they are greyed out otherwise): *Draw up to N variants
 per gene* (3, 5, 10, 20 or all) caps how many a node shows, and *each in ≥ N papers* (1, 2, 5, 10,
@@ -55,6 +55,44 @@ click, or a click on a node or edge, gives the box back. Each gene unfolds to it
 grouped by level and type, and "not in the current view" marks a gene the filters hide.
 *Search gene or variant* takes a variant too (*T790M*, *p.T790M*, *c.2573T>G*): it selects every
 gene carrying it and lists them with their paper counts.
+
+**AMP/ASCO/CAP actionability** — variants that CIViC (civicdb.org, CC0) knows carry an AMP/ASCO/CAP
+tier with its sub-tier (Li et al., *J Mol Diagn* 2017): **Tier I-A** and **I-B** (Level A or B
+evidence, in two reds, darker for A) or **Tier II-C** and **II-D** (Level C or D, in two ambers). The
+click panel shows it as a badge, each gene's *AMP* row counts the variants per sub-tier, and on the
+canvas the variant is drawn in its sub-tier's colour with the sub-tier, *p.T790M[I-A]*. *only AMP
+Tier I / II variants*, under the two selectors, draws the actionable ones alone, and *only AMP Tier
+IV variants* below it the benign or likely benign ones alone (ticking one clears the other); the
+**i** explains the tiers and levels. Unfolding a variant shows the basis of its tier — significance, disease,
+therapies and CIViC link — and its strongest evidence items; each gene's summary gains an *AMP* row,
+and the tooltip lists the tiered variants. How the tier is set (`gpu_bundle/actionability.py`, step
+4c):
+
+- a CIViC curated **assertion** with an AMP category is used as it stands (*EGFR T790M*: Tier I,
+  Level A, osimertinib in NSCLC);
+- otherwise the best accepted **evidence item** that supports a predictive, diagnostic or
+  prognostic significance and is not germline sets it, CIViC level A → Tier I-A, B → I-B,
+  C → II-C, D or E → II-D;
+- evidence filed under a profile that combines variants counts for each of them, and the profile is
+  shown with it: *ABL1 T315I* is Tier I-B as imatinib resistance in CML because CIViC files it under
+  *BCR::ABL1 Fusion AND ABL1 T315I*.
+
+- a variant without such evidence is **Tier IV** (benign or likely benign, green, *[IV]*) when its
+  allele reaches **1%** in gnomAD, overall or in a population of gnomAD's grpmax (the small and
+  founder groups — Amish, Ashkenazi Jewish, Finnish, Middle Eastern, other — are left out, as
+  gnomAD leaves them out), and **Tier III** (unknown clinical significance, grey, *[III]*)
+  otherwise. Frequencies come from MyVariant.info by the rsID tmVar gave the variant, using the
+  allele whose protein or cDNA change is the variant's (an rsID can name several: rs1042522 is
+  TP53 P72H, P72L and P72R). *TP53 p.P72R*, *EGFR p.R521K* and *ERBB2 p.I655V* come out Tier IV.
+
+A Tier I/II tier is a statement about a variant **in a tumour type**: Level A/B evidence in another
+tumour type counts as Level C. So read every such tier together with its disease. AMP grades only
+the evidence behind Tiers I and II; **Tiers III and IV have no sub-tiers**, and none is made up here.
+The click panel gives each Tier III/IV variant its basis: the gnomAD frequency, "not in gnomAD", or
+"no rsID". Over half the variants have no rsID from tmVar, so their Tier III rests on the missing
+CIViC evidence alone, with the frequency unchecked. Category variants such as *Exon 19 Deletion* or
+*Amplification* match no tmVar variant. On this corpus (4,093 variants, 315 in CIViC): I-A 45,
+I-B 55, II-C 104, II-D 62, III 3,704, IV 123.
 
 **Edges** — colour is the relation carried by most of its sentences *in view*: `activates`
 green, `inhibits` red, `binds` blue, `interacts` purple, `associated` grey, negations amber and

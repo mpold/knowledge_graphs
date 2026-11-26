@@ -11,6 +11,8 @@ env/
 gpu_bundle/databases/*.json
 gpu_bundle/databases/*.tsv
 gpu_bundle/databases/*.txt
+# CIViC nightly exports, downloaded by gpu_bundle/actionability.py (step 4c)
+gpu_bundle/databases/civic/
 # NER corpus assembled by step 1 (thousands of XML, ~1 GB).
 gpu_bundle/experimental_ner/
 # Trained model checkpoints + their converted TSVs produced by stage-2 steps 1-2.

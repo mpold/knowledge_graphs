@@ -6,7 +6,7 @@ A biomedical relation-extraction pipeline: from a single **PubMed query** to an 
 | Stage | What | Where it runs | Entry point |
 |------:|------|---------------|-------------|
 | **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (11 steps over 10 root scripts) |
-| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (20 steps + 4b; 18 + 4b when the trained models are reused) |
+| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (20 steps + 4b/4c; 18 + 4b/4c when the trained models are reused) |
 | **3** | Triples → high-confidence gene / disease / chemical **graph** | local | `high_confidence_g.py` |
 
 Each stage hands off to the next **by files**. Rendered walk-throughs of every stage ship with
@@ -58,7 +58,7 @@ the steps without running anything.
 | Python   | 3.9+                                                                                  | 3.9+                                                   | 3.9+                 |
 | Packages | `requests`                                                                            | `torch`, `transformers`, `datasets<4`, `bioc`, `numpy`, `lxml` | *stdlib only*        |
 | Hardware | any                                                                                   | **CUDA GPU** (CPU = very slow)                         | any                  |
-| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCIt, NCBI PubTator3    | optional (vis-network) |
+| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCIt, NCBI PubTator3, CIViC | optional (vis-network) |
 | Extra    | **Docker + GROBID** (for `grobid_xml.py`); *optional* local XML archive (steps 1b/6b) | ontology DB files (below)                              | *optional* OncoKB, Cellosaurus and ontology files (below) |
 
 Full details per script are in the `step_*.html` docs and `requirements.html`.
@@ -179,7 +179,7 @@ and `pub_year_xml.py` as 6c.
 
 ### Stage 2 — triples / GPU bundle (Kaggle or local GPU)
 `gpu_bundle/gpu.py` orchestrates a 20-step chain plus step 4b (RE-model training ×2 → **drug
-lexicon** → publication years → **sequence variants** (4b) → BioBERT NER → GENETIC/DISEASE/CHEMICAL normalization → rule triples → learned relation extraction
+lexicon** → publication years → **sequence variants** (4b) → **AMP actionability** (4c) → BioBERT NER → GENETIC/DISEASE/CHEMICAL normalization → rule triples → learned relation extraction
 → model comparison → scores by publication year → **zip**) in one working directory. See
 [`Step_2_updated_triples.html`](Step_2_updated_triples.html) for the two BioRED steps and
 [`step_2_triples.html`](step_2_triples.html) for the original 16.
@@ -190,7 +190,7 @@ lexicon** → publication years → **sequence variants** (4b) → BioBERT NER �
    `ppi-biobert-re/`, `ppi_data/`, `biored-biobert-re/`, `biored_data/`, which make the gate
    skip steps 1–2; see below).
 2. *Settings → Accelerator → GPU T4 x2* (both cards are used; see *Multi-GPU* below) and
-   enable *Internet* (model training, the drug lexicon and the variants step 4b need it).
+   enable *Internet* (model training, the drug lexicon and the variant steps 4b/4c need it).
 3. In a cell: `!pip install -q 'datasets<4' bioc` then `!python gpu.py` (from the dataset dir).
    (`bioc` is what the BigBIO loading script for **BioRED** needs — that corpus is BioC XML;
    without it step 2 fails with `ModuleNotFoundError: No module named 'bioc'`.)
@@ -198,7 +198,7 @@ lexicon** → publication years → **sequence variants** (4b) → BioBERT NER �
 
 **Locally:** `cd gpu_bundle && python gpu.py`. Needs the GPU deps and the DB files present;
 preview with `python gpu_bundle/gpu.py --list`. The list is numbered over the steps that will
-run, so with the training steps skipped it shows 1–18; step numbers in this README are the full 1–20 (plus 4b).
+run, so with the training steps skipped it shows 1–18; step numbers in this README are the full 1–20 (plus 4b and 4c).
 
 **Output.** `kaggle_working.zip`, the zipped run directory. What matters in it:
 
@@ -211,6 +211,7 @@ run, so with the training steps skipped it shows 1–18; step numbers in this RE
 | `sentences/` | one JSON per document | stage 3 |
 | `databases/pmc_years.json` | publication years | stage 3 |
 | `VARIANT/variants.json` | sequence variants per gene (HGVS p./c./g./r., tmVar 3 via PubTator3; step 4b, internet) | stage 3 |
+| `VARIANT/actionability.json` | AMP/ASCO/CAP tier and CIViC evidence of those variants (step 4c, internet) | stage 3 |
 | `summaries/` | `sentences`, `compare_re`, `triples_per_year` (and, when trained, the two calibration reports) | — |
 
 **How a triple is scored.** `score = P × NER × cue × result × section × self`, at most 1: the
@@ -395,6 +396,7 @@ Other options: `--score` (cutoff of the exported JSON, default 0.8; the graph al
 | `databases/pmc_years.json` | no | publication years |
 | `databases/oncokb_cancerGeneList.tsv` | no | Oncogene / Tumor suppressor buttons |
 | `VARIANT/variants.json` | no | variants listed on gene nodes, search by variant |
+| `VARIANT/actionability.json` | no | AMP/ASCO/CAP tiers of those variants (CIViC) |
 | `databases/` HGNC, ChEBI, `ncit_drugs.json`, `cellosaurus.txt` (or in `gpu_bundle/databases/`) | no | screening look-alike names out of *Candidate driver* |
 | `summaries/pubmed_query.html` (or in the bundle root) | no | the query shown on the page |
 
@@ -450,8 +452,8 @@ graph's genes (EGFR 647, KIT 288, ABL1 223, TP53 216, ALK 177, MET 124). On the 
 
 - hovering a gene shows its most-reported variants and its summary by HGVS type; clicking it lists
   them all, grouped by level and type, with rsID (linked to dbSNP) and the papers behind each;
-- *Variants* (under *Draw names for*) writes them under each gene symbol — always 10 px, rows
-  13 px apart, in any view — capped by *Draw up to N variants per gene, each in ≥ N papers*;
+- *Variants* (under *Draw names for*) writes them under each gene symbol — always 12 px, rows
+  15.6 px apart, in any view — capped by *Draw up to N variants per gene, each in ≥ N papers*;
 - *List every gene's variants* fills the details box with every gene's list;
 - the gene search also takes a variant (*T790M*, *c.2573T>G*) and selects the genes carrying it.
 
@@ -467,6 +469,32 @@ PubTator3's gene assignment is not perfect: `variants.py` moves MET's variants b
 (alias "Met") and drops zero-padded sample codes, but a few small lists outside the kinase field
 still hold variants filed under the wrong gene. [`Graph_description.md`](Graph_description.md)
 has the details.
+
+**AMP/ASCO/CAP actionability.** Stage-2 step 4c (`gpu_bundle/actionability.py`) downloads the
+CIViC nightly exports (CC0, into `databases/civic/`, reused for 7 days; `--refresh` refetches) and
+gives every corpus variant CIViC knows an AMP/ASCO/CAP tier: a CIViC curated assertion's AMP
+category where there is one, else the best accepted somatic predictive / diagnostic / prognostic
+evidence item, read A → Tier I-A, B → I-B, C → II-C, D/E → II-D. Evidence under a combined profile
+(*BCR::ABL1 Fusion AND ABL1 T315I*) counts for each of its variants, with the profile kept. A tier
+holds in the disease of its evidence, which is always shown with it. A variant without such evidence
+is Tier IV (benign / likely benign) when its allele reaches 1% in gnomAD — looked up by rsID on
+MyVariant.info, allele-matched, highest of overall and gnomAD's grpmax populations; cached in
+`VARIANT/gnomad_af.json` — and Tier III (unknown significance) otherwise; AMP gives Tiers III and IV
+no sub-tiers. On this corpus (4,093 variants, 315 in CIViC): I-A 45, I-B 55, II-C 104, II-D 62,
+III 3,704, IV 123 — e.g. EGFR T790M I-A (osimertinib, NSCLC), ABL1 T315I I-B (imatinib resistance,
+CML), ALK G1202R II-C (crizotinib resistance with an ALK fusion), TP53 P72R IV (gnomAD 0.75). Over
+half the variants have no rsID, so their Tier III is not frequency-checked. On the page every variant
+gets a tier badge (I-A, I-B reds; II-C, II-D ambers; III grey; IV green) and its basis in the click
+panel, is drawn in that colour on the canvas, and *only AMP Tier I / II variants* draws the
+actionable ones alone; `summaries/gene_variants.md` / `.tsv` carry the tier, its disease, therapies,
+population basis and CIViC link. Locally, after step 4b:
+
+```bash
+python gpu_bundle/actionability.py --root kaggle_working
+```
+
+OncoKB's levels would be the other source, but its variant data needs a licence and an API token,
+so it is not used.
 
 > **`high_confidence.py` has been removed.** The older "G_D_C" script (gene–gene *in a
 > disease/chemical context*, unsuffixed outputs) was deleted in `8f420f1`: it ignored
@@ -537,9 +565,10 @@ it is modified. Without one, stage 1 simply downloads everything.
 │                                                #   drug_direction, antibodies)
 ├── kaggle_snippets.py                           # stage 2: the notebook cells to paste on Kaggle
 ├── gpu_bundle/                                  # stage 2: the GPU pipeline
-│   ├── gpu.py                                   #   orchestrator (20 steps + 4b)
+│   ├── gpu.py                                   #   orchestrator (20 steps + 4b, 4c)
 │   ├── drug_lexicon.py                          #   NCIt drug lexicon: builder + matcher (step 3)
 │   ├── variants.py                              #   variants per gene from PubTator3 / tmVar 3 (step 4b)
+│   ├── actionability.py                         #   AMP/ASCO/CAP tiers of those variants from CIViC (step 4c)
 │   ├── requirements.txt                         #   GPU deps: torch/transformers/datasets<4/bioc/numpy/lxml
 │   ├── direction.py                             #   who acts on whom (used by stage 2 and stage 3)
 │   ├── constructs.py, drug_direction.py,        #   corrections applied by stage 3 only

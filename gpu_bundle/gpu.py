@@ -5,7 +5,7 @@ entity normalization -> base triples -> learned relation extraction) as ONE step
 on Kaggle (or locally). GPU-enabled for the model-training, NER and
 relation-extraction steps.
 
-Orchestrates twenty-one steps in dependency order:
+Orchestrates twenty-two steps in dependency order:
 
     1  run_re_pipeline.py train + calibrate the PPI relation model
                           (BigBIO bioinfer -> ppi-biobert-re/)   GPU, internet [gated]
@@ -15,6 +15,8 @@ Orchestrates twenty-one steps in dependency order:
                          CPU  [optional, internet]
     4  pub_years.py      <?pub-year?> stamps in experimental_ner/ -> pmc_years.json  CPU  [optional]
     4b variants.py       tmVar 3 variants per gene (NCBI PubTator3) -> VARIANT/variants.json
+                         CPU  [optional, internet]
+    4c actionability.py  AMP/ASCO/CAP tiers: I/II from CIViC, III/IV by gnomAD -> VARIANT/actionability.json
                          CPU  [optional, internet]
     5  sentences.py      BioBERT result-sentence selection + NER (experimental_ner/ -> sentences/)  GPU
     6  roman.py          GENETIC -> HGNC (roman key)                 CPU
@@ -134,7 +136,7 @@ Dependency / strategy notes:
   * triples_per_year.py (19) dates step 17's normalized triples by publication year
     (databases/pmc_years.json from step 4) and writes summaries/triples_per_year.html: a per-year box plot of the
     composite score, triple counts per year, and a score histogram. Offline.
-  * Steps 2, 3, 4, 4b, 16, 18 and 19 are OPTIONAL: if any fails (internet off, missing input,
+  * Steps 2, 3, 4, 4b, 4c, 16, 18 and 19 are OPTIONAL: if any fails (internet off, missing input,
     only one model trained) the orchestrator warns and CONTINUES.
   * zip_work.py (20, LAST) packs the whole working dir into kaggle_working.zip so the
     entire run is one download; it must run after every other step has written its output.
@@ -146,7 +148,7 @@ unmodified.
 
 KAGGLE USAGE
   1. Upload the project as a Kaggle Dataset (read-only at /kaggle/input/<ds>/):
-       the 21 step scripts above PLUS bigbio_to_re.py + train_re.py (run by
+       the 22 step scripts above PLUS bigbio_to_re.py + train_re.py (run by
                                                   run_re_pipeline.py in steps 1 and 2)
                                   AND calibration.py (shared: steps 1, 2 + step 17)
        experimental_ner/                             (XML corpus; sentences.py input)
@@ -261,6 +263,10 @@ STEPS = [
          optional=True, reads_sentences=False, reads_xml=True,
          desc="[internet] sequence variants per gene (HGVS p./c./g./r.) from NCBI PubTator3's "
               "tmVar 3 annotations of the corpus -> VARIANT/variants.json [optional]"),
+    dict(name="actionability", script="actionability.py", args=[], dbs=["hgnc"], gpu=False, models=[],
+         optional=True, reads_sentences=False,
+         desc="[internet] AMP/ASCO/CAP tiers of the step-4b variants: I/II from CIViC (CC0; downloaded to "
+              "databases/civic/), III/IV from gnomAD frequency (MyVariant.info) -> VARIANT/actionability.json [optional]"),
     dict(name="sentences", script="sentences.py", args=[], dbs=[], gpu=True, models=[], reads_xml=True,
          support=["drug_lexicon.py"],
          desc="[GPU] BioBERT result-sentence selection + NER over experimental_ner/ -> sentences/ "

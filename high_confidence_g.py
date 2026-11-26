@@ -1102,7 +1102,7 @@ def graph_payload_multi(triples, flags):
                       "tcat": tcat.get(nd, "other"),
                       **({"role": gene_role[nd]} if k == "gene" and nd in gene_role else {}),
                       # sequence variants of the gene, most-reported first:
-                      # [hgvs, n papers, rsID, [papers ...], HGVS type]
+                      # [hgvs, n papers, rsID, [papers ...], HGVS type, AMP annotation or None]
                       **({"var": gene_vars[nd]} if k == "gene" and nd in gene_vars else {}),
                       # surfaces by sentence count, most frequent first (at most 12)
                       **({"surf": [[w, len(ss)] for w, ss in sorted(node_surf[nd].items(),
@@ -1116,6 +1116,10 @@ def graph_payload_multi(triples, flags):
         lv = collections.Counter(v[0][0] for n in vn for v in n["var"])
         print(f"  variants (tmVar 3, PubTator3): {sum(len(n['var']) for n in vn):,} on {len(vn):,} "
               f"graph gene(s) -- " + ", ".join(f"{k}. {lv[k]:,}" for k in "pcgr"))
+        at = collections.Counter(amp_of(v) for n in vn for v in n["var"] if amp_of(v))
+        if at:
+            print("  AMP/ASCO/CAP tiers (CIViC) on graph variants: "
+                  + ", ".join(f"Tier {k} {at[k]:,}" for k in sorted(at)))
         write_variant_lists(nodes, GRAPH_OUT.parent)
     return {"nodes": nodes, "edges": edges}
 
@@ -1134,10 +1138,61 @@ def _gene_variants():
         print(f"  note: {VARIANTS} not found -- gene nodes list no variants "
               f"(run gpu_bundle/variants.py, step 4b)")
         return {}
+    amp = _amp_annotations()
     return {g: [[v["hgvs"], len(v["papers"]), v.get("rsid") or "", v["papers"][:VAR_PAPERS],
-                 v.get("type") or VT.hgvs_type(v["hgvs"])]
+                 v.get("type") or VT.hgvs_type(v["hgvs"]), amp.get(g, {}).get(v["hgvs"])]
                 for v in vs if v.get("hgvs")]
             for g, vs in genes.items()}
+
+
+AMP_ITEMS = 8       # CIViC evidence items carried per variant onto the page (counts stay complete)
+
+
+def _amp_annotations():
+    """{gene: {hgvs: compact AMP annotation}} from VARIANT/actionability.json (gpu_bundle/
+    actionability.py, step 4c: CIViC evidence and the AMP/ASCO/CAP tier it supports). The compact
+    form, entry [5] of a page variant: {t: 'I-A' | None, s: 'assertion' | 'evidence', b: [profile,
+    disease, therapies, significance, type, url] of the tier's basis, u: CIViC variant URL, n:
+    evidence items, lv: {level: n}, ev: [[level, type, significance, disease, therapies, profile,
+    url], ...]}. Missing file -> {} with a note: variants then carry no tier."""
+    path = VARIANTS.parent / "actionability.json"
+    try:
+        genes = json.loads(path.read_text(encoding="utf-8")).get("genes", {})
+    except (OSError, ValueError):
+        print(f"  note: {path} not found -- variants carry no AMP tier "
+              f"(run gpu_bundle/actionability.py, step 4c)")
+        return {}
+    out = {}
+    for g, vs in genes.items():
+        for h, r in vs.items():
+            b = r.get("basis") or {}
+            if r.get("source") == "population":      # Tier III / IV: no evidence, a frequency basis
+                out.setdefault(g, {})[h] = {"t": r["tier"], "s": "population", "a": r.get("af_basis", ""),
+                                            "u": r.get("civic_url", ""), "n": r.get("n_evidence", 0),
+                                            "lv": r.get("evidence_levels", {}), "ev": []}
+                continue
+            out.setdefault(g, {})[h] = {
+                "t": f"{r['tier']}-{r['level']}" if r.get("tier") and r.get("level") else r.get("tier"),
+                "s": r.get("source", ""),
+                "b": [b.get(k, "") for k in ("profile", "disease", "therapies", "significance", "type", "url")],
+                "u": r.get("civic_url", ""), "n": r.get("n_evidence", 0), "lv": r.get("evidence_levels", {}),
+                "ev": [[e["level"], e["type"], e["significance"], e["disease"], e["therapies"],
+                        e.get("profile", ""), e["url"]] for e in r.get("evidence", [])[:AMP_ITEMS]]}
+    return out
+
+
+AMP_ORDER = ("I-A", "I-B", "II-C", "II-D", "III", "IV")
+
+
+def amp_of(v):
+    """'I-A', 'I-B', 'II-C', 'II-D', 'III', 'IV' for a page variant entry, or '' without step 4c."""
+    a = v[5] if len(v) > 5 else None
+    return (a or {}).get("t") or ""
+
+
+def actionable(v):
+    """True for Tier I and II (clinical evidence), not III (unknown) or IV (benign)."""
+    return amp_of(v) in AMP_ORDER[:4]
 
 
 def type_summary(var):
@@ -1165,22 +1220,47 @@ def write_variant_lists(nodes, out_dir):
     tot = sum(len(n["var"]) for n in genes)
     with open(out_dir / "gene_variants.tsv", "w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh, delimiter="\t")
-        w.writerow(["gene", "level", "type", "hgvs", "papers", "rsid"])
+        w.writerow(["gene", "level", "type", "hgvs", "papers", "rsid", "amp_tier", "amp_source",
+                    "amp_profile", "amp_disease", "amp_therapies", "amp_significance", "population_basis",
+                    "civic_evidence", "civic_url"])
         for n in genes:
             for v in n["var"]:
-                w.writerow([n["id"], v[0][0], v[4], v[0], v[1], v[2]])
+                a = v[5] or {}
+                b = a.get("b") or [""] * 6
+                w.writerow([n["id"], v[0][0], v[4], v[0], v[1], v[2], a.get("t") or "",
+                            a.get("s", "") if a.get("t") else "", b[0], b[1], b[2], b[3], a.get("a", ""),
+                            a.get("n", "") if a else "", a.get("u", "")])
+    n_amp = collections.Counter(amp_of(v) for n in genes for v in n["var"] if amp_of(v))
     lines = ["# Variants per gene node", "",
              f"{len(genes)} gene nodes of the graph, {tot:,} unique variants (tmVar 3 via NCBI "
-             f"PubTator3). Genes by number of variants; each gene's summary by HGVS level and type, "
-             f"then its variants by number of papers (in parentheses).", ""]
+             f"PubTator3). AMP/ASCO/CAP tiers: "
+             + ", ".join(f"Tier {t} {n_amp[t]:,}" for t in AMP_ORDER)
+             + ". Tiers I and II (with their evidence levels) come from CIViC; a variant without such "
+             f"evidence is Tier IV when its allele reaches 1% in gnomAD (overall or a grpmax "
+             f"population), else Tier III; Tiers III and IV have no levels. Genes by number of variants; "
+             f"each gene's summary by HGVS level and type and by tier, its Tier I/II variants with their "
+             f"evidence, then all its variants by number of papers (in parentheses) with [tier]. A Tier "
+             f"I/II tier holds in the disease of its evidence.", ""]
     for n in genes:
         lines += [f"## {n['id']} — {len(n['var'])}", ""]
         for lv, cnt, ty in type_summary(n["var"]):
             lines.append(f"- **{lv}.** {cnt}: " + ", ".join(f"{t} {c}" for t, c in ty))
+        nt = collections.Counter(amp_of(v) for v in n["var"] if amp_of(v))
+        if nt:
+            lines.append("- **AMP**: " + ", ".join(f"Tier {t} {nt[t]}" for t in AMP_ORDER if nt[t]))
+        tiered = sorted((v for v in n["var"] if actionable(v)), key=lambda v: (AMP_ORDER.index(amp_of(v)), -v[1]))
+        if tiered:
+            lines.append(f"- **Tier I / II** ({len(tiered)}):")
+            for v in tiered:
+                b = v[5]["b"]
+                ctx = f" — in {b[0]}" if b[0] and " AND " in b[0] else ""
+                lines.append(f"  - {v[0]} **Tier {amp_of(v)}** ({v[5]['s']}): {b[4]} {b[3]}, "
+                             f"{b[1]}{(' — ' + b[2]) if b[2] else ''}{ctx}")
         lines.append("")
         for lv, _, ty in type_summary(n["var"]):
             for t, c in ty:
-                vs = [f"{v[0]} ({v[1]})" for v in n["var"] if v[0][0] == lv and v[4] == t]
+                vs = [f"{v[0]} ({v[1]}){(' [' + amp_of(v) + ']') if amp_of(v) else ''}"
+                      for v in n["var"] if v[0][0] == lv and v[4] == t]
                 lines += [f"**{lv}. {t}** ({c}): " + ", ".join(vs), ""]
     (out_dir / "gene_variants.md").write_text("\n".join(lines), encoding="utf-8")
     print(f"  variant lists -> {out_dir / 'gene_variants.md'}, gene_variants.tsv")
@@ -1435,6 +1515,13 @@ __LIBTAG__
  #info details.var summary{cursor:pointer} #info details.var code{font-size:12px;color:#1c2330}
  #info details.var .pm{margin-top:2px}
  #info .vtyp{margin:3px 0 1px 6px;font-style:italic;color:#3d4a5c}
+ /* AMP/ASCO/CAP tier badges (CIViC): Tier I red, Tier II amber; the evidence under a variant */
+ .amp{display:inline-block;font-size:11px;font-weight:600;border-radius:4px;padding:0 4px;margin-left:4px;vertical-align:1px}
+ /* one colour per sub-tier, darkest for the strongest evidence: I-A, I-B reds; II-C, II-D ambers */
+ .ampIA{background:#fecdca;color:#912018} .ampIB{background:#fee4e2;color:#d92d20}
+ .ampIIC{background:#fef0c7;color:#b54708} .ampIID{background:#fef7c3;color:#7a5c00}
+ .ampIII{background:#eaecf0;color:#475467} .ampIV{background:#dcfae6;color:#067647}
+ #info .ampd{margin:3px 0 4px 6px;padding-left:6px;border-left:2px solid #e3e3e3} #info .ampe{margin-top:2px}
  #info table.vsum{border-collapse:collapse;margin:2px 0 4px} #info table.vsum td{padding:1px 8px 1px 0;vertical-align:top}
  /* one screen, two columns is a desktop luxury: on a phone they stack, one at each edge */
  @media (max-width:700px){
@@ -1457,8 +1544,16 @@ __LIBTAG__
   <div id="varopts" style="margin-top:4px">
    <div class="vrow">Draw up to <select id="varmax" aria-label="Most variants drawn per gene"><option>3</option><option selected>5</option><option>10</option><option>20</option><option value="0">all</option></select> variants per gene,</div>
    <div class="vrow">each in &ge; <select id="varmin" aria-label="Fewest papers a drawn variant must have"><option>1</option><option selected>2</option><option>5</option><option>10</option><option>50</option></select> papers <button class="ihelp" data-help="var" aria-label="About variants" aria-expanded="false">i</button></div>
+   <div class="vrow" id="varamprow"><label><input type="checkbox" id="varamp"> only AMP Tier I / II variants</label> <button class="ihelp" data-help="amp" aria-label="About AMP tiers" aria-expanded="false">i</button></div>
+   <div class="vrow" id="varamp4row"><label><input type="checkbox" id="varamp4"> only AMP Tier IV variants</label></div>
+   <div class="mut help" data-help="amp"><b>AMP/ASCO/CAP tiers</b> (Li et al., <i>J Mol Diagn</i> 2017) rank a somatic variant by the clinical evidence behind it &mdash; for a therapy (predictive), a diagnosis or a prognosis &mdash; in a given tumour type:
+    <br><b>Tier I</b> &mdash; strong clinical significance. <b style="color:#912018">Level A (I-A)</b>: an FDA-approved therapy or a professional guideline for this tumour type (e.g. EGFR T790M &rarr; osimertinib in NSCLC). <b style="color:#d92d20">Level B (I-B)</b>: well-powered clinical studies with expert consensus.
+    <br><b>Tier II</b> &mdash; potential clinical significance. <b style="color:#b54708">Level C (II-C)</b>: an approved therapy for a different tumour type, investigational therapies, or several small published studies. <b style="color:#7a5c00">Level D (II-D)</b>: preclinical studies or a few case reports.
+    <br><b style="color:#475467">Tier III</b> &mdash; unknown clinical significance: no convincing evidence of a cancer association, and not common in the population. <b style="color:#067647">Tier IV</b> &mdash; benign or likely benign: observed at significant allele frequency in the general population or a subpopulation. AMP grades the evidence behind Tiers I and II only, so Tiers III and IV have <b>no sub-tiers</b>.
+    <br>Tiers I and II come from <b>CIViC</b> (civicdb.org): a curated CIViC assertion&rsquo;s AMP category where one exists, otherwise the best supporting CIViC evidence item, its level read as AMP&rsquo;s (A &rarr; I-A, B &rarr; I-B, C &rarr; II-C, D or E &rarr; II-D). Resistance counts as much as sensitivity. A tier holds <b>in the disease of its evidence</b> &mdash; Level A or B in another tumour type is only Level C &mdash; so read it with the disease and therapies the click panel shows.
+    <br>A variant without such evidence is <b>Tier IV</b> when its allele reaches <b>1%</b> in gnomAD (via MyVariant.info, by the variant&rsquo;s rsID), overall or in any population gnomAD counts in its grpmax &mdash; the small and founder groups (Amish, Ashkenazi Jewish, Finnish, Middle Eastern, other) are left out, as gnomAD does; otherwise <b>Tier III</b>. The click panel gives the basis: the gnomAD frequency, &ldquo;not in gnomAD&rdquo;, or &ldquo;no rsID&rdquo; &mdash; about half the variants have none, so their Tier III rests on the missing evidence alone, their frequency unchecked.</div>
    <div style="margin-top:4px"><button id="varall">List every gene&rsquo;s variants</button></div>
-   <div class="mut help" data-help="var"><b>Variants</b> writes each gene&rsquo;s sequence variants (HGVS p./c./g./r., tmVar 3 via NCBI PubTator3) under its symbol in a small monospace face, most-reported first. The two selectors only act while <b>Variants</b> is on (they are greyed out otherwise): <em>Draw up to</em> caps how many variants a gene node shows, and <em>each in &ge; N papers</em> hides variants fewer papers report. &ldquo;+N more&rdquo; under a node counts everything not drawn, the hidden ones included. With 5 and 2, EGFR shows its five most-reported variants (p.T790M, p.L858R, p.C797S, p.L861Q, p.G719X) and &ldquo;+642 more&rdquo;. The tooltip and the click panel always show a gene&rsquo;s full list. <b>List every gene&rsquo;s variants</b> leaves the canvas alone and fills the details box with all genes that have variants, most first; click a gene there to unfold its summary by HGVS type and its variants. &ldquo;not in the current view&rdquo; marks a gene your filters hide.</div>
+   <div class="mut help" data-help="var"><b>Variants</b> writes each gene&rsquo;s sequence variants (HGVS p./c./g./r., tmVar 3 via NCBI PubTator3) under its symbol in a small monospace face, most-reported first. The two selectors only act while <b>Variants</b> is on (they are greyed out otherwise): <em>Draw up to</em> caps how many variants a gene node shows, and <em>each in &ge; N papers</em> hides variants fewer papers report. &ldquo;+N more&rdquo; under a node counts everything not drawn, the hidden ones included. With 5 and 2, EGFR shows its five most-reported variants (p.T790M, p.L858R, p.C797S, p.L861Q, p.G719X) and &ldquo;+642 more&rdquo;. The tooltip and the click panel always show a gene&rsquo;s full list. <b>AMP/ASCO/CAP tiers</b> (step 4c): every variant is drawn with its tier, in its colour: <b style="color:#912018">[I-A]</b> and <b style="color:#d92d20">[I-B]</b> (Tier I, Level A or B evidence), <b style="color:#b54708">[II-C]</b> and <b style="color:#7a5c00">[II-D]</b> (Tier II, Level C or D), both from CIViC, e.g. p.T790M[I-A]; <b style="color:#475467">[III]</b> unknown significance and <b style="color:#067647">[IV]</b> benign or likely benign, set by gnomAD frequency, e.g. TP53 p.P72R[IV]. <em>only AMP Tier I / II variants</em> draws the first four alone, <em>only AMP Tier IV variants</em> the benign or likely benign ones alone (ticking one clears the other); the <b>i</b> beside them explains the tiers. <b>List every gene&rsquo;s variants</b> leaves the canvas alone and fills the details box with all genes that have variants, most first; click a gene there to unfold its summary by HGVS type and its variants. &ldquo;not in the current view&rdquo; marks a gene your filters hide.</div>
   </div></div></div>
  <div class="row" id="viewhead" style="margin-bottom:2px"><b style="color:#1c2330">Graph view options:</b></div>
  <div class="optbox">
@@ -1673,7 +1768,7 @@ function labelOpacity(sc){ return 1; }
 // floor, a small one at zoom 1 drew busy genes at 96px, and the same 50% slider looked nothing
 // alike from one filter to the next. ZSCALE is the zoom the fonts were last sized for.
 const LABEL_MIN_PX=8;
-const VAR_PX=10;   // the variant lines under a gene symbol: a fixed on-screen size in every view
+const VAR_PX=12;   // the variant lines under a gene symbol: a fixed on-screen size in every view
 let ZSCALE=1, zoomTimer=null;
 // on-screen px for a base size (kindFontSize(): 9-24 for genes, 8.8-19 for chemicals and
 // diseases): the slider stretches the part above the 8px floor, so 50% shows the base sizes,
@@ -2260,13 +2355,45 @@ function varTypes(id){const v=VARS[id]||[],out=[];
   if(ts.length)out.push([k,ts.reduce((t,s)=>t+c[s],0),ts.map(s=>[s,c[s]])]);});
  return out;}
 function typeLine(id){return varTypes(id).map(([k,n,ts])=>k+'. '+n+' ('+ts.map(([t,c])=>t+' '+c).join(', ')+')').join('; ');}
-function varLine(id){const v=VARS[id];if(!v||!v.length)return '';
+// AMP/ASCO/CAP tier of a variant entry (x[5], gpu_bundle/actionability.py): 'I-A', 'I-B', 'II-C',
+// 'II-D' (CIViC evidence), 'III' or 'IV' (no such evidence; gnomAD frequency decides), '' without 4c
+function ampT(x){return (x[5]&&x[5].t)||'';}
+// order and colour per tier (KEEP IN STEP with the .ampIA ... CSS badges): I-A, I-B reds; II-C,
+// II-D ambers; III grey (unknown significance); IV green (benign or likely benign)
+const AMP_SUB=['I-A','I-B','II-C','II-D','III','IV'];
+const AMP_COL={'I-A':'#912018','I-B':'#d92d20','II-C':'#b54708','II-D':'#7a5c00','III':'#475467','IV':'#067647'};
+const AMP_WHAT={III:'unknown clinical significance',IV:'benign or likely benign'};
+function ampCls(t){return 'amp amp'+t.replace('-','');}
+function actionableV(x){return AMP_SUB.indexOf(ampT(x))>=0&&AMP_SUB.indexOf(ampT(x))<4;}
+function ampBadge(x){const t=ampT(x);return t?' <span class="'+ampCls(t)+'" title="AMP/ASCO/CAP Tier '+esc(t)
+ +(x[5].s==='population'?' ('+AMP_WHAT[t]+'; '+esc(x[5].a||'')+')':' from CIViC ('+esc(x[5].s)+')')+'">Tier '+esc(t)+'</span>':'';}
+// the Tier I / II variants of a gene, best sub-tier first, then most-reported
+function ampVars(id){return (VARS[id]||[]).filter(actionableV).sort((a,b)=>AMP_SUB.indexOf(ampT(a))-AMP_SUB.indexOf(ampT(b))||b[1]-a[1]);}
+function varLine(id){const v=VARS[id];if(!v||!v.length)return '';const a=ampVars(id);
  return 'variants: '+v.slice(0,6).map(x=>x[0]+' ('+x[1]+')').join(', ')+(v.length>6?' … +'+(v.length-6)+' more':'')+' (papers)'
-  +String.fromCharCode(10)+'variant types: '+typeLine(id);}
+  +String.fromCharCode(10)+'variant types: '+typeLine(id)
+  +(a.length?String.fromCharCode(10)+'AMP tiers (CIViC): '+a.slice(0,6).map(x=>x[0]+' '+ampT(x)).join(', ')+(a.length>6?' … +'+(a.length-6)+' more':''):'');}
+const CIVIC_LINK=u=>u?' <a target=_blank rel=noopener href="'+esc(u)+'">CIViC</a>':'';
+// what CIViC says about a variant: the basis of its tier, then its strongest evidence items
+function ampDetail(x){const a=x[5];if(!a)return '';const b=a.b||[];
+ let h='<div class=ampd>';
+ if(a.s==='population'){
+  h+='<div><b>Tier '+esc(a.t)+'</b> &mdash; '+AMP_WHAT[a.t]+': no somatic predictive / diagnostic / prognostic evidence in CIViC; '
+   +esc(a.a||'')+(a.t==='IV'?' (&ge; 1%)':'')+'</div>';
+  if(a.n)h+='<div class=mut>CIViC evidence: '+a.n+' item'+(a.n===1?'':'s')+', none qualifying'+CIVIC_LINK(a.u)+'</div>';
+  return h+'</div>';}
+ if(a.t)h+='<div><b>Tier '+esc(a.t)+'</b> <span class=mut>('+(a.s==='assertion'?'CIViC curated assertion':'best CIViC evidence item')+')</span>: '
+  +esc(b[4]||'')+' '+esc(b[3]||'')+' &middot; '+esc(b[1]||'')+(b[2]?' &middot; <i>'+esc(b[2])+'</i>':'')
+  +(b[0]&&b[0].indexOf(' AND ')>=0?' <span class=mut>&middot; in '+esc(b[0])+'</span>':'')+CIVIC_LINK(b[5])+'</div>';
+ else h+='<div class=mut>In CIViC, but no supporting somatic predictive / diagnostic / prognostic evidence: no tier.</div>';
+ h+='<div class=mut>CIViC evidence: '+a.n+' item'+(a.n===1?'':'s')+(a.n?' (level '+Object.entries(a.lv||{}).map(([k,n])=>k+' '+n).join(', ')+')':'')+CIVIC_LINK(a.u)+'</div>';
+ (a.ev||[]).forEach(e=>{h+='<div class=ampe><b>'+esc(e[0])+'</b> '+esc(e[1])+' '+esc(e[2])+' &middot; '+esc(e[3])+(e[4]?' &middot; <i>'+esc(e[4])+'</i>':'')
+  +(e[5]&&e[5].indexOf(' AND ')>=0?' <span class=mut>&middot; '+esc(e[5])+'</span>':'')+CIVIC_LINK(e[6])+'</div>';});
+ return h+'</div>';}
 function varItem(x){const more=x[1]-x[3].length;
- return '<details class=var><summary><code>'+esc(x[0])+'</code> <span class=mut>'+x[1]+' paper'+(x[1]===1?'':'s')
+ return '<details class=var><summary><code>'+esc(x[0])+'</code>'+ampBadge(x)+' <span class=mut>'+x[1]+' paper'+(x[1]===1?'':'s')
   +(x[2]?' · <a target=_blank rel=noopener href="https://www.ncbi.nlm.nih.gov/snp/'+esc(x[2])+'">'+esc(x[2])+'</a>':'')+'</span></summary>'
-  +x[3].map(pmA).join(' ')+(more>0?' <span class=more>+'+more+' more</span>':'')+'</details>';}
+  +ampDetail(x)+x[3].map(pmA).join(' ')+(more>0?' <span class=more>+'+more+' more</span>':'')+'</details>';}
 function varPanel(id){const v=VARS[id];if(!v||!v.length)return '';
  let h='<div class=ihead style="margin-top:8px">Variants <span class=mut>(tmVar 3 · PubTator3, '+v.length+')</span></div>'+typeSummary(id);
  // then the variants themselves, by level and, within it, by type
@@ -2274,8 +2401,10 @@ function varPanel(id){const v=VARS[id];if(!v||!v.length)return '';
   ts.forEach(([t,c])=>{h+='<div class=vtyp>'+esc(t)+' — '+c+'</div>'+v.filter(x=>x[0].charAt(0)===k&&x[4]===t).map(varItem).join('');});});
  return h;}
 // a gene's variants counted by HGVS level and type: one line per level
-function typeSummary(id){
- return '<table class=vsum>'+varTypes(id).map(([k,n,ts])=>'<tr><td><b>'+k+'.</b> '+n+'</td><td>'+ts.map(([t,c])=>esc(t)+' <b>'+c+'</b>').join(' · ')+'</td></tr>').join('')+'</table>';}
+function typeSummary(id){const a=ampVars(id),c={};let nt=0;(VARS[id]||[]).forEach(x=>{const t=ampT(x);if(t){c[t]=(c[t]||0)+1;nt++;}});
+ return '<table class=vsum>'+varTypes(id).map(([k,n,ts])=>'<tr><td><b>'+k+'.</b> '+n+'</td><td>'+ts.map(([t,c])=>esc(t)+' <b>'+c+'</b>').join(' · ')+'</td></tr>').join('')
+  +(nt?'<tr><td><b>AMP</b> '+nt+'</td><td>'+AMP_SUB.filter(t=>c[t]).map(t=>'<span class="'+ampCls(t)+'">Tier '+t+'</span> <b>'+c[t]+'</b>').join(' · ')
+   +(a.length?'<br>Tier I / II: '+a.slice(0,8).map(x=>esc(x[0])+' <span class=mut>'+esc(ampT(x))+'</span>').join(', ')+(a.length>8?' …':''):'')+'</td></tr>':'')+'</table>';}
 // "T790M", "t790m", "p.T790M", "c.2573T>G" -> the genes carrying that variant. A change without a
 // prefix matches any level. Case is ignored: no two HGVS strings differ by case alone.
 function varGenes(q){q=q.replace(/\s+/g,'').toLowerCase();const want=/^[pcgr]\./.test(q)?[q]:['p.'+q,'c.'+q,'g.'+q,'r.'+q];
@@ -2547,20 +2676,25 @@ function labelFor(id,kind,text){
 // sit 40px apart and change with every view. drawVariantRows() paints them itself, after vis has
 // drawn the graph, at VAR_PX on screen with a fixed pitch, whatever the zoom, font slider or gene.
 function showVars(){return LABEL_KINDS.has('variant');}
+// the variant entries drawn under one gene: at least varmin papers, only Tier I/II (varamp) or only
+// Tier IV (varamp4) when one of those boxes is ticked, at most varmax of them (0 = all)
 function varsDrawn(id){const v=VARS[id];if(!v)return [];
  const mx=parseInt((document.getElementById('varmax')||{}).value)||0, mn=parseInt((document.getElementById('varmin')||{}).value)||1;
- const keep=v.filter(x=>x[1]>=mn).map(x=>x[0]);return mx?keep.slice(0,mx):keep;}
-// the text rows of one gene: three variants to a row, then "+N more" for everything not drawn
+ const amp=!!(document.getElementById('varamp')||{}).checked, amp4=!!(document.getElementById('varamp4')||{}).checked;
+ const keep=v.filter(x=>x[1]>=mn&&(!amp||actionableV(x))&&(!amp4||ampT(x)==='IV'));return mx?keep.slice(0,mx):keep;}
+// the rows of one gene: three variants to a row, each [text, colour]; a variant carries its tier
+// ("p.T790M[I-A]", "p.P72R[IV]") in that tier's colour; then "+N more" for everything not drawn
+const VAR_COL='#3d4a5c';
 function varRows(id){const v=varsDrawn(id);if(!v.length)return [];
- const rows=[];for(let i=0;i<v.length;i+=3)rows.push(v.slice(i,i+3).join('  '));
- const more=(VARS[id]||[]).length-v.length;if(more>0)rows.push('+'+more+' more');
+ const rows=[];for(let i=0;i<v.length;i+=3)rows.push(v.slice(i,i+3).map(x=>{const t=ampT(x);return [x[0]+(t?'['+t+']':''),t?AMP_COL[t]:VAR_COL];}));
+ const more=(VARS[id]||[]).length-v.length;if(more>0)rows.push([['+'+more+' more',VAR_COL]]);
  return rows;}
-const VAR_PITCH=1.3;   // row pitch, in multiples of VAR_PX: 13px between baselines at 10px
+const VAR_PITCH=1.3;   // row pitch, in multiples of VAR_PX: 15.6px between baselines at 12px
 function drawVariantRows(ctx){
  if(!showVars()||LABEL_A!==1||!NODEDS)return;
  const sc=network.getScale();if(!(sc>0))return;
- const px=VAR_PX/sc, pitch=px*VAR_PITCH, nodes=network.body.nodes;
- ctx.save();ctx.font=px+'px Consolas,Menlo,monospace';ctx.fillStyle='#3d4a5c';ctx.textAlign='center';ctx.textBaseline='top';
+ const px=VAR_PX/sc, pitch=px*VAR_PITCH, gap=px*1.2, nodes=network.body.nodes;
+ ctx.save();ctx.font=px+'px Consolas,Menlo,monospace';ctx.textAlign='left';ctx.textBaseline='top';
  NODEDS.getIds().forEach(id=>{if((KIND[id]||'gene')!=='gene')return;
   const rows=varRows(id);if(!rows.length)return;
   const n=nodes[id];if(!n||n.options.hidden||!n.shape)return;
@@ -2568,7 +2702,9 @@ function drawVariantRows(ctx){
   // is not enough -- for a dot it reaches only about halfway down the label below it.
   const L=n.labelModule&&n.labelModule.size, b=n.shape.boundingBox;
   let y=(L&&L.height>0?L.top+L.height:(b?b.bottom:n.y))+px*0.2;
-  rows.forEach(r=>{ctx.fillText(r,n.x,y);y+=pitch;});});
+  // each row is centred under the node; its variants are drawn one by one, each in its colour
+  rows.forEach(r=>{const w=r.map(s=>ctx.measureText(s[0]).width);let x=n.x-(w.reduce((a,c)=>a+c,0)+gap*(r.length-1))/2;
+   r.forEach((s,i)=>{ctx.fillStyle=s[1];ctx.fillText(s[0],x,y);x+=w[i]+gap;});y+=pitch;});});
  ctx.restore();}
 function nodeFont(kind,base){
  const f={size:screenPx(base)/Math.max(ZSCALE,1e-3)};   // screen px -> canvas units at this zoom
@@ -2921,14 +3057,21 @@ document.querySelectorAll('.lblb').forEach(b=>b.addEventListener('click',()=>{
  applyLabelKinds();}));
 // the two variant selectors act only while Variants is on: greyed out and disabled otherwise
 function updVarOpts(){const on=showVars();
- ['varmax','varmin'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=!on;});
+ ['varmax','varmin','varamp','varamp4'].forEach(id=>{const e=document.getElementById(id);if(e)e.disabled=!on;});
  document.querySelectorAll('#varopts .vrow').forEach(r=>r.classList.toggle('off',!on));}
 updVarOpts();
 // variant lines: the two selectors relabel in place; "List every gene's variants" fills the details
 // box. It toggles like the other buttons: on (blue) while its list is in the box, off when clicked
 // again (the box returns to its prompt) or when anything else -- a node, an edge, a search --
 // takes the box over, which the observer below notices by the list's id being gone.
-['varmax','varmin'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{if(showVars())applyLabelKinds();}));
+['varmax','varmin','varamp','varamp4'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{if(showVars())applyLabelKinds();}));
+// the two tier boxes exclude each other: ticking one clears the other (both would draw nothing)
+[['varamp','varamp4'],['varamp4','varamp']].forEach(([a,b])=>document.getElementById(a).addEventListener('change',()=>{
+ const o=document.getElementById(b);if(document.getElementById(a).checked&&o.checked){o.checked=false;if(showVars())applyLabelKinds();}}));
+// no AMP annotation in the payload -> no AMP checkboxes; no Tier IV variant -> no Tier IV box
+(function(){const all=Object.values(VARS);
+ if(!all.some(v=>v.some(x=>ampT(x)))){const r=document.getElementById('varamprow');if(r)r.style.display='none';}
+ if(!all.some(v=>v.some(x=>ampT(x)==='IV'))){const r=document.getElementById('varamp4row');if(r)r.style.display='none';}})();
 const varAllBtn=document.getElementById('varall'), INFO_PROMPT=document.getElementById('info').innerHTML;
 new MutationObserver(()=>{if(!document.getElementById('varlist'))varAllBtn.classList.remove('on');})
  .observe(document.getElementById('info'),{childList:true});
@@ -2940,7 +3083,7 @@ varAllBtn.addEventListener('click',()=>{const info=document.getElementById('info
   +ids.map(id=>'<details class=var><summary><b>'+esc(id)+'</b> <span class=mut>'+VARS[id].length+(nodeDrawn(id)?'':' · not in the current view')+'</span></summary>'
    +typeSummary(id)
    +varTypes(id).map(([k,n,ts])=>'<div class=vlev>'+VLEV[k]+' — '+n+'</div>'+ts.map(([t,c])=>'<div class=vtyp>'+esc(t)+' — '+c+'</div><div>'
-     +VARS[id].filter(x=>x[0].charAt(0)===k&&x[4]===t).map(x=>'<code>'+esc(x[0])+'</code> <span class=mut>('+x[1]+')</span>').join(', ')+'</div>').join('')).join('')
+     +VARS[id].filter(x=>x[0].charAt(0)===k&&x[4]===t).map(x=>'<code>'+esc(x[0])+'</code>'+ampBadge(x)+' <span class=mut>('+x[1]+')</span>').join(', ')+'</div>').join('')).join('')
    +'</details>').join('');});
 // no variants table -> no variant controls
 (function(){if(!Object.keys(VARS).length){['varlbl','varopts'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});}})();
