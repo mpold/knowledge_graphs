@@ -58,7 +58,7 @@ the steps without running anything.
 | Python   | 3.9+                                                                                  | 3.9+                                                   | 3.9+                 |
 | Packages | `requests`                                                                            | `torch`, `transformers`, `datasets<4`, `bioc`, `numpy`, `lxml` | *stdlib only*        |
 | Hardware | any                                                                                   | **CUDA GPU** (CPU = very slow)                         | any                  |
-| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCIt, NCBI PubTator3, CIViC | optional (vis-network) |
+| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCIt, NCBI PubTator3, CIViC, MyVariant.info (gnomAD) | optional (vis-network) |
 | Extra    | **Docker + GROBID** (for `grobid_xml.py`); *optional* local XML archive (steps 1b/6b) | ontology DB files (below)                              | *optional* OncoKB, Cellosaurus and ontology files (below) |
 
 Full details per script are in the `step_*.html` docs and `requirements.html`.
@@ -211,7 +211,7 @@ run, so with the training steps skipped it shows 1–18; step numbers in this RE
 | `sentences/` | one JSON per document | stage 3 |
 | `databases/pmc_years.json` | publication years | stage 3 |
 | `VARIANT/variants.json` | sequence variants per gene (HGVS p./c./g./r., tmVar 3 via PubTator3; step 4b, internet) | stage 3 |
-| `VARIANT/actionability.json` | AMP/ASCO/CAP tier and CIViC evidence of those variants (step 4c, internet) | stage 3 |
+| `VARIANT/actionability.json` | AMP/ASCO/CAP tier of those variants: I/II with their CIViC evidence, III/IV with their gnomAD basis (step 4c, internet); `gnomad_af.json` beside it caches the frequencies | stage 3 |
 | `summaries/` | `sentences`, `compare_re`, `triples_per_year` (and, when trained, the two calibration reports) | — |
 
 **How a triple is scored.** `score = P × NER × cue × result × section × self`, at most 1: the
@@ -396,7 +396,7 @@ Other options: `--score` (cutoff of the exported JSON, default 0.8; the graph al
 | `databases/pmc_years.json` | no | publication years |
 | `databases/oncokb_cancerGeneList.tsv` | no | Oncogene / Tumor suppressor buttons |
 | `VARIANT/variants.json` | no | variants listed on gene nodes, search by variant |
-| `VARIANT/actionability.json` | no | AMP/ASCO/CAP tiers of those variants (CIViC) |
+| `VARIANT/actionability.json` | no | AMP/ASCO/CAP tiers of those variants (CIViC, gnomAD) |
 | `databases/` HGNC, ChEBI, `ncit_drugs.json`, `cellosaurus.txt` (or in `gpu_bundle/databases/`) | no | screening look-alike names out of *Candidate driver* |
 | `summaries/pubmed_query.html` (or in the bundle root) | no | the query shown on the page |
 
@@ -486,7 +486,7 @@ CML), ALK G1202R II-C (crizotinib resistance with an ALK fusion), TP53 P72R IV (
 half the variants have no rsID, so their Tier III is not frequency-checked. On the page every variant
 gets a tier badge (I-A, I-B reds; II-C, II-D ambers; III grey; IV green) and its basis in the click
 panel, is drawn in that colour on the canvas, and *only AMP Tier I / II variants* draws the
-actionable ones alone; `summaries/gene_variants.md` / `.tsv` carry the tier, its disease, therapies,
+actionable ones alone, *only AMP Tier IV variants* the benign or likely benign ones; `summaries/gene_variants.md` / `.tsv` carry the tier, its disease, therapies,
 population basis and CIViC link. Locally, after step 4b:
 
 ```bash
@@ -528,6 +528,9 @@ under `gpu_bundle/databases/` before running stage 2 (see
   `<data-root>/databases/`: `curl -o kaggle_working/databases/oncokb_cancerGeneList.tsv
   https://www.oncokb.org/api/v1/utils/cancerGeneList.txt`. Absent, the Oncogene and Tumor
   suppressor buttons stay empty, with a warning
+- `civic/` — CIViC nightly exports for the AMP tiers. *Nothing to provide*: step 4c downloads them
+  (internet) and reuses them for 7 days; the gnomAD frequencies it also needs are fetched from
+  MyVariant.info and cached in `VARIANT/gnomad_af.json`
 
 `gpu.py --list` preflights the three required ones and names any that are missing; the DGIdb
 table is not preflighted, precisely because it is optional.
@@ -568,7 +571,7 @@ it is modified. Without one, stage 1 simply downloads everything.
 │   ├── gpu.py                                   #   orchestrator (20 steps + 4b, 4c)
 │   ├── drug_lexicon.py                          #   NCIt drug lexicon: builder + matcher (step 3)
 │   ├── variants.py                              #   variants per gene from PubTator3 / tmVar 3 (step 4b)
-│   ├── actionability.py                         #   AMP/ASCO/CAP tiers of those variants from CIViC (step 4c)
+│   ├── actionability.py                         #   AMP/ASCO/CAP tiers: I/II from CIViC, III/IV by gnomAD (step 4c)
 │   ├── requirements.txt                         #   GPU deps: torch/transformers/datasets<4/bioc/numpy/lxml
 │   ├── direction.py                             #   who acts on whom (used by stage 2 and stage 3)
 │   ├── constructs.py, drug_direction.py,        #   corrections applied by stage 3 only
@@ -615,9 +618,11 @@ it is modified. Without one, stage 1 simply downloads everything.
 │       │                                        #     read from <data-root>/databases/)
 │       ├── ncit_drugs.json                      # 5.8 MB  NCIt drug names → sentences.py (NER lexicon pass) and
 │                                                #     chemical.py (non-ChEBI fallback); generated by step 3
-│       └── pmc_years.json                       #   generated by pub_years.py (step 4) from the corpus's
-│                                                #     <?pub-year?> stamps (offline); read by relationships.py,
-│                                                #     triples_per_year.py and stage 3
+│       ├── pmc_years.json                       #   generated by pub_years.py (step 4) from the corpus's
+│       │                                        #     <?pub-year?> stamps (offline); read by relationships.py,
+│       │                                        #     triples_per_year.py and stage 3
+│       └── civic/                               # 5.8 MB  CIViC nightly TSVs (CC0), downloaded by
+│                                                #     actionability.py (step 4c), reused 7 days; git-ignored
 ├── Graph_description.md                         # what the graph viewer draws and how to read it
 ├── monoclonal_antibody_NER.md                   # why biologics were missed, and what now recognises them
 ├── step_1_publications.html                     # rendered walk-throughs …
