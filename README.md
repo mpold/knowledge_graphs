@@ -198,7 +198,7 @@ BioBERT NER → GENETIC/DISEASE/CHEMICAL normalization → rule triples → lear
 
 **Locally:** `cd gpu_bundle && python gpu.py`. Needs the GPU deps and the DB files present;
 preview with `python gpu_bundle/gpu.py --list`. The list is numbered over the steps that will
-run, so with the training steps skipped it shows 1–18; step numbers in this README are the full 1–20.
+run, so with the training steps skipped it shows 1–18; step numbers in this README are the full 1–20 (plus 4b).
 
 **Output.** `kaggle_working.zip`, the zipped run directory. What matters in it:
 
@@ -210,6 +210,7 @@ run, so with the training steps skipped it shows 1–18; step numbers in this RE
 | `GENETIC/`, `DISEASE/`, `CHEMICAL/` | normalization libraries with the control / phenotype / non-chemical flags and the drug–target links | stage 3 |
 | `sentences/` | one JSON per document | stage 3 |
 | `databases/pmc_years.json` | publication years | stage 3 |
+| `VARIANT/variants.json` | sequence variants per gene (HGVS p./c./g./r., tmVar 3 via PubTator3; step 4b, internet) | stage 3 |
 | `summaries/` | `sentences`, `compare_re`, `triples_per_year` (and, when trained, the two calibration reports) | — |
 
 **How a triple is scored.** `score = P × NER × cue × result × section × self`, at most 1: the
@@ -393,6 +394,7 @@ Other options: `--score` (cutoff of the exported JSON, default 0.8; the graph al
 | `DISEASE/disease.json`, `CHEMICAL/chemical.json` | no | phenotype and non-chemical flags |
 | `databases/pmc_years.json` | no | publication years |
 | `databases/oncokb_cancerGeneList.tsv` | no | Oncogene / Tumor suppressor buttons |
+| `VARIANT/variants.json` | no | variants listed on gene nodes, search by variant |
 | `databases/` HGNC, ChEBI, `ncit_drugs.json`, `cellosaurus.txt` (or in `gpu_bundle/databases/`) | no | screening look-alike names out of *Candidate driver* |
 | `summaries/pubmed_query.html` (or in the bundle root) | no | the query shown on the page |
 
@@ -505,8 +507,9 @@ it is modified. Without one, stage 1 simply downloads everything.
 │                                                #   drug_direction, antibodies)
 ├── kaggle_snippets.py                           # stage 2: the notebook cells to paste on Kaggle
 ├── gpu_bundle/                                  # stage 2: the GPU pipeline
-│   ├── gpu.py                                   #   orchestrator (20 steps)
+│   ├── gpu.py                                   #   orchestrator (20 steps + 4b)
 │   ├── drug_lexicon.py                          #   NCIt drug lexicon: builder + matcher (step 3)
+│   ├── variants.py                              #   variants per gene from PubTator3 / tmVar 3 (step 4b)
 │   ├── requirements.txt                         #   GPU deps: torch/transformers/datasets<4/bioc/numpy/lxml
 │   ├── direction.py                             #   who acts on whom (used by stage 2 and stage 3)
 │   ├── constructs.py, drug_direction.py,        #   corrections applied by stage 3 only

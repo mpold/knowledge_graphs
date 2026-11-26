@@ -5,7 +5,7 @@ entity normalization -> base triples -> learned relation extraction) as ONE step
 on Kaggle (or locally). GPU-enabled for the model-training, NER and
 relation-extraction steps.
 
-Orchestrates twenty steps in dependency order:
+Orchestrates twenty-one steps in dependency order:
 
     1  run_re_pipeline.py train + calibrate the PPI relation model
                           (BigBIO bioinfer -> ppi-biobert-re/)   GPU, internet [gated]
@@ -14,6 +14,8 @@ Orchestrates twenty steps in dependency order:
     3  drug_lexicon.py --build   NCIt drug names -> databases/ncit_drugs.json
                          CPU  [optional, internet]
     4  pub_years.py      <?pub-year?> stamps in experimental_ner/ -> pmc_years.json  CPU  [optional]
+    4b variants.py       tmVar 3 variants per gene (NCBI PubTator3) -> VARIANT/variants.json
+                         CPU  [optional, internet]
     5  sentences.py      BioBERT result-sentence selection + NER (experimental_ner/ -> sentences/)  GPU
     6  roman.py          GENETIC -> HGNC (roman key)                 CPU
     7  greek.py          GENETIC -> HGNC (greek key)                 CPU
@@ -132,7 +134,7 @@ Dependency / strategy notes:
   * triples_per_year.py (19) dates step 17's normalized triples by publication year
     (databases/pmc_years.json from step 4) and writes summaries/triples_per_year.html: a per-year box plot of the
     composite score, triple counts per year, and a score histogram. Offline.
-  * Steps 2, 3, 4, 16, 18 and 19 are OPTIONAL: if any fails (internet off, missing input,
+  * Steps 2, 3, 4, 4b, 16, 18 and 19 are OPTIONAL: if any fails (internet off, missing input,
     only one model trained) the orchestrator warns and CONTINUES.
   * zip_work.py (20, LAST) packs the whole working dir into kaggle_working.zip so the
     entire run is one download; it must run after every other step has written its output.
@@ -144,7 +146,7 @@ unmodified.
 
 KAGGLE USAGE
   1. Upload the project as a Kaggle Dataset (read-only at /kaggle/input/<ds>/):
-       the 20 step scripts above PLUS bigbio_to_re.py + train_re.py (run by
+       the 21 step scripts above PLUS bigbio_to_re.py + train_re.py (run by
                                                   run_re_pipeline.py in steps 1 and 2)
                                   AND calibration.py (shared: steps 1, 2 + step 17)
        experimental_ner/                             (XML corpus; sentences.py input)
@@ -255,6 +257,10 @@ STEPS = [
          reads_sentences=False, reads_xml=True,
          desc="harvest the stage-1 <?pub-year?> stamps from experimental_ner/ -> "
               "databases/pmc_years.json (offline) [optional]"),
+    dict(name="variants", script="variants.py", args=[], dbs=["hgnc"], gpu=False, models=[],
+         optional=True, reads_sentences=False, reads_xml=True,
+         desc="[internet] sequence variants per gene (HGVS p./c./g./r.) from NCBI PubTator3's "
+              "tmVar 3 annotations of the corpus -> VARIANT/variants.json [optional]"),
     dict(name="sentences", script="sentences.py", args=[], dbs=[], gpu=True, models=[], reads_xml=True,
          support=["drug_lexicon.py"],
          desc="[GPU] BioBERT result-sentence selection + NER over experimental_ner/ -> sentences/ "
@@ -317,7 +323,7 @@ OPTIONAL_DBS = {
                               "(it reads the stage-1 <?pub-year?> stamps)"),
 }
 RAW_DIR = "experimental_ner"   # sentences.py input (XML); sentences/ is generated from it
-OUT_DIRS = ["GENETIC", "DISEASE", "CHEMICAL", "TRIPLES"]
+OUT_DIRS = ["GENETIC", "DISEASE", "CHEMICAL", "TRIPLES", "VARIANT"]
 MODEL_ENV = {"ppi-biobert-re": "RE_MODEL_PPI",   # model dir -> env var the RE step reads
              "biored-biobert-re": "RE_MODEL_BIORED"}
 # converted-TSV dir each training step writes next to its checkpoint (run_re_pipeline

@@ -61,6 +61,8 @@ Inputs  : <data-root>/TRIPLES/triples_re_GENETIC_DISEASE_CHEMICAL_normalized.jso
           DISEASE/disease.json, CHEMICAL/chemical.json     phenotype / non_chemical flags
           databases/pmc_years.json            publication years
           databases/oncokb_cancerGeneList.tsv Oncogene / Tumor suppressor buttons
+          VARIANT/variants.json               variants per gene node (HGVS p./c./g./r.; tmVar 3 via
+                                              PubTator3, gpu_bundle/variants.py)
           databases/ HGNC, ChEBI, ncit_drugs.json, cellosaurus.txt    look-alike names of the Candidate
                                               driver lens (also looked for in gpu_bundle/databases/)
           summaries/pubmed_query.html         the query shown on the page (also next to this script)
@@ -92,6 +94,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "gpu_bundle"))
 import antibodies as AB  # noqa: E402
 import constructs as K  # noqa: E402
 import drug_direction as DD  # noqa: E402
+import variants as VT  # noqa: E402  (HGVS variant types, shared with step 4b)
 import direction as D  # noqa: E402  (shared with relation_extraction.py)
 
 ROOT = Path(__file__).resolve().parent
@@ -101,14 +104,14 @@ DATA_ROOT = ROOT / "kaggle_working"
 
 # module-level paths; (re)bound to DATA_ROOT by set_data_root() so --data-root can retarget them
 OUT_DIR = XML_DIR = SENT_DIR = None
-RE_FILE = PMC_YEARS = TARGET_FILE = CANCER_GENES = None
+RE_FILE = PMC_YEARS = TARGET_FILE = CANCER_GENES = VARIANTS = None
 DISEASE_LIB = CHEM_LIB = None
 JSON_OUT = GRAPH_OUT = None
 
 
 def set_data_root(data_root):
     """Point every input/output path at `data_root` (the pipeline's output tree)."""
-    global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, PMC_YEARS, CANCER_GENES
+    global DATA_ROOT, OUT_DIR, XML_DIR, SENT_DIR, RE_FILE, PMC_YEARS, CANCER_GENES, VARIANTS
     global TARGET_FILE, DISEASE_LIB, CHEM_LIB, JSON_OUT, GRAPH_OUT
     DATA_ROOT = Path(data_root).resolve()
     OUT_DIR = DATA_ROOT / "TRIPLES"
@@ -119,6 +122,8 @@ def set_data_root(data_root):
     # OncoKB Cancer Gene List (https://www.oncokb.org/api/v1/utils/cancerGeneList.txt), the
     # gene -> oncogene / tumor suppressor roles behind the Oncogene and Tumor suppressor buttons
     CANCER_GENES = DATA_ROOT / "databases" / "oncokb_cancerGeneList.tsv"
+    # gene -> sequence variants (HGVS p./c./g./r.), tmVar 3 via NCBI PubTator3 (gpu_bundle/variants.py)
+    VARIANTS = DATA_ROOT / "VARIANT" / "variants.json"
     TARGET_FILE = DATA_ROOT / "CHEMICAL" / "chemical_to_target.json"   # gene -> corpus chemicals (in_corpus_GENETIC flag)
     # normalization libraries carrying the in-place phenotype / non_chemical flags
     DISEASE_LIB = DATA_ROOT / "DISEASE" / "disease.json"
@@ -1025,6 +1030,7 @@ def graph_payload_multi(triples, flags):
         years = {}
     tgt, chems_by_gene, tsrc, tcat = _drug_targets()
     gene_role = _cancer_gene_roles()     # not `roles`: the loop below reuses that name
+    gene_vars = _gene_variants()
     dir_sent = collections.defaultdict(set)            # (a,b,cat) -> sentences
     pair_sent = collections.defaultdict(dict)          # pair -> {sentence: [score, pmid, cat, spec, src]}
     pair_src = collections.defaultdict(set)            # pair -> model roles behind ANY of its triples
@@ -1095,6 +1101,9 @@ def graph_payload_multi(triples, flags):
                       "tsource": tsrc.get(nd, "") if k == "gene" else "",
                       "tcat": tcat.get(nd, "other"),
                       **({"role": gene_role[nd]} if k == "gene" and nd in gene_role else {}),
+                      # sequence variants of the gene, most-reported first:
+                      # [hgvs, n papers, rsID, [papers ...], HGVS type]
+                      **({"var": gene_vars[nd]} if k == "gene" and nd in gene_vars else {}),
                       # surfaces by sentence count, most frequent first (at most 12)
                       **({"surf": [[w, len(ss)] for w, ss in sorted(node_surf[nd].items(),
                                     key=lambda z: (-len(z[1]), z[0]))[:12] if w]}
@@ -1102,7 +1111,79 @@ def graph_payload_multi(triples, flags):
     nr = collections.Counter(n.get("role") for n in nodes if n.get("role"))
     print(f"  OncoKB cancer-gene roles on graph genes: oncogene {nr['onc']}, tumor suppressor "
           f"{nr['tsg']}, both {nr['both']}")
+    if gene_vars:
+        vn = [n for n in nodes if n.get("var")]
+        lv = collections.Counter(v[0][0] for n in vn for v in n["var"])
+        print(f"  variants (tmVar 3, PubTator3): {sum(len(n['var']) for n in vn):,} on {len(vn):,} "
+              f"graph gene(s) -- " + ", ".join(f"{k}. {lv[k]:,}" for k in "pcgr"))
+        write_variant_lists(nodes, GRAPH_OUT.parent)
     return {"nodes": nodes, "edges": edges}
+
+
+VAR_PAPERS = 40     # papers listed per variant on the page (the count is always the full one)
+
+
+def _gene_variants():
+    """{HGNC symbol: [[hgvs, n papers, rsID, [papers ...]], ...]} from VARIANT/variants.json
+    (gpu_bundle/variants.py: tmVar 3 annotations from NCBI PubTator3, read over the whole text of
+    each corpus document, not only the sentences behind the triples). Most-reported first. Missing
+    file -> {} with a note: gene nodes then simply list no variants."""
+    try:
+        genes = json.loads(VARIANTS.read_text(encoding="utf-8")).get("genes", {})
+    except (OSError, ValueError):
+        print(f"  note: {VARIANTS} not found -- gene nodes list no variants "
+              f"(run gpu_bundle/variants.py, step 4b)")
+        return {}
+    return {g: [[v["hgvs"], len(v["papers"]), v.get("rsid") or "", v["papers"][:VAR_PAPERS],
+                 v.get("type") or VT.hgvs_type(v["hgvs"])]
+                for v in vs if v.get("hgvs")]
+            for g, vs in genes.items()}
+
+
+def type_summary(var):
+    """[(level, n, [(type, n), ...]), ...] for one gene's [[hgvs, papers, rsid, pmcs, type], ...]:
+    levels p/c/g/r, types most frequent first (ties in VT.P_TYPES / VT.NA_TYPES order, as varTypes()
+    on the page does), empty ones left out."""
+    out = []
+    for lv in "pcgr":
+        ty = collections.Counter(v[4] for v in var if v[0][0] == lv)
+        if ty:
+            order = VT.P_TYPES if lv == "p" else VT.NA_TYPES
+            rank = {t: i for i, t in enumerate(order)}
+            out.append((lv, sum(ty.values()),
+                        sorted(ty.items(), key=lambda z: (-z[1], rank.get(z[0], len(order))))))
+    return out
+
+
+def write_variant_lists(nodes, out_dir):
+    """summaries/gene_variants.md (readable) and .tsv (one row per gene and variant): every
+    variant of every gene node, with each gene's summary by HGVS level and type."""
+    genes = sorted((n for n in nodes if n.get("var")), key=lambda n: (-len(n["var"]), n["id"]))
+    if not genes:
+        return
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tot = sum(len(n["var"]) for n in genes)
+    with open(out_dir / "gene_variants.tsv", "w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh, delimiter="\t")
+        w.writerow(["gene", "level", "type", "hgvs", "papers", "rsid"])
+        for n in genes:
+            for v in n["var"]:
+                w.writerow([n["id"], v[0][0], v[4], v[0], v[1], v[2]])
+    lines = ["# Variants per gene node", "",
+             f"{len(genes)} gene nodes of the graph, {tot:,} unique variants (tmVar 3 via NCBI "
+             f"PubTator3). Genes by number of variants; each gene's summary by HGVS level and type, "
+             f"then its variants by number of papers (in parentheses).", ""]
+    for n in genes:
+        lines += [f"## {n['id']} — {len(n['var'])}", ""]
+        for lv, cnt, ty in type_summary(n["var"]):
+            lines.append(f"- **{lv}.** {cnt}: " + ", ".join(f"{t} {c}" for t, c in ty))
+        lines.append("")
+        for lv, _, ty in type_summary(n["var"]):
+            for t, c in ty:
+                vs = [f"{v[0]} ({v[1]})" for v in n["var"] if v[0][0] == lv and v[4] == t]
+                lines += [f"**{lv}. {t}** ({c}): " + ", ".join(vs), ""]
+    (out_dir / "gene_variants.md").write_text("\n".join(lines), encoding="utf-8")
+    print(f"  variant lists -> {out_dir / 'gene_variants.md'}, gene_variants.tsv")
 
 
 def _cancer_gene_roles():
@@ -1342,6 +1423,12 @@ __LIBTAG__
  /* the details box is 12px prose; its heading takes the panel's normal size so the block reads
     as a section rather than as more small print */
  #info .ihead{font-size:14px;color:#1c2330;margin-bottom:4px}
+ /* a gene's sequence variants (tmVar 3): one line per variant, its papers folded away */
+ #info .vlev{margin:6px 0 2px;font-weight:600;color:#1c2330} #info details.var{margin:1px 0}
+ #info details.var summary{cursor:pointer} #info details.var code{font-size:12px;color:#1c2330}
+ #info details.var .pm{margin-top:2px}
+ #info .vtyp{margin:3px 0 1px 6px;font-style:italic;color:#3d4a5c}
+ #info table.vsum{border-collapse:collapse;margin:2px 0 4px} #info table.vsum td{padding:1px 8px 1px 0;vertical-align:top}
  /* one screen, two columns is a desktop luxury: on a phone they stack, one at each edge */
  @media (max-width:700px){
   #panel,#lpanel{left:12px;right:12px;max-width:none;max-height:42vh;overflow:auto}
@@ -1357,8 +1444,11 @@ __LIBTAG__
  <button class="pclose" data-panel="lpanel" title="Close this menu" aria-label="Close the left menu">&times;</button>
  __PUBMED_QUERY__
  <div class="row">Year: <b id="yrlab"></b><br><input id="yrlo" type="range" style="width:74px"> <input id="yrhi" type="range" style="width:74px"></div>
- <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease" data-label="Disease names">Disease names</button><button class="lblb" data-kind="chemical" data-label="Drug names">Drug names</button></span>
-  <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed.</div></div>
+ <div class="row" id="lblrow">Draw names for: <button class="ihelp" aria-label="About drawn names" aria-expanded="false">i</button><br><span id="labelbtns"><button class="lblb" data-kind="disease" data-label="Disease names">Disease names</button><button class="lblb" data-kind="chemical" data-label="Drug names">Drug names</button><button class="lblb" data-kind="variant" data-label="Variants" id="varlbl">Variants</button></span>
+  <div id="varopts" style="margin-top:2px">Variants per gene <select id="varmax" aria-label="Variants drawn per gene"><option>3</option><option selected>5</option><option>10</option><option>20</option><option value="0">all</option></select>
+   in &ge; <select id="varmin" aria-label="Minimum papers per drawn variant"><option>1</option><option selected>2</option><option>5</option><option>10</option><option>50</option></select> papers
+   <button id="varall">All variants</button></div>
+  <div class="mut help">Gene symbols are always drawn. Disease and drug names are long, repeat across many edges and bury the symbols by sheer wordiness, so they start off &mdash; switch them on to read a neighbourhood, off to see its shape. When on they are set in a <b>condensed</b> face at <b>80%</b> of the size the same weight of gene would take, and drug names are <i>italic</i> as well: the extra cues let a long name sit beside a symbol without out-shouting it, and let you tell the three kinds apart in one glance without reading them. Relative size still tracks evidence within each kind, and the font slider scales everything together. Applies in place; the layout is not recomputed. <b>Variants</b> writes each gene&rsquo;s sequence variants (HGVS p./c./g./r., tmVar 3 via PubTator3) under its symbol in a small monospace face, most-reported first: <em>Variants per gene</em> caps how many, <em>papers</em> drops those fewer papers report. <b>All variants</b> lists every gene&rsquo;s full list in the details box.</div></div>
  <div class="row"><button id="relay">Re-layout this view</button> <button id="relayback" disabled>Restore layout</button> <button class="ihelp" aria-label="About re-layout" aria-expanded="false">i</button>
   <div class="mut help">Filtering hides nodes but leaves the rest where they were, so distances still reflect links you no longer see. <b>Re-layout this view</b> places the drawn nodes afresh from the drawn edges alone (more sentences in view = shorter edge; nodes also push each other apart, so distances stay approximate). It sets <em>Shrink periphery</em> and <em>Expand center</em> to 0%, as both bend distances. Filtering further keeps the new places; a change that brings in other nodes, or <b>Restore layout</b>, returns to the original places and slider values.</div></div>
  <div class="row"><button id="lonebtn" aria-pressed="false">Hide stand-alone nodes</button> <button class="ihelp" aria-label="About stand-alone nodes" aria-expanded="false">i</button>
@@ -1444,7 +1534,7 @@ __LIBTAG__
  <div class="row">Font size: <b id="fsv">100%</b><br><input id="fscale" type="range" min="10" max="100" step="5" value="100" aria-label="Label font size"></div>
  <div class="row">Min cluster size: <select id="mincluster"><option value="2" selected>2 (off)</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option></select> <button class="ihelp" aria-label="About min cluster size" aria-expanded="false">i</button><div class="mut help">Drops connected components smaller than this. <b>2 is off, not a floor</b>: the components are built from the edges that survive every other filter, so the smallest one possible already has two nodes and a pair joined by a single edge always passes. Raise it to 3 or more to peel the small islands a loose score leaves behind &mdash; and note it runs AFTER min-connections, so a node that drops below that bar can take its whole component with it.</div></div>
  <div class="row">Min connections: <select id="mindeg"><option>1</option><option selected>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select> <button class="ihelp" aria-label="About min connections" aria-expanded="false">i</button><div class="mut help">Hides nodes linked to fewer than this many others; thins the hairball's single-link fringe. Links of <b>every relation type</b> count, ticked or not, so unticking types never hides a well-connected gene; the line under the graph says how many edges it hides. Applied until it holds: removing a node can push its neighbours below the bar, so they go too, and every node left has at least this many links, though with relation types unticked fewer of them may be <em>on screen</em>. <b>1</b> turns it off and keeps that fringe &mdash; the only way to see a node whose whole evidence is one edge. Expect a denser canvas: it is the setting that admits every hapax in the corpus.</div></div>
- <div class="row">Search gene: <input id="search" placeholder="e.g. EGFR" autocomplete="off"></div>
+ <div class="row">Search gene or variant: <input id="search" placeholder="e.g. EGFR, T790M, c.2573T&gt;G" autocomplete="off"></div>
  <div class="row">Filter to gene:<br><input id="genefilter" placeholder="e.g. EGFR (+neighbors)" autocomplete="off"> <select id="hops"><option value="1">1 hop</option><option value="2">2 hops</option></select></div>
  <div class="row">Search drug: <input id="drugsearch" placeholder="e.g. nivolumab" autocomplete="off"></div>
  <div class="row">Filter to drug/chemical:<br><select id="chemfilter"><option value="">(all drugs)</option></select></div>
@@ -2137,6 +2227,45 @@ let TM=null;   // matcher in force for the current view; used to highlight hits 
 const SURF={};DATA.nodes.forEach(n=>{if(n.surf)SURF[n.id]=n.surf;});
 function surfLine(id){const v=SURF[id];if(!v||!v.length)return '';
  return 'found in the text as: '+v.map(([w,c])=>w+' ('+c+')').join(', ');}
+// A gene's sequence variants, from VARIANT/variants.json (gpu_bundle/variants.py): tmVar 3's
+// annotations in NCBI PubTator3, read over each document's whole text (abstract only where
+// PubTator3 has no full text), so they do not depend on which sentences made it into triples.
+// Each entry is [hgvs, n papers, rsID, [papers ...], HGVS type], most-reported first. tmVar names the gene a
+// variant belongs to, which is how it lands on this node.
+const VARS={};DATA.nodes.forEach(n=>{if(n.var)VARS[n.id]=n.var;});
+const VLEV={p:'p. (protein)',c:'c. (coding DNA)',g:'g. (genomic DNA)',r:'r. (RNA)'};
+// HGVS variant types (entry [4], set by gpu_bundle/variants.py hgvs_type()); this order only breaks
+// ties between equally frequent types -- KEEP IN STEP with variants.P_TYPES / NA_TYPES
+const VT_ORDER={p:['missense','nonsense','synonymous','unspecified (X)','deletion','insertion','duplication','delins','frameshift','extension','other'],
+ na:['substitution','deletion','insertion','duplication','delins','inversion','other']};
+// [[level, n, [[type, n], ...]], ...] for one gene: levels p/c/g/r, types most frequent first
+function varTypes(id){const v=VARS[id]||[],out=[];
+ ['p','c','g','r'].forEach(k=>{const c={};v.forEach(x=>{if(x[0].charAt(0)===k)c[x[4]]=(c[x[4]]||0)+1;});
+  const o=VT_ORDER[k==='p'?'p':'na'],ts=Object.keys(c).sort((a,b)=>c[b]-c[a]||o.indexOf(a)-o.indexOf(b));
+  if(ts.length)out.push([k,ts.reduce((t,s)=>t+c[s],0),ts.map(s=>[s,c[s]])]);});
+ return out;}
+function typeLine(id){return varTypes(id).map(([k,n,ts])=>k+'. '+n+' ('+ts.map(([t,c])=>t+' '+c).join(', ')+')').join('; ');}
+function varLine(id){const v=VARS[id];if(!v||!v.length)return '';
+ return 'variants: '+v.slice(0,6).map(x=>x[0]+' ('+x[1]+')').join(', ')+(v.length>6?' … +'+(v.length-6)+' more':'')+' (papers)'
+  +String.fromCharCode(10)+'variant types: '+typeLine(id);}
+function varItem(x){const more=x[1]-x[3].length;
+ return '<details class=var><summary><code>'+esc(x[0])+'</code> <span class=mut>'+x[1]+' paper'+(x[1]===1?'':'s')
+  +(x[2]?' · <a target=_blank rel=noopener href="https://www.ncbi.nlm.nih.gov/snp/'+esc(x[2])+'">'+esc(x[2])+'</a>':'')+'</span></summary>'
+  +x[3].map(pmA).join(' ')+(more>0?' <span class=more>+'+more+' more</span>':'')+'</details>';}
+function varPanel(id){const v=VARS[id];if(!v||!v.length)return '';
+ let h='<div class=ihead style="margin-top:8px">Variants <span class=mut>(tmVar 3 · PubTator3, '+v.length+')</span></div>'+typeSummary(id);
+ // then the variants themselves, by level and, within it, by type
+ varTypes(id).forEach(([k,n,ts])=>{h+='<div class=vlev>'+VLEV[k]+' — '+n+'</div>';
+  ts.forEach(([t,c])=>{h+='<div class=vtyp>'+esc(t)+' — '+c+'</div>'+v.filter(x=>x[0].charAt(0)===k&&x[4]===t).map(varItem).join('');});});
+ return h;}
+// a gene's variants counted by HGVS level and type: one line per level
+function typeSummary(id){
+ return '<table class=vsum>'+varTypes(id).map(([k,n,ts])=>'<tr><td><b>'+k+'.</b> '+n+'</td><td>'+ts.map(([t,c])=>esc(t)+' <b>'+c+'</b>').join(' · ')+'</td></tr>').join('')+'</table>';}
+// "T790M", "t790m", "p.T790M", "c.2573T>G" -> the genes carrying that variant. A change without a
+// prefix matches any level. Case is ignored: no two HGVS strings differ by case alone.
+function varGenes(q){q=q.replace(/\s+/g,'').toLowerCase();const want=/^[pcgr]\./.test(q)?[q]:['p.'+q,'c.'+q,'g.'+q,'r.'+q];
+ const out=[];for(const id in VARS){const x=VARS[id].find(v=>want.indexOf(v[0].toLowerCase())>=0);if(x)out.push([id,x]);}
+ return out.sort((a,b)=>b[1][1]-a[1][1]);}
 // spans in t where an endpoint gene is written, by its own surfaces (case-sensitive, not inside
 // a longer word -- but a glued surface such as "ARQ62L" is itself one of the surfaces)
 function geneIv(t,e){const iv=[];if(!e)return iv;
@@ -2394,18 +2523,34 @@ const NARROW_FACE='Arial Narrow,Liberation Sans Narrow,Segoe UI Semilight,Arial,
 function labelFor(id,kind,text){
  if(!LABEL_KINDS.has(kind||'gene'))return '';
  const t=text===undefined?(labelById[id]||''):text;
- return (kind==='chemical')?'<i>'+esc(t)+'</i>':t;
+ if(kind==='chemical')return '<i>'+esc(t)+'</i>';
+ // a gene with its variants switched on: symbol, then the variants in <code> (the "mono" slot of
+ // nodeFont), three to a line. Its font opts into multi:'html', so the symbol is escaped here too.
+ if((kind||'gene')==='gene'&&showVars()){const v=varsDrawn(id);
+  if(v.length){const rows=[];for(let i=0;i<v.length;i+=3)rows.push('<code>'+v.slice(i,i+3).map(lblEsc).join('  ')+'</code>');
+   const more=(VARS[id]||[]).length-v.length;
+   return lblEsc(t)+'\n'+rows.join('\n')+(more>0?'\n<code>+'+more+' more</code>':'');}}
+ return t;
 }
+// vis-network's html labels decode only &lt; and &amp;, so '>' (c.2573T>G) must stay raw
+function lblEsc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+// Variant lines drawn on gene nodes: on with the Variants button, capped per gene (varmax, 0 = all)
+// and by the papers behind each variant (varmin). The full list is always one click away.
+function showVars(){return LABEL_KINDS.has('variant');}
+function varsDrawn(id){const v=VARS[id];if(!v)return [];
+ const mx=parseInt((document.getElementById('varmax')||{}).value)||0, mn=parseInt((document.getElementById('varmin')||{}).value)||1;
+ const keep=v.filter(x=>x[1]>=mn).map(x=>x[0]);return mx?keep.slice(0,mx):keep;}
 function nodeFont(kind,base){
  const f={size:screenPx(base)/Math.max(ZSCALE,1e-3)};   // screen px -> canvas units at this zoom
  if(kind==='disease')f.face=NARROW_FACE;
  if(kind==='chemical'){f.face=NARROW_FACE;f.multi='html';f.ital={face:NARROW_FACE,mod:'italic'};}
+ if((kind||'gene')==='gene'&&showVars()){f.multi='html';f.mono={face:'Consolas,Menlo,monospace',size:Math.max(f.size*0.5,9/Math.max(ZSCALE,1e-3)),color:'#3d4a5c'};}
  return f;
 }
 function nodeLabel(n){return labelFor(n.id,n.kind||'gene',n.label);}
 function applyLabelKinds(){
  if(!NODEDS)return;
- NODEDS.update(NODEDS.get().map(n=>{const k=KIND[n.id]||'gene';return {id:n.id,label:labelFor(n.id,k)};}));
+ NODEDS.update(NODEDS.get().map(n=>{const k=KIND[n.id]||'gene';return {id:n.id,label:labelFor(n.id,k),font:nodeFont(k,n._fs||11)};}));
 }
 function activeMinCluster(){const v=parseInt((document.getElementById('mincluster')||{}).value);return isNaN(v)?2:v;}
 function activeMinDegree(){const v=parseInt((document.getElementById('mindeg')||{}).value);return isNaN(v)?2:v;}
@@ -2617,7 +2762,7 @@ function build(thr){
  const nsz=id=>(nss[id]?nss[id].size:0);
  const nodes=DATA.nodes.filter(n=>keep.has(n.id)).map(n=>{const k=n.kind||'gene';
   const fs=kindFontSize(k,nsz(n.id));
-  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+(SURF[n.id]?String.fromCharCode(10)+surfLine(n.id):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
+  return {id:n.id,label:nodeLabel(n),value:nsz(n.id),size:scaleNode(nsz(n.id)),shape:n.shape||'dot',title:n.label+((n.kind&&n.kind!=='gene')?'  ['+n.kind+']':'')+' — '+nsz(n.id)+' unique sentences (in view)'+(n.target?' · drug target: '+n.target+' chemicals'+(n.tcat==='green'?' (approved anti-neoplastic)':(n.tcat==='amber'?' (approved, non-anti-neoplastic)':' (no approved drug: investigational / ChEBI role)')):'')+(SURF[n.id]?String.fromCharCode(10)+surfLine(n.id):'')+(VARS[n.id]?String.fromCharCode(10)+varLine(n.id):''),color:nodeColor(n),_fs:fs,font:nodeFont(k,fs),// the one visual channel still free: fill is drug-target shading, shape is node kind
    borderWidth:1,borderWidthSelected:2};});
  // no `value`: vis would then scale the width itself and ignore edgeWidth()
  // inhibits ends in a flat bar (T), activates in an arrowhead, as pathway diagrams draw them;
@@ -2681,7 +2826,7 @@ function build(thr){
  fitLeftPanel();    // self-correcting: a panel narrowed by anything recovers on the next redraw
  const _e=edges;
  network.on('click',p=>{const info=document.getElementById('info');
-   if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)'+(SURF[n.id]?'<div class=mut style="margin-top:3px">'+esc(surfLine(n.id))+'</div>':'');}
+   if(p.nodes.length){const n=DATA.nodes.find(x=>x.id===p.nodes[0]);info.innerHTML='<b>'+n.label+'</b>: '+nsz(n.id)+' unique sentences (in view)'+(SURF[n.id]?'<div class=mut style="margin-top:3px">'+esc(surfLine(n.id))+'</div>':'')+varPanel(n.id);}
    else if(p.edges.length){const o=_e[p.edges[0]];info.innerHTML=INFO_HEAD+edgeHead(o.e,o.vis,o.cat)+o.vis.map(s=>'<div class=stip>'+pmA(s.pmid)+' <span class=mut>['+s.sc.toFixed(3)+(s.yr?(' · '+s.yr):'')+']</span> '+hl(s.text,o.e)+'</div>').join('');}});
 }
 const thr=document.getElementById('thr');
@@ -2742,8 +2887,20 @@ document.querySelectorAll('.lblb').forEach(b=>b.addEventListener('click',()=>{
  if(LABEL_KINDS.has(k))LABEL_KINDS.delete(k);else LABEL_KINDS.add(k);
  b.classList.toggle('on',LABEL_KINDS.has(k));
  applyLabelKinds();}));
+// variant lines: the two selectors relabel in place; "All variants" fills the details box
+['varmax','varmin'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{if(showVars())applyLabelKinds();}));
+document.getElementById('varall').addEventListener('click',()=>{const info=document.getElementById('info');
+ const ids=Object.keys(VARS).sort((a,b)=>VARS[b].length-VARS[a].length||a.localeCompare(b));
+ info.innerHTML='<div class=ihead>All variants <span class=mut>('+ids.length+' genes, '+ids.reduce((t,id)=>t+VARS[id].length,0)+' variants)</span></div>'
+  +ids.map(id=>'<details class=var><summary><b>'+esc(id)+'</b> <span class=mut>'+VARS[id].length+(nodeDrawn(id)?'':' · not in the current view')+'</span></summary>'
+   +typeSummary(id)
+   +varTypes(id).map(([k,n,ts])=>'<div class=vlev>'+VLEV[k]+' — '+n+'</div>'+ts.map(([t,c])=>'<div class=vtyp>'+esc(t)+' — '+c+'</div><div>'
+     +VARS[id].filter(x=>x[0].charAt(0)===k&&x[4]===t).map(x=>'<code>'+esc(x[0])+'</code> <span class=mut>('+x[1]+')</span>').join(', ')+'</div>').join('')).join('')
+   +'</details>').join('');});
+// no variants table -> no variant controls
+(function(){if(!Object.keys(VARS).length){['varlbl','varopts'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});}})();
 // the gene-only graph has nothing else to name
-(function(){if(!DATA.nodes.some(n=>(n.kind||'gene')!=='gene')){const r=document.getElementById('lblrow');if(r)r.style.display='none';}})();
+(function(){if(!DATA.nodes.some(n=>(n.kind||'gene')!=='gene')&&!Object.keys(VARS).length){const r=document.getElementById('lblrow');if(r)r.style.display='none';}})();
 const mcl=document.getElementById('mincluster');
 mcl.addEventListener('change',()=>build(+thr.value));
 document.getElementById('mindeg').addEventListener('change',()=>build(+thr.value));
@@ -2778,7 +2935,12 @@ const txtEl=document.getElementById('textfilter');let txtTimer=null;   // deboun
 txtEl.addEventListener('input',()=>{clearTimeout(txtTimer);txtTimer=setTimeout(()=>build(+thr.value),350);});
 txtEl.addEventListener('keydown',ev=>{if(ev.key==='Enter'){clearTimeout(txtTimer);build(+thr.value);}});
 const searchBox=document.getElementById('search');
-function doSearch(q){q=(q||'').trim();const info=document.getElementById('info');if(!q)return;const hit=DATA.nodes.find(n=>n.label.toLowerCase()===q.toLowerCase())||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(q.toLowerCase())===0);if(!hit){info.innerHTML='No node matching "'+esc(q)+'"';return;}if(!nodeDrawn(hit.id)){info.innerHTML=hiddenNote(hit);return;}try{network.selectNodes([hit.id]);network.focus(hit.id,{scale:1.3,animation:true});info.innerHTML='<b>'+hit.label+'</b>';}catch(e){info.innerHTML='<b>'+hit.label+'</b> not in current view';}}
+function doSearch(q){q=(q||'').trim();const info=document.getElementById('info');if(!q)return;const hit=DATA.nodes.find(n=>n.label.toLowerCase()===q.toLowerCase())||DATA.nodes.find(n=>n.label.toLowerCase().indexOf(q.toLowerCase())===0);if(!hit){const vg=varGenes(q);
+  if(!vg.length){info.innerHTML='No node or variant matching "'+esc(q)+'"';return;}
+  const drawn=vg.filter(([id])=>nodeDrawn(id));
+  if(drawn.length){try{network.selectNodes(drawn.map(([id])=>id));network.fit({nodes:drawn.map(([id])=>id),animation:true});}catch(e){}}
+  info.innerHTML='<div class=ihead>'+esc(vg[0][1][0])+'</div>'+vg.map(([id,x])=>'<div><b>'+esc(id)+'</b> <span class=mut>'+x[1]+' paper'+(x[1]===1?'':'s')+(nodeDrawn(id)?'':' · not in the current view')+'</span></div>').join('')
+   +'<div class=mut style="margin-top:4px">Click a gene for its full variant list.</div>';return;}if(!nodeDrawn(hit.id)){info.innerHTML=hiddenNote(hit);return;}try{network.selectNodes([hit.id]);network.focus(hit.id,{scale:1.3,animation:true});info.innerHTML='<b>'+hit.label+'</b>';}catch(e){info.innerHTML='<b>'+hit.label+'</b> not in current view';}}
 searchBox.addEventListener('keydown',ev=>{if(ev.key==='Enter')doSearch(searchBox.value);});
 searchBox.addEventListener('change',()=>doSearch(searchBox.value));
 function zoomBy(f){if(!network)return;const s=network.getScale();network.moveTo({scale:s*f,animation:{duration:200}});}

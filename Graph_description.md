@@ -25,6 +25,30 @@ text wrote it -- every surface normalized to that HGNC symbol, with its sentence
 also shown when the node is clicked -- and in every sentence listed for an edge, the words that
 stand for its gene ends are set in bold blue, so you can see what was read as the gene.
 
+**Variants** — a gene's sequence variants in HGVS notation (*p.* protein, *c.* coding DNA, *g.*
+genomic DNA, *r.* RNA), from tmVar 3 as NCBI PubTator3 annotated the corpus documents. Hover shows
+the most-reported ones with their paper counts; clicking the gene lists them all, grouped by level,
+each with its rsID (linked to dbSNP) and the papers that report it. tmVar writes a bare change in
+HGVS form (*T790M* → *p.T790M*) and names the gene the variant belongs to, which is the gene it is
+listed under. They are read over each document's whole text (the abstract only, where PubTator3 has
+no full text), so a variant is listed whether or not a sentence naming it became a triple.
+Each gene's variants are also summarized by **HGVS type**, in the tooltip, at the top of the
+click panel and in *All variants*: per level, how many are *missense*, *nonsense*, *synonymous*,
+*unspecified (X)*, *deletion*, *insertion*, *duplication*, *delins*, *frameshift* or *extension*
+(p.), and *substitution*, *deletion*, *insertion*, *duplication*, *delins* or *inversion* (c., g.,
+r.); the list below is grouped the same way. *X* is left open because it means "any residue" in
+current HGVS but a stop in older papers (*p.R216X*). *other* collects what tmVar wrote in a form
+that is not one change (*p.L19,858R*, a patient carrying two). The type is set in
+`gpu_bundle/variants.py` (`hgvs_type`), and `summaries/gene_variants.md` / `.tsv` carry it too.
+
+The *Variants* button (next to *Disease names* / *Drug names*) writes the variants into the gene
+nodes themselves, under the symbol in a small monospace face, most-reported first. *Variants per
+gene* caps how many are drawn (3, 5, 10, 20 or all) and *in ≥ N papers* hides those fewer papers
+report; a gene with more shows "+N more". *All variants* lists every gene's full list, grouped by
+level, in the details box.
+*Search gene or variant* takes a variant too (*T790M*, *p.T790M*, *c.2573T>G*): it selects every
+gene carrying it and lists them with their paper counts.
+
 **Edges** — colour is the relation carried by most of its sentences *in view*: `activates`
 green, `inhibits` red, `binds` blue, `interacts` purple, `associated` grey, negations amber and
 dashed. *activates* ends in an arrowhead, *inhibits* in an inhibition bar (T). Thickness and arrowhead / bar size scale with **independent publications**, square-rooted and
@@ -280,6 +304,12 @@ step 4); re-run it if the corpus has grown, or the year slider will silently dro
 evidence. It only harvests the `<?pub-year YYYY?>` stamp that stage 1 (`pub_year_xml.py`,
 step 6c) writes into every `experimental_ner/` XML, so it needs no network, no NCBI and no
 `pmids/pmid_pmc_ids.tsv`.
+
+The variants come from `VARIANT/variants.json`, built by `gpu_bundle/variants.py` (stage-2
+step 4b, internet). Locally, against the downloaded run:
+`python gpu_bundle/variants.py --root kaggle_working --xml-dir gpu_bundle/experimental_ner`.
+It caches every fetched document in `VARIANT/pubtator3_variants.jsonl`, so a second run only
+fetches what is new (`--refresh` refetches everything). Without the file, gene nodes list no variants.
 
 ## Re-layout
 
