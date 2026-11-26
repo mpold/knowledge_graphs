@@ -6,7 +6,7 @@ A biomedical relation-extraction pipeline: from a single **PubMed query** to an 
 | Stage | What | Where it runs | Entry point |
 |------:|------|---------------|-------------|
 | **1** | Publications → full-text NER corpus | local (network + Docker/GROBID) | `step_1_orchestrator.py` (11 steps over 10 root scripts) |
-| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (20 steps; 18 when the trained models are reused) |
+| **2** | NER corpus → normalized, model-scored relation **triples** | GPU (Kaggle or local) | `gpu_bundle/gpu.py` (20 steps + 4b; 18 + 4b when the trained models are reused) |
 | **3** | Triples → high-confidence gene / disease / chemical **graph** | local | `high_confidence_g.py` |
 
 Each stage hands off to the next **by files**. Rendered walk-throughs of every stage ship with
@@ -58,7 +58,7 @@ the steps without running anything.
 | Python   | 3.9+                                                                                  | 3.9+                                                   | 3.9+                 |
 | Packages | `requests`                                                                            | `torch`, `transformers`, `datasets<4`, `bioc`, `numpy`, `lxml` | *stdlib only*        |
 | Hardware | any                                                                                   | **CUDA GPU** (CPU = very slow)                         | any                  |
-| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCIt                    | optional (vis-network) |
+| Network  | NCBI / OpenAlex / CrossRef / PMC                                                      | HuggingFace (models + BigBIO), NCIt, NCBI PubTator3    | optional (vis-network) |
 | Extra    | **Docker + GROBID** (for `grobid_xml.py`); *optional* local XML archive (steps 1b/6b) | ontology DB files (below)                              | *optional* OncoKB, Cellosaurus and ontology files (below) |
 
 Full details per script are in the `step_*.html` docs and `requirements.html`.
@@ -178,8 +178,8 @@ and `pub_year_xml.py` as 6c.
   project's `gpu_bundle/experimental_ner/` against another corpus. See `step_1_publications.html`.
 
 ### Stage 2 — triples / GPU bundle (Kaggle or local GPU)
-`gpu_bundle/gpu.py` orchestrates a 20-step chain (RE-model training ×2 → **drug lexicon** →
-BioBERT NER → GENETIC/DISEASE/CHEMICAL normalization → rule triples → learned relation extraction
+`gpu_bundle/gpu.py` orchestrates a 20-step chain plus step 4b (RE-model training ×2 → **drug
+lexicon** → publication years → **sequence variants** (4b) → BioBERT NER → GENETIC/DISEASE/CHEMICAL normalization → rule triples → learned relation extraction
 → model comparison → scores by publication year → **zip**) in one working directory. See
 [`Step_2_updated_triples.html`](Step_2_updated_triples.html) for the two BioRED steps and
 [`step_2_triples.html`](step_2_triples.html) for the original 16.
@@ -190,7 +190,7 @@ BioBERT NER → GENETIC/DISEASE/CHEMICAL normalization → rule triples → lear
    `ppi-biobert-re/`, `ppi_data/`, `biored-biobert-re/`, `biored_data/`, which make the gate
    skip steps 1–2; see below).
 2. *Settings → Accelerator → GPU T4 x2* (both cards are used; see *Multi-GPU* below) and
-   enable *Internet*.
+   enable *Internet* (model training, the drug lexicon and the variants step 4b need it).
 3. In a cell: `!pip install -q 'datasets<4' bioc` then `!python gpu.py` (from the dataset dir).
    (`bioc` is what the BigBIO loading script for **BioRED** needs — that corpus is BioC XML;
    without it step 2 fails with `ModuleNotFoundError: No module named 'bioc'`.)
@@ -422,21 +422,51 @@ python test_antibodies.py
 The graph spans gene, DISEASE and CHEMICAL nodes (diseases and chemicals identified by MONDO /
 ChEBI label — or NCIt label, for the biologics ChEBI has no term for — shaped ◆ and ■), so the
 gene–disease and chemical–gene edges BioRED contributes are drawn instead of discarded. On this
-corpus the graph holds 1,396 genes, 378 chemicals, 129 diseases and 5,941 edges, with sentences from
-1,294 of the 2,220 documents (2026-11-25). The gene-only view and its `_G` outputs have been
+corpus the graph holds 2,664 genes, 1,145 chemicals, 232 diseases and 24,789 edges, with sentences
+from 3,827 of the 4,578 documents (2026-11-26). The gene-only view and its `_G` outputs have been
 retired; the `_M` outputs below are the only ones written.
 
 Output: `<data-root>/summaries/high_confidence_M.html`, `<data-root>/TRIPLES/high_confidence_M.json`,
-and a copy of the graph in the bundle root named after the current directory plus today's date
+`<data-root>/summaries/gene_variants.md` and `gene_variants.tsv` (when `VARIANT/variants.json` is
+present), and a copy of the graph in the bundle root named after the current directory plus today's date
 (e.g. `KMT2A_leukemia_2026_11_25_M.html`).
 
 **Reading the graph.** The page is self-contained — payload, library and all — and every edge
 traces back to the sentences behind it, with clickable PMIDs. It opens on the `binds` relation
 only, with *Min connections* at 2, so most nodes are hidden at first: click *Check all* under
-*Relation type* for the rest. *Search gene*, *Search drug* and *Filter to drug/chemical* reach every
-node, and say which setting hides one that is not drawn.
+*Relation type* for the rest. *Search gene or variant*, *Search drug* and *Filter to drug/chemical*
+reach every node, and say which setting hides one that is not drawn.
 [`Graph_description.md`](Graph_description.md) is the guide to the controls, the order the filters
 run in, and the limits worth carrying.
+
+**Variants on gene nodes.** Stage-2 step 4b (`gpu_bundle/variants.py`) reads the sequence
+variants NCBI PubTator3's tmVar 3 found in every corpus document (full text where PubTator3 has it,
+else the abstract) and files them under their HGNC gene, in HGVS form — *T790M* becomes
+`p.T790M` — with paper counts, rsIDs and an HGVS type (missense, nonsense, synonymous, deletion,
+insertion, duplication, delins, frameshift, extension for p.; substitution, deletion, insertion,
+duplication, delins, inversion for c., g., r.). They are read over each paper's whole text, so they
+do not depend on which sentences became triples. On this corpus: 3,635 variants on 420 of the
+graph's genes (EGFR 647, KIT 288, ABL1 223, TP53 216, ALK 177, MET 124). On the page:
+
+- hovering a gene shows its most-reported variants and its summary by HGVS type; clicking it lists
+  them all, grouped by level and type, with rsID (linked to dbSNP) and the papers behind each;
+- *Variants* (under *Draw names for*) writes them under each gene symbol — always 10 px, rows
+  13 px apart, in any view — capped by *Draw up to N variants per gene, each in ≥ N papers*;
+- *List every gene's variants* fills the details box with every gene's list;
+- the gene search also takes a variant (*T790M*, *c.2573T>G*) and selects the genes carrying it.
+
+The step needs internet. For a run directory that predates it, run it locally (it caches every
+fetched document in `VARIANT/pubtator3_variants.jsonl`, so a re-run only fetches new papers), then
+stage 3 again:
+
+```bash
+python gpu_bundle/variants.py --root kaggle_working --xml-dir gpu_bundle/experimental_ner
+```
+
+PubTator3's gene assignment is not perfect: `variants.py` moves MET's variants back from SLTM
+(alias "Met") and drops zero-padded sample codes, but a few small lists outside the kinase field
+still hold variants filed under the wrong gene. [`Graph_description.md`](Graph_description.md)
+has the details.
 
 > **`high_confidence.py` has been removed.** The older "G_D_C" script (gene–gene *in a
 > disease/chemical context*, unsuffixed outputs) was deleted in `8f420f1`: it ignored
